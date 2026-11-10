@@ -307,7 +307,7 @@ Every phase must have measurable acceptance criteria.
 - [x] Configure Cloudflare Workers (minimal Worker; `wrangler deploy --dry-run` bundles; no D1/R2/deploy/payments configured).
 - [ ] Establish folder structure.
 - [x] Create `AGENTS.md`.
-- [ ] Create architecture documentation.
+- [x] Create architecture documentation (`docs/architecture.md`; docs-only, regression checks pass).
 - [ ] Configure formatting.
 - [x] Configure linting (ESLint; `npm run lint` passes).
 - [x] Configure automated testing (Vitest; 2 tests pass).
@@ -616,11 +616,11 @@ After every completed development task:
 Maintain the following short record at the end of this document.
 
 **Current phase:** Phase 1 — Foundation  
-**Last completed task:** ESLint and GitHub Actions validation; verified by clean install, typecheck, lint, 2 passing tests and Wrangler dry-run bundle  
-**Current task:** Create the initial architecture document and complete the remaining Phase 1 foundation items  
+**Last completed task:** Created `docs/architecture.md` (docs only); verified by `npm ci`, typecheck, lint, 2 passing tests and Wrangler dry-run, all with no regression  
+**Current task:** None in progress; Phase 1 remains incomplete (folder structure and formatting items open)  
 **Known blockers:** None recorded  
-**Next task:** Create `docs/architecture.md`, confirm the intended folder structure and add formatting without beginning Phase 2  
-**Last verified commit:** `eb51a67b394032889e64381130f42ffabd64b4fc` plus the changes in the current review branch
+**Next task:** Establish the folder structure per `docs/architecture.md` Section 7 and configure formatting, without beginning Phase 2  
+**Last verified commit:** `7cfa9d6` plus the changes in the current review branch
 
 Update these fields at the end of each working session.
 
