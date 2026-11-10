@@ -302,15 +302,16 @@ Every phase must have measurable acceptance criteria.
 
 **Status:** In Progress
 
-- [ ] Create GitHub repository.
+- [x] Create GitHub repository.
 - [x] Initialize TypeScript project (typecheck and vitest pass).
 - [x] Configure Cloudflare Workers (minimal Worker; `wrangler deploy --dry-run` bundles; no D1/R2/deploy/payments configured).
 - [ ] Establish folder structure.
-- [ ] Create `AGENTS.md`.
+- [x] Create `AGENTS.md`.
 - [ ] Create architecture documentation.
-- [ ] Configure formatting and linting.
-- [ ] Configure automated testing.
-- [ ] Establish GitHub Actions validation.
+- [ ] Configure formatting.
+- [x] Configure linting (ESLint; `npm run lint` passes).
+- [x] Configure automated testing (Vitest; 2 tests pass).
+- [x] Establish GitHub Actions validation (install, typecheck, lint, test and Worker dry-run).
 - [x] Select and record the initial content domain: API Integration and Troubleshooting.
 
 **Acceptance criteria:**
@@ -615,11 +616,11 @@ After every completed development task:
 Maintain the following short record at the end of this document.
 
 **Current phase:** Phase 1 — Foundation  
-**Last completed task:** TypeScript + Cloudflare Workers scaffold (package.json, tsconfig.json, wrangler.jsonc, src/index.ts, test/index.test.ts); verified by `npm run typecheck`, `npm test` (2 passed) and wrangler dry-run bundle  
-**Current task:** Create private GitHub repository and configure Claude development access  
+**Last completed task:** ESLint and GitHub Actions validation; verified by clean install, typecheck, lint, 2 passing tests and Wrangler dry-run bundle  
+**Current task:** Create the initial architecture document and complete the remaining Phase 1 foundation items  
 **Known blockers:** None recorded  
-**Next task:** Create private GitHub repository, commit project instructions, configure ANTHROPIC_API_KEY in GitHub Actions Secrets, then start Phase 1 scaffolding via a bounded manual Claude run  
-**Last verified commit:** Not yet available
+**Next task:** Create `docs/architecture.md`, confirm the intended folder structure and add formatting without beginning Phase 2  
+**Last verified commit:** `eb51a67b394032889e64381130f42ffabd64b4fc` plus the changes in the current review branch
 
 Update these fields at the end of each working session.
 
