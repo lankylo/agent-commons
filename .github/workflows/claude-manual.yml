@@ -39,4 +39,7 @@ jobs:
             Work on a branch and open a PR for review; do not merge.
             Update project.md progress only for tested changes.
           claude_args: |
-            --max-turns 8
+            --model sonnet
+            --max-turns 16
+            --permission-mode auto
+            --allowedTools "Bash(npm install),Bash(npm run:*),Bash(npx tsc:*),Bash(npx eslint:*),Bash(npx vitest:*),Edit,Write"
