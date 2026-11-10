@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
     inputs:
       task:
-        description: 'One narrowly scoped task, including acceptance criteria (avoid secrets)'
+        description: "One narrowly scoped task, including acceptance criteria (avoid secrets)"
         required: true
         type: string
 

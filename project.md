@@ -2,7 +2,7 @@
 
 **Project:** Agent Commons  
 **Version:** 1.4  
-**Status:** Planning  
+**Status:** Phase 1 Complete  
 **Last updated:** 10 November 2026  
 **Source of truth:** `project.md`
 
@@ -300,15 +300,15 @@ Every phase must have measurable acceptance criteria.
 
 ### Phase 1 — Project Foundation
 
-**Status:** In Progress
+**Status:** Completed
 
 - [x] Create GitHub repository.
 - [x] Initialize TypeScript project (typecheck and vitest pass).
 - [x] Configure Cloudflare Workers (minimal Worker; `wrangler deploy --dry-run` bundles; no D1/R2/deploy/payments configured).
-- [ ] Establish folder structure.
+- [x] Establish the Phase 1 folder structure (current baseline documented in `docs/architecture.md`; future phase-owned directories are not created empty).
 - [x] Create `AGENTS.md`.
 - [x] Create architecture documentation (`docs/architecture.md`; docs-only, regression checks pass).
-- [ ] Configure formatting.
+- [x] Configure formatting (Prettier; `npm run format:check` passes).
 - [x] Configure linting (ESLint; `npm run lint` passes).
 - [x] Configure automated testing (Vitest; 2 tests pass).
 - [x] Establish GitHub Actions validation (install, typecheck, lint, test and Worker dry-run).
@@ -495,16 +495,16 @@ Every phase must have measurable acceptance criteria.
 
 | Phase | Status | Completion |
 |---|---|---|
-| 1. Foundation | Not Started | 0% |
+| 1. Foundation | Completed | 100% |
 | 2. Identity and Content Registry | Not Started | 0% |
 | 3. Search and Retrieval | Not Started | 0% |
 | 4. Agent Interfaces | Not Started | 0% |
 | 5. Validation and Trust | Not Started | 0% |
 | 6. Payments and Contributor Credits | Not Started | 0% |
 
-**Current phase:** 1 — Project Foundation  
-**Current blocker:** None recorded  
-**Latest verified milestone:** Project planning completed; no implementation verified
+**Current phase:** Phase 1 complete; Phase 2 not started  
+**Current blocker:** Wrangler v3 dependency audit findings require a separately reviewed v4 upgrade before Phase 2  
+**Latest verified milestone:** Phase 1 foundation accepted: build, formatting, lint, tests, CI, Worker dry-run and local `/health` HTTP 200 smoke test verified
 
 Completion percentages must reflect verified acceptance criteria, not merely generated code.
 
@@ -584,18 +584,14 @@ Do not expand scope solely to solve speculative future problems.
 
 ## 10. Next Development Actions
 
-**Immediate task: Phase 1 — Project Foundation**
+**Immediate task: Pre-Phase 2 dependency hygiene**
 
-1. Establish the GitHub repository and project structure.
-2. Create and commit this `project.md`.
-3. Create `AGENTS.md` using Section 5 as the governing instructions.
-4. Create the initial architecture document.
-5. Initialize TypeScript, Cloudflare Workers and automated validation.
-6. Confirm the recorded initial content domain: API Integration and Troubleshooting (decision completed).
-7. Verify the project builds and tests successfully.
-8. Update Phase 1 status.
+1. Upgrade Wrangler from v3 to v4 in a separately reviewed change.
+2. Verify configuration compatibility, clean installation, formatting, typecheck, lint, tests, Worker dry-run and local development startup.
+3. Review the resulting dependency audit without applying unrelated forced upgrades.
+4. Update this handoff only for verified results.
 
-Do not begin Phase 2 until Phase 1 acceptance criteria have been met.
+Do not begin Phase 2 until the Wrangler upgrade has been reviewed and merged.
 
 ---
 
@@ -615,12 +611,12 @@ After every completed development task:
 
 Maintain the following short record at the end of this document.
 
-**Current phase:** Phase 1 — Foundation  
-**Last completed task:** Created `docs/architecture.md` (docs only); verified by `npm ci`, typecheck, lint, 2 passing tests and Wrangler dry-run, all with no regression  
-**Current task:** None in progress; Phase 1 remains incomplete (folder structure and formatting items open)  
-**Known blockers:** None recorded  
-**Next task:** Establish the folder structure per `docs/architecture.md` Section 7 and configure formatting, without beginning Phase 2  
-**Last verified commit:** `7cfa9d6` plus the changes in the current review branch
+**Current phase:** Phase 1 complete; Phase 2 not started  
+**Last completed task:** Configured Prettier and final Phase 1 validation; verified by clean install, formatting, typecheck, lint, 2 passing tests, Worker dry-run and local `/health` HTTP 200 smoke test  
+**Current task:** None in progress  
+**Known blockers:** Wrangler v3 dependency audit findings remain; upgrade to v4 before Phase 2  
+**Next task:** Upgrade Wrangler from v3 to v4 in a bounded, separately reviewed change  
+**Last verified commit:** `319f2c2` plus the changes in the current review branch
 
 Update these fields at the end of each working session.
 
@@ -651,3 +647,4 @@ Agent Commons MVP is complete when:
 ---
 
 **Project instruction:** Build only what is required to achieve the next verified milestone. Preserve completed work, minimize repeated reasoning, and prioritize reliability over unnecessary complexity.
+
