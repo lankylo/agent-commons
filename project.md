@@ -503,8 +503,8 @@ Every phase must have measurable acceptance criteria.
 | 6. Payments and Contributor Credits | Not Started | 0% |
 
 **Current phase:** Phase 1 complete; Phase 2 not started  
-**Current blocker:** Wrangler v3 dependency audit findings require a separately reviewed v4 upgrade before Phase 2  
-**Latest verified milestone:** Phase 1 foundation accepted: build, formatting, lint, tests, CI, Worker dry-run and local `/health` HTTP 200 smoke test verified
+**Current blocker:** None; merge the reviewed Wrangler v4 upgrade before starting Phase 2  
+**Latest verified milestone:** Wrangler 4.159.0 and Workers types v5 verified by clean install, formatting, typecheck, lint, tests, Worker dry-run and local `/health` HTTP 200 smoke test
 
 Completion percentages must reflect verified acceptance criteria, not merely generated code.
 
@@ -584,12 +584,11 @@ Do not expand scope solely to solve speculative future problems.
 
 ## 10. Next Development Actions
 
-**Immediate task: Pre-Phase 2 dependency hygiene**
+**Immediate task: Review and merge the Wrangler v4 upgrade**
 
-1. Upgrade Wrangler from v3 to v4 in a separately reviewed change.
-2. Verify configuration compatibility, clean installation, formatting, typecheck, lint, tests, Worker dry-run and local development startup.
-3. Review the resulting dependency audit without applying unrelated forced upgrades.
-4. Update this handoff only for verified results.
+1. Review and merge the separately scoped Wrangler 4.159.0 and Workers types v5 upgrade.
+2. Do not force unrelated dependency upgrades: the production dependency audit is clean, while the remaining development-only findings require separate Vitest and ESLint upgrade reviews.
+3. After merge, begin Phase 2 with a bounded design task for the operator/agent identity model and shared contribution envelope.
 
 Do not begin Phase 2 until the Wrangler upgrade has been reviewed and merged.
 
@@ -612,11 +611,11 @@ After every completed development task:
 Maintain the following short record at the end of this document.
 
 **Current phase:** Phase 1 complete; Phase 2 not started  
-**Last completed task:** Configured Prettier and final Phase 1 validation; verified by clean install, formatting, typecheck, lint, 2 passing tests, Worker dry-run and local `/health` HTTP 200 smoke test  
+**Last completed task:** Upgraded to Wrangler 4.159.0 and Workers types v5; verified by clean install, formatting, typecheck, lint, 2 passing tests, Worker dry-run, local `/health` HTTP 200 smoke test and zero production dependency audit findings  
 **Current task:** None in progress  
-**Known blockers:** Wrangler v3 dependency audit findings remain; upgrade to v4 before Phase 2  
-**Next task:** Upgrade Wrangler from v3 to v4 in a bounded, separately reviewed change  
-**Last verified commit:** `319f2c2` plus the changes in the current review branch
+**Known blockers:** None; 16 development-only audit findings remain for separate Vitest and ESLint upgrade reviews  
+**Next task:** After this upgrade is reviewed and merged, define the Phase 2 operator/agent identity model and shared contribution envelope in a bounded task  
+**Last verified commit:** `99309d2` plus the changes in the current review branch
 
 Update these fields at the end of each working session.
 
