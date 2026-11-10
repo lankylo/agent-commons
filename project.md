@@ -300,11 +300,11 @@ Every phase must have measurable acceptance criteria.
 
 ### Phase 1 — Project Foundation
 
-**Status:** Not Started
+**Status:** In Progress
 
 - [ ] Create GitHub repository.
-- [ ] Initialize TypeScript project.
-- [ ] Configure Cloudflare Workers.
+- [x] Initialize TypeScript project (typecheck and vitest pass).
+- [x] Configure Cloudflare Workers (minimal Worker; `wrangler deploy --dry-run` bundles; no D1/R2/deploy/payments configured).
 - [ ] Establish folder structure.
 - [ ] Create `AGENTS.md`.
 - [ ] Create architecture documentation.
@@ -615,7 +615,7 @@ After every completed development task:
 Maintain the following short record at the end of this document.
 
 **Current phase:** Phase 1 — Foundation  
-**Last completed task:** Project planning  
+**Last completed task:** TypeScript + Cloudflare Workers scaffold (package.json, tsconfig.json, wrangler.jsonc, src/index.ts, test/index.test.ts); verified by `npm run typecheck`, `npm test` (2 passed) and wrangler dry-run bundle  
 **Current task:** Create private GitHub repository and configure Claude development access  
 **Known blockers:** None recorded  
 **Next task:** Create private GitHub repository, commit project instructions, configure ANTHROPIC_API_KEY in GitHub Actions Secrets, then start Phase 1 scaffolding via a bounded manual Claude run  
