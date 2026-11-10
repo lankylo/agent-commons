@@ -331,9 +331,9 @@ Every phase must have measurable acceptance criteria.
 - [ ] Implement operator accounts and agent credentials.
 - [x] Define the shared contribution envelope and `family` discriminator. (`src/registry/envelope.ts`)
 - [x] Define the Knowledge schema (facts, extracted records, summaries, source evidence and rights). (`src/registry/knowledge.ts`)
-- [ ] Define the Execution schema (typed steps, inputs, target domains, compatibility and safety boundaries).
-- [ ] Define the fixed allowed Execution step vocabulary; Knowledge records do not require steps.
-- [ ] Define freshness, verification and licensing fields. (Knowledge side done in `src/registry/knowledge.ts`; Execution side pending)
+- [x] Define the Execution schema (typed steps, inputs, target domains, compatibility and safety boundaries). (`src/registry/execution.ts`)
+- [x] Define the fixed allowed Execution step vocabulary; Knowledge records do not require steps. (`http_request`, `extract_field`, `assert`, `wait`)
+- [x] Define freshness, verification and licensing fields. (Knowledge: `src/registry/knowledge.ts`; Execution: `src/registry/execution.ts`)
 - [x] Define the capped, untrusted `explanation` field for Knowledge records. (1000-character cap; unknown fields rejected)
 - [x] Define source hash/snapshot fields for Knowledge records. (sha256 digest, `accessedAt`, optional `snapshotRef`)
 - [ ] Define platform maximum review intervals per content type.
@@ -496,13 +496,13 @@ Every phase must have measurable acceptance criteria.
 | Phase | Status | Completion |
 |---|---|---|
 | 1. Foundation | Completed | 100% |
-| 2. Identity and Content Registry | In Progress | 20% |
+| 2. Identity and Content Registry | In Progress | 30% |
 | 3. Search and Retrieval | Not Started | 0% |
 | 4. Agent Interfaces | Not Started | 0% |
 | 5. Validation and Trust | Not Started | 0% |
 | 6. Payments and Contributor Credits | Not Started | 0% |
 
-**Current phase:** Phase 2 in progress (identity model, shared envelope and Knowledge schema defined; Knowledge schema PR under review)  
+**Current phase:** Phase 2 in progress (identity model, shared envelope, Knowledge schema and Execution schema defined; Execution schema PR under review; Knowledge schema PR #7 merged)  
 **Current blocker:** None  
 **Latest verified milestone:** Wrangler 4.159.0 and Workers types v5 verified by clean install, formatting, typecheck, lint, tests, Worker dry-run and local `/health` HTTP 200 smoke test
 
@@ -542,6 +542,7 @@ Completion percentages must reflect verified acceptance criteria, not merely gen
 | 2026-11-10 | Select API Integration and Troubleshooting as the first content domain | Supports sourced API knowledge and testable diagnostic/execution recipes, with low-cost controlled seeding |
 | 2026-11-10 | Use Claude via pay-as-you-go Anthropic API for development only | Keep the production Agent Commons service LLM-free by default; store the key as a GitHub Actions secret, never in code |
 | 2026-11-10 | Require manually approved Claude development runs and PR review | Control API expenditure, avoid unattended loops and keep development decisions traceable |
+| 2026-11-10 | 2026-11-10 | Execution validation is strict and allow-list based over a fixed four-step vocabulary (`http_request`, `extract_field`, `assert`, `wait`); no free-text fields: literals are whitespace-free tokens, steps may only address declared `targetDomains`, inputs and variables must be declared before use, writing methods require a non-read-only `sideEffect`, irreversible writes require human approval | Structural limits are the primary prompt-injection control; recipes are data, not permission grants. Headers/auth are deliberately excluded until credentials are designed |
 | 2026-11-10 | Knowledge validation is strict and allow-list based: unknown fields, platform-only fields and Execution fields are rejected; scalar values are capped so prose cannot hide outside `explanation` | Structural limits are the primary prompt-injection control |
 
 Record future decisions here when they materially change the architecture, scope, costs or development priorities.
@@ -586,10 +587,10 @@ Do not expand scope solely to solve speculative future problems.
 
 ## 10. Next Development Actions
 
-**Immediate task: Review and merge the Phase 2 Knowledge schema PR**
+**Immediate task: Review the Phase 2 Execution schema PR** (PRs #6 and #7 are merged.)
 
-1. Review and merge the Knowledge schema PR (the identity/envelope PR #6 is merged).
-2. Then, as separate approved tasks, define the Execution schema and step vocabulary, and platform review-interval maxima per content type.
+1. Review the Execution schema PR; merging remains a human decision.
+2. Then, as separate approved tasks: platform review-interval maxima per content type, and cross-family references (by ID and version).
 3. Do not implement D1, R2, credentials or APIs until their tasks are approved.
 
 ---
@@ -611,11 +612,11 @@ After every completed development task:
 Maintain the following short record at the end of this document.
 
 **Current phase:** Phase 2 in progress  
-**Last completed task:** Defined and implemented the Knowledge contribution schema and deterministic validator (`src/registry/knowledge.ts`, 11 new unit tests; format, typecheck, lint, 18 passing tests, Worker dry-run). Previously: designed operator/agent identity model and shared contribution envelope with `family` discriminator (types plus 5 unit tests; format, typecheck, lint, 7 passing tests, Worker dry-run). Previously: upgraded to Wrangler 4.159.0 and Workers types v5; verified by clean install, formatting, typecheck, lint, 2 passing tests, Worker dry-run, local `/health` HTTP 200 smoke test and zero production dependency audit findings  
+**Last completed task:** Defined and implemented the Execution contribution schema, fixed step vocabulary and deterministic validator (`src/registry/execution.ts`, shared primitives extracted to `src/registry/check.ts`; 18 new unit tests; format, typecheck, lint, 36 passing tests, Worker dry-run). Previously: defined and implemented the Knowledge contribution schema and deterministic validator (`src/registry/knowledge.ts`, 11 new unit tests; format, typecheck, lint, 18 passing tests, Worker dry-run). Previously: designed operator/agent identity model and shared contribution envelope with `family` discriminator (types plus 5 unit tests; format, typecheck, lint, 7 passing tests, Worker dry-run). Previously: upgraded to Wrangler 4.159.0 and Workers types v5; verified by clean install, formatting, typecheck, lint, 2 passing tests, Worker dry-run, local `/health` HTTP 200 smoke test and zero production dependency audit findings  
 **Current task:** None in progress  
 **Known blockers:** None; 16 development-only audit findings remain for separate Vitest and ESLint upgrade reviews  
-**Next task:** After PR review, define the Execution schema and step vocabulary in separate bounded tasks  
-**Last verified commit:** `1af0884` plus the changes in the Knowledge schema review branch
+**Next task:** After PR review, define platform review-interval maxima per content type and cross-family references as separate bounded tasks  
+**Last verified commit:** `05fb28b` (main after PR #7) plus the changes in the Execution schema review branch
 
 Update these fields at the end of each working session.
 
