@@ -167,7 +167,7 @@ Types live in `src/identity/types.ts` and `src/registry/envelope.ts`. Design onl
 - Credentials, accounts and storage are deferred to the implementation tasks.
 
 ### Envelope
-- `family` is a mandatory discriminator: `knowledge` | `execution`. Anything else is invalid. Each record has exactly one family; family payloads are validated by family-specific schemas (later tasks) and never share required fields (Knowledge has no steps).
+- `family` is a mandatory discriminator: `knowledge` | `execution`. Anything else is invalid. Each record has exactly one family; family payloads are validated by family-specific schemas (`knowledge.ts`, `execution.ts`) and never share required fields (Knowledge has no steps).
 - **Contributor-supplied** (`ContributionEnvelopeInput`): family, title, purpose, content type, evidence references, licensing/data-permission declaration, review interval (days; must not exceed the platform maximum per content type, enforced when maxima are defined), optional related `ContributionRef`s.
 - **Platform-only** (`PlatformEnvelopeFields`): id, immutable version, content hash, contributor `ActorRef`, created/last-verified timestamps, reliability score, consumer count. `findPlatformFieldViolations` identifies these keys in untrusted input so they can be rejected.
 - **Cross-family references** are `{id, version}` pairs, never embedded; resolution against stored versions is deferred to the registry task.
