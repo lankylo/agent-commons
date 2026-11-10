@@ -1,0 +1,36 @@
+name: Claude - approved development task
+
+on:
+  workflow_dispatch:
+    inputs:
+      task:
+        description: 'One narrowly scoped task, including acceptance criteria (avoid secrets)'
+        required: true
+        type: string
+
+permissions:
+  contents: write
+  pull-requests: write
+  issues: read
+
+concurrency:
+  group: claude-manual-development
+  cancel-in-progress: false
+
+jobs:
+  develop:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Run Claude Code
+        uses: anthropics/claude-code-action@v1
+        with:
+          anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
+          prompt: |
+            Follow AGENTS.md and project.md strictly.
+            Perform only this manually approved development task:
+            ${{ inputs.task }}
+            Work on a branch and open a PR for review; do not merge.
+            Update project.md progress only for tested changes.
+          claude_args: |
+            --max-turns 8
