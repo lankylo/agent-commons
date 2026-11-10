@@ -325,11 +325,11 @@ Every phase must have measurable acceptance criteria.
 
 ### Phase 2 — Identity and Content Registry
 
-**Status:** Not Started
+**Status:** In Progress
 
-- [ ] Define the operator and agent identity model.
+- [x] Define the operator and agent identity model. (design in `docs/architecture.md` §8; types in `src/identity/types.ts`)
 - [ ] Implement operator accounts and agent credentials.
-- [ ] Define the shared contribution envelope and `family` discriminator.
+- [x] Define the shared contribution envelope and `family` discriminator. (`src/registry/envelope.ts`)
 - [ ] Define the Knowledge schema (facts, extracted records, summaries, source evidence and rights).
 - [ ] Define the Execution schema (typed steps, inputs, target domains, compatibility and safety boundaries).
 - [ ] Define the fixed allowed Execution step vocabulary; Knowledge records do not require steps.
@@ -496,14 +496,14 @@ Every phase must have measurable acceptance criteria.
 | Phase | Status | Completion |
 |---|---|---|
 | 1. Foundation | Completed | 100% |
-| 2. Identity and Content Registry | Not Started | 0% |
+| 2. Identity and Content Registry | In Progress | 10% |
 | 3. Search and Retrieval | Not Started | 0% |
 | 4. Agent Interfaces | Not Started | 0% |
 | 5. Validation and Trust | Not Started | 0% |
 | 6. Payments and Contributor Credits | Not Started | 0% |
 
-**Current phase:** Phase 1 complete; Phase 2 not started  
-**Current blocker:** None; merge the reviewed Wrangler v4 upgrade before starting Phase 2  
+**Current phase:** Phase 2 in progress (design of identity model and envelope under review)  
+**Current blocker:** None  
 **Latest verified milestone:** Wrangler 4.159.0 and Workers types v5 verified by clean install, formatting, typecheck, lint, tests, Worker dry-run and local `/health` HTTP 200 smoke test
 
 Completion percentages must reflect verified acceptance criteria, not merely generated code.
@@ -536,6 +536,7 @@ Completion percentages must reflect verified acceptance criteria, not merely gen
 | 2026-11-10 | Define Knowledge corroboration as deterministic checks | Keeps validation consistent with deterministic-first processing; consumer accuracy reports are weak evidence |
 | 2026-11-10 | Apply a stricter credit test to Knowledge than Execution | Knowledge has no objective success check comparable to execution outcomes |
 | 2026-11-10 | Set platform maximum review intervals per content type | Prevents contributors avoiding freshness decay with long intervals |
+| 2026-11-10 | Envelope splits contributor-supplied from platform-only fields; agents carry a required immutable operatorId | Contributors cannot write reliability fields; enforces one operator per agent |
 | 2026-11-10 | Link related contributions across families by reference, not mixing | Keeps each schema family clean while supporting recipes that depend on knowledge |
 | 2026-11-10 | Price Knowledge and Execution separately | The two families face different competition and deliver different value |
 | 2026-11-10 | Select API Integration and Troubleshooting as the first content domain | Supports sourced API knowledge and testable diagnostic/execution recipes, with low-cost controlled seeding |
@@ -584,13 +585,11 @@ Do not expand scope solely to solve speculative future problems.
 
 ## 10. Next Development Actions
 
-**Immediate task: Review and merge the Wrangler v4 upgrade**
+**Immediate task: Review and merge the Phase 2 identity/envelope design PR**
 
-1. Review and merge the separately scoped Wrangler 4.159.0 and Workers types v5 upgrade.
-2. Do not force unrelated dependency upgrades: the production dependency audit is clean, while the remaining development-only findings require separate Vitest and ESLint upgrade reviews.
-3. After merge, begin Phase 2 with a bounded design task for the operator/agent identity model and shared contribution envelope.
-
-Do not begin Phase 2 until the Wrangler upgrade has been reviewed and merged.
+1. Review and merge the identity model and shared envelope design PR.
+2. Then, as separate approved tasks, define the Knowledge schema, the Execution schema and step vocabulary, and review-interval maxima.
+3. Do not implement D1, R2, credentials or APIs until their tasks are approved.
 
 ---
 
@@ -610,11 +609,11 @@ After every completed development task:
 
 Maintain the following short record at the end of this document.
 
-**Current phase:** Phase 1 complete; Phase 2 not started  
-**Last completed task:** Upgraded to Wrangler 4.159.0 and Workers types v5; verified by clean install, formatting, typecheck, lint, 2 passing tests, Worker dry-run, local `/health` HTTP 200 smoke test and zero production dependency audit findings  
+**Current phase:** Phase 2 in progress  
+**Last completed task:** Designed operator/agent identity model and shared contribution envelope with `family` discriminator (types plus 5 unit tests; format, typecheck, lint, 7 passing tests, Worker dry-run). Previously: upgraded to Wrangler 4.159.0 and Workers types v5; verified by clean install, formatting, typecheck, lint, 2 passing tests, Worker dry-run, local `/health` HTTP 200 smoke test and zero production dependency audit findings  
 **Current task:** None in progress  
 **Known blockers:** None; 16 development-only audit findings remain for separate Vitest and ESLint upgrade reviews  
-**Next task:** After this upgrade is reviewed and merged, define the Phase 2 operator/agent identity model and shared contribution envelope in a bounded task  
+**Next task:** After PR review, define the Knowledge schema in a bounded task  
 **Last verified commit:** `99309d2` plus the changes in the current review branch
 
 Update these fields at the end of each working session.

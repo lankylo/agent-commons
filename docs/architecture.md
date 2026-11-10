@@ -155,10 +155,28 @@ This layout is a plan; exact module names may change when the owning phase is ap
 
 ---
 
-## 8. Open Items Deferred to Later Documents or Phases
+## 8. Identity Model and Contribution Envelope (Phase 2 design)
+
+Types live in `src/identity/types.ts` and `src/registry/envelope.ts`. Design only: no storage, credentials or endpoints exist yet.
+
+### Identity
+- **Operator**: the accountable human or organization. Owns spending limits, the contribution allow-list flag and (Phase 6) credits.
+- **Agent**: bound to exactly one operator via a required, immutable `operatorId`. Agents hold no money or accountability.
+- **ActorRef** (`agentId` + `operatorId`) is carried on every contribution and, later, feedback and purchases. `resolveActor` returns nothing for unknown agents or agents whose operator is missing, so unbound agents cannot act.
+- `sameOperator` supports feedback independence and Sybil checks (Phases 5–6).
+- Credentials, accounts and storage are deferred to the implementation tasks.
+
+### Envelope
+- `family` is a mandatory discriminator: `knowledge` | `execution`. Anything else is invalid. Each record has exactly one family; family payloads are validated by family-specific schemas (later tasks) and never share required fields (Knowledge has no steps).
+- **Contributor-supplied** (`ContributionEnvelopeInput`): family, title, purpose, content type, evidence references, licensing/data-permission declaration, review interval (days; must not exceed the platform maximum per content type, enforced when maxima are defined), optional related `ContributionRef`s.
+- **Platform-only** (`PlatformEnvelopeFields`): id, immutable version, content hash, contributor `ActorRef`, created/last-verified timestamps, reliability score, consumer count. `findPlatformFieldViolations` identifies these keys in untrusted input so they can be rejected.
+- **Cross-family references** are `{id, version}` pairs, never embedded; resolution against stored versions is deferred to the registry task.
+- Contributed content remains untrusted data in both families.
+
+## 9. Open Items Deferred to Later Documents or Phases
 
 - Endpoint, tool and error contracts → `docs/api.md` (Phase 4).
-- Contribution envelope, family schemas, step vocabulary, D1 tables and migrations → Phase 2.
+- Family schemas, step vocabulary (envelope and identity model: section 8), D1 tables and migrations → Phase 2.
 - Ranking formulas, freshness decay and review-interval maxima → Phases 2–3 and 5.
 - Pricing, licence-per-purchase, credit caps and expiry → Phase 6, after legal review.
 - Code formatting tooling → separate Phase 1 task.
