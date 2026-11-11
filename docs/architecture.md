@@ -1,6 +1,6 @@
 # Agent Commons — Architecture
 
-`project.md` is the source of truth for scope, roadmap and decisions. This document records the implementation architecture and boundaries. It does not duplicate requirements, and it deliberately defines **no API contracts** (those belong in `docs/api.md`) and **no schemas or table designs** (Phase 2).
+`project.md` is the source of truth for scope, roadmap and decisions. This document records the implementation architecture and boundaries. It does not duplicate requirements, and it deliberately defines **no API contracts** (those belong in `docs/api.md`) and keeps table designs in `docs/d1-schema.md` (Phase 2 design only; no migrations or bindings exist).
 
 **Status legend:** **Implemented** = exists in the repository and is verified. **Planned** = intended design only; not implemented, not configured, subject to change in the phase noted.
 
@@ -134,6 +134,7 @@ agent-commons/
 ├── .github/workflows/         ✔ validate.yml, claude-manual.yml
 ├── docs/
 │   ├── architecture.md        ✔ this document
+│   ├── d1-schema.md           ✔ D1 table design (design only)
 │   └── api.md                 planned: REST/MCP contracts, examples, errors
 ├── tasks/                     planned: per-task instructions
 ├── src/
@@ -197,10 +198,13 @@ Defined centrally in `src/registry/review-intervals.ts` (`MAX_REVIEW_INTERVAL_DA
 
 These are initial values for the API Integration and Troubleshooting domain; changing them is a code change reviewed by PR. Adding a content type requires an explicit entry. Intervals are not retroactive to stored data (none exists yet).
 
+### D1 table design
+The concrete D1 schema (tables, keys, constraints, indexes, deletion rules, JSON-vs-normalized decisions and the mapping to these models) is in `docs/d1-schema.md`. It is a design only: no migrations, D1 binding or R2 bucket exist. Summary of the guarantees it encodes: `agents.operator_id` is `NOT NULL`, an FK and immutable (one operator per agent); versions are append-only with a contiguous `previous_version` chain and immutability triggers; `UNIQUE(content_hash)` gives exact-duplicate detection; and `contribution_references` carries a composite FK to the exact `(family, id, version)` of the referenced version. Platform-computed fields live in a separate mutable table so versions stay immutable.
+
 ## 9. Open Items Deferred to Later Documents or Phases
 
 - Endpoint, tool and error contracts → `docs/api.md` (Phase 4).
-- Family schemas, step vocabulary (envelope and identity model: section 8), D1 tables and migrations → Phase 2.
+- D1 migrations, bindings and R2 configuration → Phase 2 (table design: `docs/d1-schema.md`).
 - Ranking formulas and freshness decay → Phases 3 and 5.
 - Pricing, licence-per-purchase, credit caps and expiry → Phase 6, after legal review.
 - Code formatting tooling → separate Phase 1 task.
