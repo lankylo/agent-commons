@@ -142,6 +142,30 @@ export class ContributionRegistry {
     }).getContributionVersion(contributionId, version);
   }
 
+  /**
+   * Internal exact content-hash lookup (no search, no listing). The agent must be active and
+   * allow-listed, and only versions owned by the agent's own operator are returned.
+   */
+  async findVersionByContentHash(
+    agentId: AgentId,
+    contentHash: string,
+  ): Promise<
+    | { ok: true; found: { id: string; version: number; family: ContributionFamily } | null }
+    | { ok: false; error: CreationError }
+  > {
+    const actor = await this.resolveActor(agentId);
+    if (!actor.ok) return { ok: false, error: actor.error };
+    const hit = await this.db
+      .prepare(
+        `SELECT v.contribution_id AS id, v.version AS version, v.family AS family
+           FROM contribution_versions v JOIN contributions c ON c.id = v.contribution_id
+          WHERE v.content_hash = ? AND c.contributor_operator_id = ?`,
+      )
+      .bind(contentHash, actor.contributor.operatorId)
+      .first<{ id: string; version: number; family: ContributionFamily }>();
+    return { ok: true, found: hit ?? null };
+  }
+
   /** Create version 1 of a new contribution on behalf of an authenticated agent. */
   async createContribution(agentId: AgentId, input: unknown): Promise<CreateContributionResult> {
     const actor = await this.resolveActor(agentId);
