@@ -1,5 +1,6 @@
 /**
- * Initial contribution creation (version 1 only).
+ * Contribution creation (version 1) and immutable versioning (version n+1, see
+ * `createContributionVersion`).
  *
  * Accepts an already-authenticated agent id plus untrusted Knowledge or Execution input
  * (HTTP authentication is a separate task). The service resolves the active agent and its
@@ -63,6 +64,35 @@ export type CreateContributionResult =
   | { readonly ok: true; readonly contribution: CreatedContribution }
   | { readonly ok: false; readonly error: CreationError };
 
+export type VersionErrorCode =
+  | CreationErrorCode
+  | "invalid_expected_version"
+  | "contribution_not_found"
+  | "operator_mismatch"
+  | "version_conflict"
+  | "family_mismatch";
+
+export interface VersionError extends Omit<CreationError, "code"> {
+  readonly code: VersionErrorCode;
+  /** Only for version_conflict from a stale expected version. */
+  readonly latestVersion?: number;
+}
+
+export interface CreatedContributionVersion extends Omit<CreatedContribution, "version"> {
+  readonly version: number;
+  readonly previousVersion: number;
+}
+
+export type CreateVersionResult =
+  | { readonly ok: true; readonly contribution: CreatedContributionVersion }
+  | { readonly ok: false; readonly error: VersionError };
+
+interface PreparedContent {
+  readonly content: KnowledgeContributionInput | ExecutionContributionInput;
+  readonly bytes: Uint8Array;
+  readonly contentHash: string;
+}
+
 export interface RegistryEnv {
   DB: D1Database;
   CONTENT_BUCKET: R2Bucket;
@@ -80,6 +110,7 @@ const defaultPlatform: RegistryPlatform = {
 };
 
 const fail = (error: CreationError): CreateContributionResult => ({ ok: false, error });
+const failV = (error: VersionError): CreateVersionResult => ({ ok: false, error });
 
 interface AgentOperatorRow {
   agent_status: string;
@@ -101,7 +132,154 @@ export class ContributionRegistry {
 
   /** Create version 1 of a new contribution on behalf of an authenticated agent. */
   async createContribution(agentId: AgentId, input: unknown): Promise<CreateContributionResult> {
-    // 1. Actor: active agent, active operator, allow-listed operator.
+    const actor = await this.resolveActor(agentId);
+    if (!actor.ok) return fail(actor.error);
+    const contributor = actor.contributor;
+
+    const prepared = await this.prepareContent(input, contributor.operatorId);
+    // family_mismatch / version codes cannot occur without a required family or version.
+    if (!prepared.ok) return fail(prepared.error as CreationError);
+
+    // Platform-assigned identity and timestamps.
+    const id = this.platform.newContributionId();
+    const createdAt = this.platform.now().toISOString();
+
+    const stored = await this.storeContent(prepared.value);
+    if (!stored.ok) return fail(stored.error);
+
+    const { content, contentHash, bytes } = prepared.value;
+    // D1 second: one atomic batch. A failure here leaves only a harmless orphan object.
+    const statements = [
+      this.db
+        .prepare(
+          "INSERT INTO contributions (id, family, contributor_agent_id, contributor_operator_id, created_at) VALUES (?, ?, ?, ?, ?)",
+        )
+        .bind(id, content.family, contributor.agentId, contributor.operatorId, createdAt),
+      ...this.buildStatements({
+        id,
+        version: 1,
+        createdAt,
+        contributor,
+        contentHash,
+        payloadBytes: bytes.byteLength,
+        content,
+      }),
+    ];
+    const failure = await this.commit(statements, contentHash, contributor.operatorId);
+    if (failure) return fail(failure as CreationError);
+
+    return {
+      ok: true,
+      contribution: {
+        id,
+        version: 1,
+        family: content.family,
+        contentHash,
+        contentKey: stored.key,
+        payloadBytes: bytes.byteLength,
+        contributor,
+        createdAt,
+      },
+    };
+  }
+
+  /**
+   * Create the next immutable version of an existing contribution.
+   *
+   * The author must be an active agent of the contribution's ORIGINAL operator, and that operator
+   * must still be allow-listed. The contribution id and family never change; the new version is
+   * `expectedPreviousVersion + 1` and is accepted only if that is still the latest version
+   * (optimistic concurrency; a racing writer loses on the (contribution_id, version) primary key
+   * inside the atomic batch). Input is validated, hashed and written exactly as in creation:
+   * R2 first, then one D1 batch. Earlier versions, their rows and R2 objects are never touched.
+   */
+  async createContributionVersion(
+    agentId: AgentId,
+    contributionId: string,
+    expectedPreviousVersion: number,
+    input: unknown,
+  ): Promise<CreateVersionResult> {
+    const actor = await this.resolveActor(agentId);
+    if (!actor.ok) return failV(actor.error);
+    const contributor = actor.contributor;
+
+    if (!Number.isSafeInteger(expectedPreviousVersion) || expectedPreviousVersion < 1) {
+      return failV({
+        code: "invalid_expected_version",
+        message: "expectedPreviousVersion must be a positive integer",
+      });
+    }
+
+    const head = await this.db
+      .prepare(
+        `SELECT c.family AS family, c.contributor_operator_id AS operator_id,
+                (SELECT MAX(version) FROM contribution_versions WHERE contribution_id = c.id) AS latest
+           FROM contributions c WHERE c.id = ?`,
+      )
+      .bind(contributionId)
+      .first<{ family: ContributionFamily; operator_id: string; latest: number | null }>();
+    if (!head || head.latest === null) {
+      return failV({ code: "contribution_not_found", message: "contribution not found" });
+    }
+    if (head.operator_id !== contributor.operatorId) {
+      return failV({
+        code: "operator_mismatch",
+        message: "only the contribution's original operator may create new versions",
+      });
+    }
+    if (head.latest !== expectedPreviousVersion) {
+      return failV({
+        code: "version_conflict",
+        message: "expected previous version is not the latest version",
+        latestVersion: head.latest,
+      });
+    }
+
+    const prepared = await this.prepareContent(input, contributor.operatorId, head.family);
+    if (!prepared.ok) return failV(prepared.error);
+
+    const version = expectedPreviousVersion + 1;
+    const createdAt = this.platform.now().toISOString();
+    const stored = await this.storeContent(prepared.value);
+    if (!stored.ok) return failV(stored.error);
+
+    const { content, contentHash, bytes } = prepared.value;
+    const failure = await this.commit(
+      this.buildStatements({
+        id: contributionId,
+        version,
+        createdAt,
+        contributor,
+        contentHash,
+        payloadBytes: bytes.byteLength,
+        content,
+      }),
+      contentHash,
+      contributor.operatorId,
+      true,
+    );
+    if (failure) return failV(failure);
+
+    return {
+      ok: true,
+      contribution: {
+        id: contributionId,
+        version,
+        previousVersion: expectedPreviousVersion,
+        family: content.family,
+        contentHash,
+        contentKey: stored.key,
+        payloadBytes: bytes.byteLength,
+        contributor,
+        createdAt,
+      },
+    };
+  }
+
+  /** Active agent + active operator + allow-listed operator. */
+  private async resolveActor(
+    agentId: AgentId,
+  ): Promise<{ ok: true; contributor: ActorRef } | { ok: false; error: CreationError }> {
     const row = await this.db
       .prepare(
         `SELECT a.status AS agent_status, o.id AS operator_id, o.status AS operator_status,
@@ -110,23 +288,38 @@ export class ContributionRegistry {
       )
       .bind(agentId)
       .first<AgentOperatorRow>();
-    if (!row) return fail({ code: "actor_not_found", message: "agent not found" });
+    if (!row) return { ok: false, error: { code: "actor_not_found", message: "agent not found" } };
     if (row.agent_status !== "active" || row.operator_status !== "active") {
-      return fail({ code: "actor_inactive", message: "agent or operator is not active" });
+      return {
+        ok: false,
+        error: { code: "actor_inactive", message: "agent or operator is not active" },
+      };
     }
     if (row.allow_listed !== 1) {
-      return fail({
-        code: "operator_not_allow_listed",
-        message: "operator is not allow-listed to contribute",
-      });
+      return {
+        ok: false,
+        error: {
+          code: "operator_not_allow_listed",
+          message: "operator is not allow-listed to contribute",
+        },
+      };
     }
-    const contributor: ActorRef = { agentId, operatorId: row.operator_id as OperatorId };
+    return { ok: true, contributor: { agentId, operatorId: row.operator_id as OperatorId } };
+  }
 
-    // 2. Platform-only fields are rejected before any validation.
+  /** Shared by creation and versioning: platform fields, validation, references, hash, duplicates. */
+  private async prepareContent(
+    input: unknown,
+    operatorId: OperatorId,
+    requiredFamily?: ContributionFamily,
+  ): Promise<{ ok: true; value: PreparedContent } | { ok: false; error: VersionError }> {
+    const bad = (error: VersionError) => ({ ok: false, error }) as const;
+
+    // Platform-only fields are rejected before any validation.
     if (typeof input === "object" && input !== null && !Array.isArray(input)) {
       const violations = findPlatformFieldViolations(input as Record<string, unknown>);
       if (violations.length > 0) {
-        return fail({
+        return bad({
           code: "platform_field_rejected",
           message: "platform-computed fields cannot be set by contributors",
           errors: violations.map((k) => `${k}: platform-computed field cannot be set`),
@@ -134,8 +327,14 @@ export class ContributionRegistry {
       }
     }
 
-    // 3. Family validator.
+    // Family validator.
     const family = (input as { family?: unknown } | null | undefined)?.family;
+    if (requiredFamily !== undefined && family !== requiredFamily) {
+      return bad({
+        code: "family_mismatch",
+        message: `a ${requiredFamily} contribution cannot change family`,
+      });
+    }
     const validated =
       family === "knowledge"
         ? validateKnowledgeContribution(input)
@@ -143,7 +342,7 @@ export class ContributionRegistry {
           ? validateExecutionContribution(input)
           : ({ ok: false, errors: ['family: must be "knowledge" or "execution"'] } as const);
     if (!validated.ok) {
-      return fail({
+      return bad({
         code: "invalid_content",
         message: "content failed validation",
         errors: validated.errors,
@@ -151,7 +350,7 @@ export class ContributionRegistry {
     }
     const content = validated.value;
 
-    // 4. Cross-family references must resolve to exact stored versions.
+    // Cross-family references must resolve to exact stored versions.
     const refs = await resolveContributionRefs(
       content.family,
       content.related,
@@ -164,20 +363,20 @@ export class ContributionRegistry {
           .first()) !== null,
     );
     if (!refs.ok) {
-      return fail({
+      return bad({
         code: "unresolved_reference",
         message: "one or more references do not resolve",
         errors: refs.errors,
       });
     }
 
-    // 5. Canonical JSON and hash.
+    // Canonical JSON and hash.
     let canonical: string;
     try {
       canonical = canonicalJson(content);
     } catch (e) {
       if (e instanceof CanonicalJsonError) {
-        return fail({
+        return bad({
           code: "invalid_content",
           message: "content cannot be canonicalized",
           errors: [`content: ${e.message}`],
@@ -188,65 +387,64 @@ export class ContributionRegistry {
     const bytes = new TextEncoder().encode(canonical);
     const contentHash = await sha256Hex(canonical);
 
-    // 6. Duplicate content (before any write).
-    const dup = await this.findDuplicate(contentHash, contributor.operatorId);
-    if (dup) return fail(dup);
+    // Duplicate content (before any write).
+    const dup = await this.findDuplicate(contentHash, operatorId);
+    if (dup) return bad(dup);
 
-    // 7. Platform-assigned identity and timestamps.
-    const id = this.platform.newContributionId();
-    const createdAt = this.platform.now().toISOString();
+    return { ok: true, value: { content, bytes, contentHash } };
+  }
 
-    // 8. R2 first: immutable, content-addressed, idempotent.
-    let contentKey: string;
+  /** R2 first: immutable, content-addressed, idempotent. */
+  private async storeContent(
+    p: PreparedContent,
+  ): Promise<{ ok: true; key: string } | { ok: false; error: CreationError }> {
     try {
-      contentKey = (
-        await putContentObject(this.bucket, {
-          family: content.family,
-          contentType: content.contentType,
-          bytes,
-        })
-      ).key;
+      const { key } = await putContentObject(this.bucket, {
+        family: p.content.family,
+        contentType: p.content.contentType,
+        bytes: p.bytes,
+      });
+      return { ok: true, key };
     } catch {
-      return fail({ code: "storage_failed", message: "content object could not be stored" });
+      return {
+        ok: false,
+        error: { code: "storage_failed", message: "content object could not be stored" },
+      };
     }
+  }
 
-    // 9. D1 second: one atomic batch. A failure here leaves only a harmless orphan object.
-    const statements = this.buildStatements({
-      id,
-      createdAt,
-      contributor,
-      contentHash,
-      payloadBytes: bytes.byteLength,
-      content,
-    });
+  /** One atomic D1 batch; maps hash and version-key races to typed errors. */
+  private async commit(
+    statements: D1PreparedStatement[],
+    contentHash: string,
+    operatorId: OperatorId,
+    versioning = false,
+  ): Promise<VersionError | undefined> {
     try {
       await this.db.batch(statements);
+      return undefined;
     } catch (e) {
-      if (
-        e instanceof Error &&
-        /UNIQUE constraint failed: contribution_versions\.content_hash/.test(e.message)
-      ) {
-        const raced = await this.findDuplicate(contentHash, contributor.operatorId);
-        return fail(
-          raced ?? { code: "duplicate_content", message: "identical content already exists" },
-        );
+      const msg = e instanceof Error ? e.message : "";
+      if (/UNIQUE constraint failed: contribution_versions\.content_hash/.test(msg)) {
+        const raced = await this.findDuplicate(contentHash, operatorId);
+        return raced ?? { code: "duplicate_content", message: "identical content already exists" };
       }
-      return fail({ code: "persistence_failed", message: "contribution could not be saved" });
+      if (
+        versioning &&
+        /UNIQUE constraint failed: contribution_versions\.contribution_id, contribution_versions\.version/.test(
+          msg,
+        )
+      ) {
+        return {
+          code: "version_conflict",
+          message: "a concurrent update created this version first",
+        };
+      }
+      return {
+        code: "persistence_failed",
+        message: versioning ? "version could not be saved" : "contribution could not be saved",
+      };
     }
-
-    return {
-      ok: true,
-      contribution: {
-        id,
-        version: 1,
-        family: content.family,
-        contentHash,
-        contentKey,
-        payloadBytes: bytes.byteLength,
-        contributor,
-        createdAt,
-      },
-    };
   }
 
   private async findDuplicate(
@@ -273,29 +471,24 @@ export class ContributionRegistry {
 
   private buildStatements(p: {
     id: string;
+    version: number;
     createdAt: string;
     contributor: ActorRef;
     contentHash: string;
     payloadBytes: number;
     content: KnowledgeContributionInput | ExecutionContributionInput;
   }): D1PreparedStatement[] {
-    const { id, createdAt, contributor, contentHash, content } = p;
+    const { id, version, createdAt, contributor, contentHash, content } = p;
     const q = (sql: string, ...args: unknown[]) => this.db.prepare(sql).bind(...args);
     const s: D1PreparedStatement[] = [
-      q(
-        "INSERT INTO contributions (id, family, contributor_agent_id, contributor_operator_id, created_at) VALUES (?, ?, ?, ?, ?)",
-        id,
-        content.family,
-        contributor.agentId,
-        contributor.operatorId,
-        createdAt,
-      ),
       q(
         `INSERT INTO contribution_versions (contribution_id, version, previous_version, family,
            author_agent_id, author_operator_id, content_hash, hash_algorithm, payload_bytes, title,
            purpose, content_type, license, data_permission, review_interval_days, as_of, created_at)
-         VALUES (?, 1, NULL, ?, ?, ?, ?, 'sha256', ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+         VALUES (?, ?, ?, ?, ?, ?, ?, 'sha256', ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         id,
+        version,
+        version === 1 ? null : version - 1,
         content.family,
         contributor.agentId,
         contributor.operatorId,
@@ -311,16 +504,18 @@ export class ContributionRegistry {
         createdAt,
       ),
       q(
-        "INSERT INTO version_platform_state (contribution_id, version, last_verified_at, reliability_score, consumer_count, updated_at) VALUES (?, 1, NULL, NULL, 0, ?)",
+        "INSERT INTO version_platform_state (contribution_id, version, last_verified_at, reliability_score, consumer_count, updated_at) VALUES (?, ?, NULL, NULL, 0, ?)",
         id,
+        version,
         createdAt,
       ),
     ];
     content.evidence.forEach((e, i) =>
       s.push(
         q(
-          "INSERT INTO contribution_evidence (contribution_id, version, ordinal, kind, uri) VALUES (?, 1, ?, ?, ?)",
+          "INSERT INTO contribution_evidence (contribution_id, version, ordinal, kind, uri) VALUES (?, ?, ?, ?, ?)",
           id,
+          version,
           i,
           e.kind,
           e.uri,
@@ -330,8 +525,9 @@ export class ContributionRegistry {
     (content.related ?? []).forEach((r, i) =>
       s.push(
         q(
-          "INSERT INTO contribution_references (from_contribution_id, from_version, from_family, ordinal, to_contribution_id, to_version, to_family) VALUES (?, 1, ?, ?, ?, ?, ?)",
+          "INSERT INTO contribution_references (from_contribution_id, from_version, from_family, ordinal, to_contribution_id, to_version, to_family) VALUES (?, ?, ?, ?, ?, ?, ?)",
           id,
+          version,
           content.family,
           i,
           r.id,
@@ -340,19 +536,24 @@ export class ContributionRegistry {
         ),
       ),
     );
-    if (content.family === "knowledge") s.push(...this.knowledgeStatements(id, content));
-    else s.push(...this.executionStatements(id, content));
+    if (content.family === "knowledge") s.push(...this.knowledgeStatements(id, version, content));
+    else s.push(...this.executionStatements(id, version, content));
     return s;
   }
 
-  private knowledgeStatements(id: string, k: KnowledgeContributionInput): D1PreparedStatement[] {
+  private knowledgeStatements(
+    id: string,
+    version: number,
+    k: KnowledgeContributionInput,
+  ): D1PreparedStatement[] {
     const q = (sql: string, ...args: unknown[]) => this.db.prepare(sql).bind(...args);
     const s: D1PreparedStatement[] = [
       q(
         `INSERT INTO knowledge_versions (contribution_id, version, family, summary, explanation, records_json,
            source_license, rights_holder, permitted_use, verification_method, declared_confidence)
-         VALUES (?, 1, 'knowledge', ?, ?, ?, ?, ?, ?, ?, ?)`,
+         VALUES (?, ?, 'knowledge', ?, ?, ?, ?, ?, ?, ?, ?)`,
         id,
+        version,
         k.summary ?? null,
         k.explanation ?? null,
         k.records === undefined ? null : canonicalJson(k.records),
@@ -366,8 +567,9 @@ export class ContributionRegistry {
     (k.facts ?? []).forEach((f, i) =>
       s.push(
         q(
-          "INSERT INTO knowledge_facts (contribution_id, version, ordinal, subject, predicate, value_json, unit) VALUES (?, 1, ?, ?, ?, ?, ?)",
+          "INSERT INTO knowledge_facts (contribution_id, version, ordinal, subject, predicate, value_json, unit) VALUES (?, ?, ?, ?, ?, ?, ?)",
           id,
+          version,
           i,
           f.subject,
           f.predicate,
@@ -380,8 +582,9 @@ export class ContributionRegistry {
       s.push(
         q(
           `INSERT INTO knowledge_sources (contribution_id, version, ordinal, uri, accessed_at, source_date,
-             hash_algorithm, hash_digest, snapshot_ref) VALUES (?, 1, ?, ?, ?, ?, ?, ?, ?)`,
+             hash_algorithm, hash_digest, snapshot_ref) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
           id,
+          version,
           i,
           src.uri,
           src.accessedAt,
@@ -395,7 +598,11 @@ export class ContributionRegistry {
     return s;
   }
 
-  private executionStatements(id: string, x: ExecutionContributionInput): D1PreparedStatement[] {
+  private executionStatements(
+    id: string,
+    version: number,
+    x: ExecutionContributionInput,
+  ): D1PreparedStatement[] {
     const q = (sql: string, ...args: unknown[]) => this.db.prepare(sql).bind(...args);
     const verification = x.verification;
     const s: D1PreparedStatement[] = [
@@ -403,8 +610,9 @@ export class ContributionRegistry {
         `INSERT INTO execution_versions (contribution_id, version, family, objective, inputs_json, outputs_json,
            steps_json, success_checks_json, compatibility_json, side_effect, requires_human_approval,
            max_requests, timeout_seconds, on_failure, verification_method, tested_at, declared_confidence)
-         VALUES (?, 1, 'execution', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+         VALUES (?, ?, 'execution', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         id,
+        version,
         x.objective,
         canonicalJson(x.inputs),
         canonicalJson(x.outputs),
@@ -424,8 +632,9 @@ export class ContributionRegistry {
     for (const domain of x.targetDomains) {
       s.push(
         q(
-          "INSERT INTO execution_target_domains (contribution_id, version, domain) VALUES (?, 1, ?)",
+          "INSERT INTO execution_target_domains (contribution_id, version, domain) VALUES (?, ?, ?)",
           id,
+          version,
           domain,
         ),
       );
