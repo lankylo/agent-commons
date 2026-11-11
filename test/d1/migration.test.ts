@@ -115,6 +115,7 @@ describe("clean migration", () => {
       .map((r) => r["name"]);
     expect(names.sort()).toEqual(
       [
+        "agent_credentials",
         "agents",
         "contribution_evidence",
         "contribution_references",
@@ -133,7 +134,7 @@ describe("clean migration", () => {
       count(
         "SELECT count(*) AS c FROM sqlite_master WHERE type = 'index' AND name LIKE '%\\_idx' ESCAPE '\\'",
       ),
-    ).toBe(12);
+    ).toBe(13);
     expect(db.prepare("PRAGMA foreign_key_check").all()).toEqual([]);
   });
 });
