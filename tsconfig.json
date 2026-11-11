@@ -15,6 +15,7 @@
     "test/d1",
     "test/storage",
     "test/identity/repository.test.ts",
-    "test/registry/creation.test.ts"
+    "test/registry/creation.test.ts",
+    "test/seed/httpbin.test.ts"
   ]
 }
