@@ -28,6 +28,7 @@ import { findPlatformFieldViolations, type ContributionFamily } from "./envelope
 import { validateExecutionContribution, type ExecutionContributionInput } from "./execution";
 import { validateKnowledgeContribution, type KnowledgeContributionInput } from "./knowledge";
 import { resolveContributionRefs } from "./references";
+import { ContributionRetriever, type RetrieveResult } from "./retrieval";
 
 export type CreationErrorCode =
   | "actor_not_found"
@@ -128,6 +129,17 @@ export class ContributionRegistry {
     this.db = env.DB;
     this.bucket = env.CONTENT_BUCKET;
     this.platform = { ...defaultPlatform, ...platform };
+  }
+
+  /**
+   * Internal, verified retrieval of one exact immutable version (see `retrieval.ts`).
+   * No "latest" alias, search, listing or access control.
+   */
+  getContributionVersion(contributionId: string, version: number): Promise<RetrieveResult> {
+    return new ContributionRetriever({
+      DB: this.db,
+      CONTENT_BUCKET: this.bucket,
+    }).getContributionVersion(contributionId, version);
   }
 
   /** Create version 1 of a new contribution on behalf of an authenticated agent. */
