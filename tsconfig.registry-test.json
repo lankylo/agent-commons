@@ -6,6 +6,7 @@
     "test/registry/versioning.test.ts",
     "test/registry/retrieval.test.ts",
     "test/registry/phase2-integration.test.ts",
+    "test/registry/search-query.test.ts",
     "test/seed/httpbin.test.ts",
     "test/seed/load-httpbin.test.ts"
   ],
