@@ -5,7 +5,8 @@
     "test/registry/creation.test.ts",
     "test/registry/versioning.test.ts",
     "test/registry/retrieval.test.ts",
-    "test/registry/phase2-integration.test.ts"
+    "test/registry/phase2-integration.test.ts",
+    "test/seed/httpbin.test.ts"
   ],
   "exclude": []
 }
