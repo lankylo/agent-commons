@@ -1,6 +1,10 @@
 {
   "extends": "./tsconfig.json",
   "compilerOptions": { "types": ["@cloudflare/workers-types", "node"] },
-  "include": ["test/registry/creation.test.ts", "test/registry/versioning.test.ts"],
+  "include": [
+    "test/registry/creation.test.ts",
+    "test/registry/versioning.test.ts",
+    "test/registry/retrieval.test.ts"
+  ],
   "exclude": []
 }
