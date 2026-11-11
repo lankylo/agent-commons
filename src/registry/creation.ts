@@ -25,6 +25,7 @@ import type { ActorRef, AgentId, OperatorId } from "../identity/types";
 import { putContentObject } from "../storage/content-objects";
 import { canonicalJson, CanonicalJsonError, sha256Hex } from "./content-hash";
 import { findPlatformFieldViolations, type ContributionFamily } from "./envelope";
+import { buildSearchText } from "./search-document";
 import { validateExecutionContribution, type ExecutionContributionInput } from "./execution";
 import { validateKnowledgeContribution, type KnowledgeContributionInput } from "./knowledge";
 import { resolveContributionRefs } from "./references";
@@ -570,6 +571,17 @@ export class ContributionRegistry {
           r.version,
           r.family,
         ),
+      ),
+    );
+    // Same atomic batch: the immutable search document (the FTS5 index is filled by a trigger).
+    s.push(
+      q(
+        "INSERT INTO contribution_search_documents (contribution_id, version, family, content_type, indexed_text) VALUES (?, ?, ?, ?, ?)",
+        id,
+        version,
+        content.family,
+        content.contentType,
+        buildSearchText(content),
       ),
     );
     if (content.family === "knowledge") s.push(...this.knowledgeStatements(id, version, content));

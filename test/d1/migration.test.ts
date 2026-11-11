@@ -110,7 +110,9 @@ beforeEach(() => {
 describe("clean migration", () => {
   it("creates every designed table and index on an empty database", () => {
     const names = db
-      .prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%'")
+      .prepare(
+        "SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%' AND name NOT LIKE 'contribution\\_search%' ESCAPE '\\'",
+      )
       .all()
       .map((r) => r["name"]);
     expect(names.sort()).toEqual(
@@ -130,6 +132,12 @@ describe("clean migration", () => {
         "version_platform_state",
       ].sort(),
     );
+    // FTS5 virtual table plus its document table (shadow tables are filtered out above).
+    expect(
+      count(
+        "SELECT count(*) AS c FROM sqlite_master WHERE name IN ('contribution_search','contribution_search_documents')",
+      ),
+    ).toBe(2);
     expect(
       count(
         "SELECT count(*) AS c FROM sqlite_master WHERE type = 'index' AND name LIKE '%\\_idx' ESCAPE '\\'",
