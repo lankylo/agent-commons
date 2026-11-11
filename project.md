@@ -338,7 +338,7 @@ Every phase must have measurable acceptance criteria.
 - [x] Define source hash/snapshot fields for Knowledge records. (sha256 digest, `accessedAt`, optional `snapshotRef`)
 - [x] Define platform maximum review intervals per content type. (`src/registry/review-intervals.ts`; enforced by both family validators; `docs/architecture.md` §8)
 - [x] Define cross-family contribution references (by ID and version). (`src/registry/references.ts`; used by both validators; `docs/architecture.md` §8)
-- [ ] Design D1 database tables.
+- [x] Design D1 database tables. (`docs/d1-schema.md`; design only, DDL checked against a local SQLite; no migrations or bindings)
 - [ ] Implement database migrations.
 - [ ] Configure R2 storage.
 - [ ] Implement contribution creation.
@@ -496,13 +496,13 @@ Every phase must have measurable acceptance criteria.
 | Phase | Status | Completion |
 |---|---|---|
 | 1. Foundation | Completed | 100% |
-| 2. Identity and Content Registry | In Progress | 40% |
+| 2. Identity and Content Registry | In Progress | 45% |
 | 3. Search and Retrieval | Not Started | 0% |
 | 4. Agent Interfaces | Not Started | 0% |
 | 5. Validation and Trust | Not Started | 0% |
 | 6. Payments and Contributor Credits | Not Started | 0% |
 
-**Current phase:** Phase 2 in progress (identity model, shared envelope, Knowledge schema, Execution schema and review-interval maxima and cross-family references defined; PRs #6, #7, #8 and #9 merged; cross-family references PR awaiting review)  
+**Current phase:** Phase 2 in progress (identity model, shared envelope, Knowledge schema, Execution schema and review-interval maxima and cross-family references defined and D1 table design documented; PRs #6–#10 merged; D1 table design PR awaiting review)  
 **Current blocker:** None  
 **Latest verified milestone:** Wrangler 4.159.0 and Workers types v5 verified by clean install, formatting, typecheck, lint, tests, Worker dry-run and local `/health` HTTP 200 smoke test
 
@@ -544,6 +544,7 @@ Completion percentages must reflect verified acceptance criteria, not merely gen
 | 2026-11-10 | Require manually approved Claude development runs and PR review | Control API expenditure, avoid unattended loops and keep development decisions traceable |
 | 2026-11-11 | Cross-family references are `{family, id, version}` where `family` is the referenced (opposite) family; IDs match `^[a-z0-9][a-z0-9-]{7,63}$`; versions are positive safe integers and always explicit; duplicates, same-family refs and unknown fields are rejected; existence is checked via a caller-supplied (sync or async) resolver, with no storage dependency | Keeps families separate and references stable because stored versions are immutable. Rules in `docs/architecture.md` §8 |
 | 2026-11-11 | Review-interval maxima are a code-defined, per-family allow-list of content types (knowledge: `api-limits` 30, `api-reference` 90, `error-reference` 180, `concept-summary` 365 days; execution: `api-recipe` 60, `diagnostic-recipe` 90 days); unknown content types are rejected; maxima are inclusive | Volatile content gets shorter intervals; contributors cannot override the platform maximum. Rationale in `docs/architecture.md` §8 |
+| 2026-11-11 | D1 design: versions are append-only with a contiguous `previous_version` chain and immutability triggers; `UNIQUE(content_hash)` detects exact duplicates (hash of canonical validated input incl. family, excl. platform fields); references are composite FKs to the exact `(id, version, family)`; platform-computed fields sit in a separate mutable table; Knowledge facts/sources and Execution target domains are normalized, other family structures are JSON; review maxima stay in code; no hard deletes, all FKs `RESTRICT`. Rationale in `docs/d1-schema.md` | Makes one-operator-per-agent, immutability, duplicate detection and exact-version resolution database-enforced rather than convention |
 | 2026-11-10 | Execution validation is strict and allow-list based over a fixed four-step vocabulary (`http_request`, `extract_field`, `assert`, `wait`); no free-text fields: literals are whitespace-free tokens, steps may only address declared `targetDomains`, inputs and variables must be declared before use, writing methods require a non-read-only `sideEffect`, irreversible writes require human approval | Structural limits are the primary prompt-injection control; recipes are data, not permission grants. Headers/auth are deliberately excluded until credentials are designed |
 | 2026-11-10 | Knowledge validation is strict and allow-list based: unknown fields, platform-only fields and Execution fields are rejected; scalar values are capped so prose cannot hide outside `explanation` | Structural limits are the primary prompt-injection control |
 
@@ -589,10 +590,10 @@ Do not expand scope solely to solve speculative future problems.
 
 ## 10. Next Development Actions
 
-**Immediate task: Review the Phase 2 cross-family references PR** (PRs #6, #7, #8 and #9 are merged.)
+**Immediate task: Review the Phase 2 D1 table design PR** (PRs #6–#10 are merged.)
 
-1. Review the cross-family references PR; merging remains a human decision.
-2. Then choose the next separately approved Phase 2 task (e.g. D1 table design).
+1. Review `docs/d1-schema.md`; merging remains a human decision.
+2. Then choose the next separately approved Phase 2 task (e.g. D1 migrations, content hashing).
 3. Do not implement D1, R2, credentials or APIs until their tasks are approved.
 
 ---
@@ -614,11 +615,11 @@ After every completed development task:
 Maintain the following short record at the end of this document.
 
 **Current phase:** Phase 2 in progress  
-**Last completed task:** Defined and implemented cross-family contribution references by ID and exact version (`src/registry/references.ts`: opposite-family `{family, id, version}` shape, ID/version format, duplicate and unknown-field rejection, storage-independent async-capable resolver; integrated into both validators; 32 new tests; format, typecheck, lint, 97 passing tests, Worker dry-run). Previously: defined and enforced platform maximum review intervals per content type (`src/registry/review-intervals.ts`, used by both validators; the unused `reviewIntervalMaxDaysCeiling` limits were removed; 29 new tests; format, typecheck, lint, 65 passing tests, Worker dry-run). Previously: defined and implemented the Execution contribution schema, fixed step vocabulary and deterministic validator (`src/registry/execution.ts`, shared primitives extracted to `src/registry/check.ts`; 18 new unit tests; format, typecheck, lint, 36 passing tests, Worker dry-run). Previously: defined and implemented the Knowledge contribution schema and deterministic validator (`src/registry/knowledge.ts`, 11 new unit tests; format, typecheck, lint, 18 passing tests, Worker dry-run). Previously: designed operator/agent identity model and shared contribution envelope with `family` discriminator (types plus 5 unit tests; format, typecheck, lint, 7 passing tests, Worker dry-run). Previously: upgraded to Wrangler 4.159.0 and Workers types v5; verified by clean install, formatting, typecheck, lint, 2 passing tests, Worker dry-run, local `/health` HTTP 200 smoke test and zero production dependency audit findings  
+**Last completed task:** Designed the D1 tables for identity and the content registry (`docs/d1-schema.md`: operators, agents, contributions, immutable versions, evidence, cross-family references, platform state, Knowledge and Execution extensions; keys, FKs, uniqueness, indexes, deletion/immutability rules, JSON vs normalized, TS mapping; design only, no migrations; DDL and constraints exercised in a throwaway in-memory SQLite check; format, typecheck, lint, tests, Worker dry-run). Previously: defined and implemented cross-family contribution references by ID and exact version (`src/registry/references.ts`: opposite-family `{family, id, version}` shape, ID/version format, duplicate and unknown-field rejection, storage-independent async-capable resolver; integrated into both validators; 32 new tests; format, typecheck, lint, 97 passing tests, Worker dry-run). Previously: defined and enforced platform maximum review intervals per content type (`src/registry/review-intervals.ts`, used by both validators; the unused `reviewIntervalMaxDaysCeiling` limits were removed; 29 new tests; format, typecheck, lint, 65 passing tests, Worker dry-run). Previously: defined and implemented the Execution contribution schema, fixed step vocabulary and deterministic validator (`src/registry/execution.ts`, shared primitives extracted to `src/registry/check.ts`; 18 new unit tests; format, typecheck, lint, 36 passing tests, Worker dry-run). Previously: defined and implemented the Knowledge contribution schema and deterministic validator (`src/registry/knowledge.ts`, 11 new unit tests; format, typecheck, lint, 18 passing tests, Worker dry-run). Previously: designed operator/agent identity model and shared contribution envelope with `family` discriminator (types plus 5 unit tests; format, typecheck, lint, 7 passing tests, Worker dry-run). Previously: upgraded to Wrangler 4.159.0 and Workers types v5; verified by clean install, formatting, typecheck, lint, 2 passing tests, Worker dry-run, local `/health` HTTP 200 smoke test and zero production dependency audit findings  
 **Current task:** None in progress  
 **Known blockers:** None; 16 development-only audit findings remain for separate Vitest and ESLint upgrade reviews  
-**Next task:** After PR review, a separately approved Phase 2 task (e.g. D1 table design)  
-**Last verified commit:** `f2bd535` (main after PR #9) plus the changes in the cross-family references branch
+**Next task:** After PR review, a separately approved Phase 2 task (e.g. D1 migrations)  
+**Last verified commit:** `d8d6be0` (main after PR #10) plus the changes in the D1 schema design branch
 
 Update these fields at the end of each working session.
 
