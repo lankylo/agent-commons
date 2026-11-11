@@ -40,6 +40,6 @@ jobs:
             Update project.md progress only for tested changes.
           claude_args: |
             --model sonnet
-            --max-turns 16
+            --max-turns 20
             --permission-mode auto
             --allowedTools "Bash(npm install),Bash(npm run:*),Bash(npx tsc:*),Bash(npx eslint:*),Bash(npx vitest:*),Edit,Write"
