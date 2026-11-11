@@ -220,3 +220,7 @@ Implemented in `src/storage/content-objects.ts`; verified by `test/storage/conte
 - **Duplicates:** identical bytes resolve to the same key; the second write is a no-op reported as `created: false`. Same bytes with different family/content-type metadata is a conflict error, not an overwrite.
 - **Retrieval:** by hash only. Reads re-hash the bytes against the key and check metadata; mismatch (tampering/corruption) throws. Missing hash returns `null`.
 - **Trust:** content is untrusted; callers validate by family before writing. D1 (not R2) remains the source of metadata and version pointers; no D1 writes exist yet.
+
+## 10. Contribution creation (version 1)
+
+`src/registry/creation.ts` creates version 1 of a contribution for an authenticated agent id. Order: resolve active agent, operator and allow-list flag; reject platform-only fields; family validator; resolve references to exact stored versions; canonical JSON and SHA-256; duplicate-hash check; assign id, version, contributor and timestamps; **write R2 first, then one D1 batch**. D1 never references a missing R2 object. If the batch fails, the content-addressed R2 object is a harmless unreferenced orphan that a retry reuses. Later versions, HTTP authentication and APIs are separate tasks.

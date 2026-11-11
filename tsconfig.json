@@ -11,5 +11,10 @@
     "isolatedModules": true
   },
   "include": ["src", "test"],
-  "exclude": ["test/d1", "test/storage", "test/identity/repository.test.ts"]
+  "exclude": [
+    "test/d1",
+    "test/storage",
+    "test/identity/repository.test.ts",
+    "test/registry/creation.test.ts"
+  ]
 }

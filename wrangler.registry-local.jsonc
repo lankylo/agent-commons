@@ -1,0 +1,21 @@
+{
+  // Local-only config for registry integration tests (D1 + R2 together). Not used by `wrangler deploy`.
+  // Placeholder identifiers: no real D1 database or R2 bucket exists and none may be created from this file.
+  "name": "agent-commons-registry-local",
+  "main": "src/index.ts",
+  "compatibility_date": "2025-01-01",
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "agent-commons-local",
+      "database_id": "00000000-0000-0000-0000-000000000000",
+      "migrations_dir": "migrations",
+    },
+  ],
+  "r2_buckets": [
+    {
+      "binding": "CONTENT_BUCKET",
+      "bucket_name": "agent-commons-content-local",
+    },
+  ],
+}
