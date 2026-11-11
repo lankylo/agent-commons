@@ -23,6 +23,8 @@ let registry: ContributionRegistry;
 let search: ContributionSearch;
 let agent: AgentId;
 let clock = new Date("2026-11-11T12:00:00.000Z");
+// Search reference time, injected so freshness is deterministic.
+const searchNow = new Date("2026-11-15T00:00:00.000Z");
 const ids: Record<string, string> = {};
 
 beforeAll(async () => {
@@ -50,12 +52,15 @@ beforeAll(async () => {
   db = proxy.env.DB;
   registry = new ContributionRegistry(proxy.env, { now: () => clock });
   // Search gets D1 only; any R2 access through this env fails the test.
-  search = new ContributionSearch({
-    DB: db,
-    get CONTENT_BUCKET(): never {
-      throw new Error("search must not access R2");
-    },
-  } as { DB: D1Database });
+  search = new ContributionSearch(
+    {
+      DB: db,
+      get CONTENT_BUCKET(): never {
+        throw new Error("search must not access R2");
+      },
+    } as { DB: D1Database },
+    { now: () => searchNow },
+  );
   const identity = new IdentityRepository(db);
   const op = await identity.createOperator({ kind: "organization", displayName: "Op" });
   await db
@@ -212,10 +217,12 @@ const RESULT_KEYS = [
   "contentType",
   "createdAt",
   "family",
+  "freshness",
   "id",
   "lastVerifiedAt",
   "purpose",
   "reliabilityScore",
+  "reviewDueAt",
   "reviewIntervalDays",
   "title",
   "version",
@@ -239,6 +246,8 @@ describe("httpbin seeds", () => {
       lastVerifiedAt: null,
       reliabilityScore: null,
       consumerCount: 0,
+      freshness: "current",
+      reviewDueAt: expect.any(String),
     });
     for (const r of results) expect(Object.keys(r).sort()).toEqual(RESULT_KEYS);
     expect(await found({ query: "diagnostic recipe", family: "execution" })).toEqual([
@@ -265,7 +274,7 @@ describe("filters", () => {
 
   it("applies every Knowledge filter", async () => {
     const q = { query: "zebrafinch", family: "knowledge" } as const;
-    expect(await found(q)).toEqual(sorted(ids.k1, ids.k2));
+    expect(await found(q)).toEqual([ids.k2, ids.k1]);
     expect(await found({ ...q, filters: { verificationMethod: "owner-tested" } })).toEqual([
       ids.k1,
     ]);
@@ -283,7 +292,7 @@ describe("filters", () => {
 
   it("applies every Execution filter", async () => {
     const q = { query: "pelican", family: "execution" } as const;
-    expect(await found(q)).toEqual(sorted(ids.e1, ids.e2));
+    expect(await found(q)).toEqual([ids.e1, ids.e2]);
     const one = async (filters: Record<string, unknown>) => found({ ...q, filters });
     expect(await one({ verificationMethod: "owner-tested" })).toEqual([ids.e1]);
     expect(await one({ verificationMethod: "simulated" })).toEqual([ids.e2]);
@@ -291,7 +300,7 @@ describe("filters", () => {
     expect(await one({ targetDomain: "pelican.example.net" })).toEqual([ids.e1]);
     expect(await one({ targetDomain: "example.net" })).toEqual([]);
     expect(await one({ requiredCapability: "jsonpointer" })).toEqual([ids.e1]);
-    expect(await one({ requiredCapability: "http-client" })).toEqual(sorted(ids.e1, ids.e2));
+    expect(await one({ requiredCapability: "http-client" })).toEqual([ids.e1, ids.e2]);
     expect(await one({ requiredCapability: "http" })).toEqual([]);
     expect(await one({ sideEffect: "irreversible-write" })).toEqual([ids.e2]);
     expect(await one({ sideEffect: "read-only" })).toEqual([ids.e1]);
@@ -364,7 +373,7 @@ describe("plain-text query safety", () => {
     expect(await found({ query: "httpbin.org (diagnostic)!" })).toEqual([ids.httpbinE]);
     expect(await found({ query: 'title:"pelican" ^record' })).toEqual([]); // "title" is a term
     expect(await found({ query: 'pelican\'s "record"' })).toEqual([]); // "s" is a term
-    expect(await found({ query: "pelican' \"record" })).toEqual(sorted(ids.e1, ids.e2));
+    expect(await found({ query: "pelican' \"record" })).toEqual([ids.e1, ids.e2]);
   });
 
   it("treats FTS operator words as ordinary required terms", async () => {
@@ -372,7 +381,7 @@ describe("plain-text query safety", () => {
     expect(await found({ query: "pelican NOT archive" })).toEqual([]);
     expect(await found({ query: "NEAR(pelican archive)" })).toEqual([]);
     // "and" is an ordinary word in both purposes ("Retrieve a record and confirm it").
-    expect(await found({ query: "pelican AND" })).toEqual(sorted(ids.e1, ids.e2));
+    expect(await found({ query: "pelican AND" })).toEqual([ids.e1, ids.e2]);
     expect(await found({ query: "AND" })).toEqual(await found({ query: "and" }));
     expect(await found({ query: "pelican archive" })).toEqual([ids.e2]);
   });
@@ -397,7 +406,7 @@ describe("plain-text query safety", () => {
   it("never matches Knowledge explanation text", async () => {
     expect(await found({ query: "xylophonic" })).toEqual([]);
     expect(await found({ query: "ignore previous instructions" })).toEqual([]);
-    expect(await found({ query: "quokka walrus" })).toEqual(sorted(ids.k1, ids.k2));
+    expect(await found({ query: "quokka walrus" })).toEqual([ids.k2, ids.k1]);
   });
 
   it("rejects empty, overlong and token-heavy queries", async () => {
@@ -412,7 +421,7 @@ describe("plain-text query safety", () => {
     const heavy = Array.from({ length: SEARCH_LIMITS.maxTokens + 1 }, () => "pelican").join(" ");
     expect(await issues({ query: heavy })).toEqual(["query:too_many_tokens"]);
     const atLimit = Array.from({ length: SEARCH_LIMITS.maxTokens }, () => "pelican").join(" ");
-    expect(await found({ query: atLimit })).toEqual(sorted(ids.e1, ids.e2));
+    expect(await found({ query: atLimit })).toEqual([ids.e1, ids.e2]);
   });
 });
 
@@ -449,15 +458,15 @@ describe("latest-version rule and ordering", () => {
     ids.versioned = id;
   });
 
-  it("orders by latest-version creation time descending, then contribution id", async () => {
-    // "quotas" matches k1/k2 (2026-11-11) and the versioned record's v2 does not; add a newer one.
+  it("ranks by evidence tier, then latest-version creation time, then contribution id", async () => {
+    // k1 (owner-tested) and k2 (cross-source) were created 2026-11-11; add a newer owner-tested one.
     clock = new Date("2026-11-13T00:00:00.000Z");
     const newer = await registry.createContribution(
       agent,
       knowledge({ title: "Zebrafinch late addendum", summary: "Late quotas." }),
     );
     if (!newer.ok) throw new Error(JSON.stringify(newer.error));
-    const expected = [newer.contribution.id, ...sorted(ids.k1, ids.k2)];
+    const expected = [ids.k2, newer.contribution.id, ids.k1];
     expect(await found({ query: "zebrafinch" })).toEqual(expected);
     expect(await found({ query: "zebrafinch" })).toEqual(expected); // stable across calls
     expect(await found({ query: "zebrafinch", limit: 2 })).toEqual(expected.slice(0, 2));
