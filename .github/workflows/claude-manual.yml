@@ -7,6 +7,11 @@ on:
         description: "One narrowly scoped task, including acceptance criteria (avoid secrets)"
         required: true
         type: string
+      use_opus:
+        description: "Use Opus as the coding executor for unusually complex tasks (higher cost)"
+        required: false
+        default: false
+        type: boolean
 
 permissions:
   id-token: write
@@ -39,7 +44,7 @@ jobs:
             Work on a branch and open a PR for review; do not merge.
             Update project.md progress only for tested changes.
           claude_args: |
-            --model sonnet
+            --model ${{ inputs.use_opus && 'opus' || 'sonnet' }}
             --max-turns 20
             --permission-mode auto
             --allowedTools "Bash(npm install),Bash(npm run:*),Bash(npx tsc:*),Bash(npx eslint:*),Bash(npx vitest:*),Edit,Write"
