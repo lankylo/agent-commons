@@ -6,6 +6,7 @@
  */
 import { PLATFORM_ONLY_FIELDS, type ContributionEnvelopeInput } from "./envelope";
 import { checkReviewInterval } from "./review-intervals";
+import { checkContributionRefs } from "./references";
 import { Checker, SHA256_HEX, isObj } from "./check";
 
 export const KNOWLEDGE_LIMITS = {
@@ -141,14 +142,7 @@ export function validateKnowledgeContribution(input: unknown): KnowledgeValidati
   }
 
   if (input.related !== undefined) {
-    c.list(input.related, "related", KNOWLEDGE_LIMITS.maxRelated).forEach((r, i) => {
-      const o = c.obj(r, `related[${i}]`, ["id", "version"]);
-      if (!o) return;
-      c.str(o.id, `related[${i}].id`, KNOWLEDGE_LIMITS.shortStringMaxChars);
-      if (typeof o.version !== "number" || !Number.isInteger(o.version) || o.version < 1) {
-        c.err(`related[${i}].version`, "must be a positive integer");
-      }
-    });
+    checkContributionRefs(c, input.related, "related", "knowledge", KNOWLEDGE_LIMITS.maxRelated);
   }
 
   // Payload: at least one structured or summary body.

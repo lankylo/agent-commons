@@ -17,7 +17,7 @@ const valid = (): Rec => ({
   evidence: [{ kind: "documentation", uri: "https://example.com/docs/items" }],
   licensing: { license: "CC-BY-4.0", dataPermission: "redistribution-allowed" },
   reviewIntervalDays: 30,
-  related: [{ id: "know-1", version: 1 }],
+  related: [{ family: "knowledge", id: "know-0001", version: 1 }],
   objective: "Fetch an item by id and verify its status",
   inputs: [
     { name: "itemId", type: "string", required: true },

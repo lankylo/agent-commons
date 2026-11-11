@@ -14,8 +14,13 @@ export function isContributionFamily(value: unknown): value is ContributionFamil
 
 export type ContributionId = string & { readonly __brand: "ContributionId" };
 
-/** Cross-family reference: by ID and immutable version, never embedded. */
+/**
+ * Cross-family reference: by ID and exact immutable version, never embedded.
+ * `family` is the family of the REFERENCED contribution and must be the
+ * opposite of the referencing contribution's family (see `references.ts`).
+ */
 export interface ContributionRef {
+  readonly family: ContributionFamily;
   readonly id: ContributionId;
   readonly version: number;
 }
