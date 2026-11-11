@@ -1,0 +1,13 @@
+{
+  // Local-only config for `npm run r2:verify:local` and tests. Not used by `wrangler deploy`.
+  // The bucket_name is a placeholder: no real R2 bucket exists and none may be created from this file.
+  "name": "agent-commons-r2-local",
+  "main": "src/index.ts",
+  "compatibility_date": "2025-01-01",
+  "r2_buckets": [
+    {
+      "binding": "CONTENT_BUCKET",
+      "bucket_name": "agent-commons-content-local",
+    },
+  ],
+}

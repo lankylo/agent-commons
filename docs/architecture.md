@@ -208,3 +208,15 @@ The concrete D1 schema (tables, keys, constraints, indexes, deletion rules, JSON
 - Ranking formulas and freshness decay → Phases 3 and 5.
 - Pricing, licence-per-purchase, credit caps and expiry → Phase 6, after legal review.
 - Code formatting tooling → separate Phase 1 task.
+
+## 9. R2 content objects (local convention)
+
+Implemented in `src/storage/content-objects.ts`; verified by `test/storage/content-objects.test.ts` (`npm run r2:verify:local`) against Miniflare's local R2 emulation with throwaway persistence.
+
+- **Binding:** `CONTENT_BUCKET` (typed `ContentStorageEnv`) is declared only in `wrangler.r2-local.jsonc`, whose `bucket_name` is a placeholder. The deployable `wrangler.jsonc` still has no bindings; no remote or production bucket exists or may be created from this file.
+- **Key:** `contributions/sha256/<64 lowercase hex>`. The hash is SHA-256 of the stored bytes (the canonical JSON), so it equals the contribution `contentHash`. Any other key shape is rejected.
+- **Metadata:** HTTP `Content-Type: application/json`; custom metadata `family` (`knowledge`|`execution`), `contentType` (registry content type valid for that family) and `sha256`. All are required on read.
+- **Immutability:** objects are write-once. Writes use a conditional put (`etagDoesNotMatch: "*"`); this module never overwrites or deletes. Deletion workflows are out of scope.
+- **Duplicates:** identical bytes resolve to the same key; the second write is a no-op reported as `created: false`. Same bytes with different family/content-type metadata is a conflict error, not an overwrite.
+- **Retrieval:** by hash only. Reads re-hash the bytes against the key and check metadata; mismatch (tampering/corruption) throws. Missing hash returns `null`.
+- **Trust:** content is untrusted; callers validate by family before writing. D1 (not R2) remains the source of metadata and version pointers; no D1 writes exist yet.
