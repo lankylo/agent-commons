@@ -35,7 +35,7 @@ An external agent can independently:
 - Retrieve and use that solution.
 - Contribute new reusable knowledge or a declarative execution recipe.
 - Report whether the solution worked.
-- Make an authorized payment, or redeem contributor credits, for premium content.
+- Make an authorized payment for premium content, funded by operator-provided funds or the agent's own available earnings.
 
 **Commercial objective:** Demonstrate that purchasing Commons content reduces the total cost or effort required for an agent to complete its task.
 
@@ -105,7 +105,7 @@ The full conversation history should not be necessary to resume development.
 - Modular architecture with independently testable components.
 - External services accessed through clearly defined adapters.
 - Prefer established standards rather than proprietary protocols.
-- All financial and credit operations must be authorized, idempotent where supported, and auditable.
+- All financial operations (earnings, purchases, reservations, refunds, reversals, withdrawals) must be authorized, idempotent where supported, auditable and recorded in an append-only ledger carrying both `agentId` and `operatorId`.
 - Treat all agent-contributed content as untrusted.
 - Use a shared contribution envelope with a mandatory `family` discriminator (`knowledge` or `execution`) and family-specific schemas, validation and retrieval. Never require execution steps for knowledge records.
 - Every agent identity is bound to an accountable operator account.
@@ -157,12 +157,13 @@ Detailed implementation decisions belong in `docs/architecture.md`.
 - Quality status, freshness decay and feedback collection.
 - Feedback restricted to agents that actually retrieved the content.
 
-**Payments and contributor credits**
+**Payments, agent earnings and payouts**
 - x402 integration for purchases.
 - Payment verification.
-- Contributor credit ledger (non-cash, redeemable for Commons content only).
-- Idempotent payment and credit processing.
-- Operator spending limits enforced at purchase time.
+- Append-only agent earnings ledger recording `agentId` and `operatorId` on every entry; balances derived from the ledger.
+- Idempotent payment, earning and payout processing.
+- Operator controls (spending limits, categories, reserve, autonomy cap, withdrawal approval, suspension) enforced server-side.
+- Operator-approved, legally verified payout destinations, via a provider-managed wallet or marketplace subaccount (provider not yet selected).
 
 ### Excluded From Initial MVP
 
@@ -173,7 +174,7 @@ Detailed implementation decisions belong in `docs/architecture.md`.
 - Complex reputation algorithms.
 - Full creator dashboards.
 - Native cryptocurrency wallets or exchanges.
-- Cash payouts, withdrawals or transfers of contributor credits.
+- Native crypto custody by Agent Commons, direct holding of customer funds by Agent Commons, and unrestricted agent-to-agent transfers that bypass operator controls.
 - Proprietary LLM development.
 - Automatic execution of untrusted contributed code.
 
@@ -220,7 +221,7 @@ Broader domains are opened only after the initial domain shows real reuse. Owner
 - **Knowledge:** check source traceability, permissions, freshness and deterministic corroboration, and whether the content remains usable. Consumer feedback reports usefulness, accuracy or staleness with supporting evidence.
 - **Deterministic corroboration for Knowledge** means, without LLM calls: (1) each source reference still resolves; (2) the current source matches the hash or snapshot recorded at contribution time, or the change is flagged for review; and (3) independent operators have contributed or confirmed the same structured fact. Consumer accuracy reports are weaker evidence than these checks.
 - **Execution:** check step-schema compliance, declared targets, permission boundaries, compatibility and actual outcomes. Consumer feedback records execution success/failure and evidence.
-- A retrieved contribution may receive feedback, but mere retrieval or self-reported success must not automatically establish verified reliability or trigger unexamined credit rewards.
+- A retrieved contribution may receive feedback, but mere retrieval or self-reported success must not automatically establish verified reliability or trigger unexamined earnings.
 
 ---
 
@@ -449,43 +450,73 @@ Every phase must have measurable acceptance criteria.
 
 ---
 
-### Phase 6 — Payments and Contributor Credits
+### Phase 6 — Payments, Agent Earnings and Payouts
 
 **Status:** Not Started
 
-- [ ] Complete legal and regulatory review (see Section 9) before enabling live payments.
-- [ ] Select supported x402 payment integration.
+- [ ] Complete legal and regulatory review (see Section 9), including KYC/AML, sanctions, tax reporting and cross-border review, before enabling live payments or payouts.
+- [ ] Select the payment/wallet provider (provider-managed wallet or marketplace subaccount preferred; not yet selected) and supported x402 integration.
 - [ ] Define content pricing and the licence granted per purchase (single use or per version), with separate pricing for Knowledge and Execution.
 - [ ] Implement payment authorization and verification.
-- [ ] Enforce operator spending limits.
+- [ ] Implement the append-only agent ledger (every entry records `agentId` and `operatorId`) and balances derived from it.
+- [ ] Define contribution revenue-share rules, fees, caps, settlement finality and fraud/refund holds.
+- [ ] Implement operator controls: per-transaction and period spending limits, permitted categories, minimum reserve, maximum autonomous balance, withdrawal approval and emergency suspension.
+- [ ] Enforce operator controls server-side at purchase time.
 - [ ] Implement paid retrieval for both Knowledge and Execution contributions.
 - [ ] Implement payment receipt records.
-- [ ] Implement the contributor credit ledger.
-- [ ] Define credit earning rules, caps and expiry.
-- [ ] Implement credit redemption against purchases.
-- [ ] Implement duplicate-payment and duplicate-credit protections.
+- [ ] Implement operator-approved, legally verified payout destinations and withdrawals.
+- [ ] Implement refund and reversal handling, including clawback of pending and available earnings.
+- [ ] Implement duplicate-payment, duplicate-earning and duplicate-payout protections.
+- [ ] Implement reconciliation of the ledger to provider records.
 - [ ] Test successful, failed and interrupted payments.
-- [ ] Test credit earning, redemption and abuse scenarios.
+- [ ] Test earning, spending, withdrawal, refund, reversal and abuse scenarios (self-purchase, duplicates, inter-agent transfer bypass).
 
-**Credit model:**
-- Credits accrue to the operator account, not the agent.
-- Credits are earned only on purchase by a consumer from a different operator — never on submission or retrieval alone — and only when the family-specific success test is met:
+**Economic attribution vs legal accountability:**
+- Earnings, task payments, tips and contribution-sale revenue are attributed to the individual **agent**.
+- Every agent financial account is bound to exactly one accountable **operator** (the existing immutable `operatorId`).
+- The operator is the legal, KYC and tax party and controls external payout destinations and spending policies.
+- Agents may autonomously earn and spend **available** funds within operator-defined limits. Agents never own legal accountability and cannot choose payout destinations.
+- Agent Commons prefers provider-managed wallets or marketplace subaccounts and should not directly hold customer funds. Funds custody, if unavoidable, requires specific legal review.
+
+**Ledger model (design; no tables or code yet):**
+- Append-only: entries are never updated or deleted; corrections are new entries. Every entry records `agentId`, `operatorId`, amount, currency, entry type, state, idempotency key, related purchase/contribution/version references and timestamp.
+- Entry types: `operator_funding` (initial operator funding), `task_earning`, `tip`, `contribution_revenue_share`, `purchase`, `fee`, `reservation`, `reservation_release`, `refund`, `reversal`, `withdrawal`.
+- Balance states, derived from entries and never stored as authoritative: `pending` (earned, not yet final), `available` (final and spendable/withdrawable subject to policy), `reserved` (held for an in-flight purchase or withdrawal), `spent`, `withdrawn`, `reversed`.
+- Idempotency keys and unique constraints on (source purchase, beneficiary agent, entry type) prevent duplicate earnings and duplicate payouts.
+
+**Contribution-sale earnings:**
+- An eligible purchase by an **independent operator** (different from the contributor's operator) creates a concrete monetary earning for the contribution's beneficiary agent, in `pending` state.
+- Earning requires the family-specific success test:
   - **Execution:** the consumer reports a successful execution with evidence.
   - **Knowledge:** the contribution is corroborated by deterministic checks (source still resolves and matches its recorded hash or snapshot) or confirmed by at least two independent operators other than the contributor's. A single consumer's accuracy report is not sufficient.
-- Credits earned per contribution per consuming operator are capped.
-- Credits are redeemable only for Commons content; they are non-transferable and cannot be withdrawn or converted to money.
-- Credits expire after a defined period to bound outstanding liability.
+- Settlement finality and fraud/refund controls (hold period, provider confirmation, dispute window) move the earning from `pending` to `available`. A refund or chargeback before or after finality produces a `reversal` entry.
+- Earnings per contribution per consuming operator are capped. Self-purchases (same agent, or any agent of the same operator) never earn.
+- The agent may spend available earnings within policy. External withdrawal or payout goes only to an operator-approved, legally verified destination.
+
+**Operator controls:**
+- Per-transaction and per-period (e.g. daily/monthly) spending limits.
+- Permitted spending categories.
+- Minimum reserve that cannot be spent autonomously.
+- Maximum autonomous balance; amounts above it require operator action (sweep or approval).
+- Withdrawal approval (operator approves each payout or a standing policy) to a verified destination only.
+- Emergency suspension that immediately blocks spending and withdrawals for one agent or all agents of the operator.
+- Transfers between agents are permitted only if both agents' operator policies allow them (and are ledgered with both agents and operators); otherwise refused. No transfer may bypass operator limits, KYC state or sanctions screening.
+
+**Compliance gates (all required before live money):** KYC/AML on operators, sanctions screening of operators and payout destinations, tax reporting data and obligations, provider reconciliation, and cross-border legal review (FSCA, SARB exchange control and other jurisdictions). Provider selection is deferred.
 
 **Acceptance criteria:**
 - Agents can discover prices before purchase.
-- Authorized payments or sufficient credits unlock purchased content.
-- Purchases beyond an operator's spending limit are refused.
+- Authorized payments, or sufficient available funds within operator policy, unlock purchased content.
+- Purchases beyond a per-transaction or period limit, outside permitted categories, or breaching the minimum reserve are refused; suspended agents cannot spend or withdraw.
 - Failed payments do not unlock content.
-- Retries do not produce unintended duplicate charges or duplicate credits.
-- Credits are recorded correctly and reconcile to confirmed, successful purchases.
-- Credits cannot be earned through feedback from the contributor's own operator.
-- Knowledge credits are issued only when the Knowledge success test is met.
-- The complete purchase and redemption process can be tested end to end.
+- Retries do not produce unintended duplicate charges, duplicate earnings or duplicate payouts.
+- Every ledger entry records both `agentId` and `operatorId`; balances derived from the ledger reconcile to confirmed purchases and provider records.
+- An eligible independent-operator purchase creates a pending earning for the beneficiary agent; it becomes available only after finality and fraud/refund controls; refunds reverse it.
+- Self-purchases and same-operator feedback or purchases cannot create earnings.
+- Knowledge earnings are issued only when the Knowledge success test is met.
+- Withdrawals go only to operator-approved, legally verified destinations and require approval per policy.
+- Agent-to-agent transfers cannot bypass operator controls.
+- The complete purchase, earning and payout process can be tested end to end using test-network or provider-sandbox settlement only.
 
 **Milestone:** Commercially testable Agent Commons MVP.
 
@@ -500,9 +531,9 @@ Every phase must have measurable acceptance criteria.
 | 3. Search and Retrieval | Not Started | 0% |
 | 4. Agent Interfaces | Not Started | 0% |
 | 5. Validation and Trust | Not Started | 0% |
-| 6. Payments and Contributor Credits | Not Started | 0% |
+| 6. Payments, Agent Earnings and Payouts | Not Started | 0% |
 
-**Current phase:** Phase 2 in progress (identity model, shared envelope, Knowledge schema, Execution schema and review-interval maxima and cross-family references defined and D1 table design documented and implemented as the initial local migration; content hashing implemented; local R2 content-object convention implemented; local D1 identity repository (operators and agents) and local D1 agent credentials (issuance, verification, revocation; no HTTP auth) implemented; initial contribution creation (version 1) implemented locally; immutable contribution versioning (version n+1) implemented locally; PRs #6–#18 merged; contribution versioning PR awaiting review)  
+**Current phase:** Phase 2 in progress (identity model, shared envelope, Knowledge schema, Execution schema and review-interval maxima and cross-family references defined and D1 table design documented and implemented as the initial local migration; content hashing implemented; local R2 content-object convention implemented; local D1 identity repository (operators and agents) and local D1 agent credentials (issuance, verification, revocation; no HTTP auth) implemented; initial contribution creation (version 1) implemented locally; immutable contribution versioning (version n+1) implemented locally; PRs #6–#19 merged; Phase 6 re-scoped from non-cash credits to agent earnings, balances and payouts by an architecture-only change, no financial code or tables)  
 **Current blocker:** None  
 **Latest verified milestone:** Wrangler 4.159.0 and Workers types v5 verified by clean install, formatting, typecheck, lint, tests, Worker dry-run and local `/health` HTTP 200 smoke test
 
@@ -526,15 +557,19 @@ Completion percentages must reflect verified acceptance criteria, not merely gen
 | 2026-11-10 | Proceed without a dedicated pre-build value test | Accepted risk; value is validated during Phases 3–6 |
 | 2026-11-10 | Use a declarative recipe schema with a fixed step vocabulary | Makes malicious-content scanning tractable and limits prompt-injection risk |
 | 2026-11-10 | Make freshness and reliability first-class metadata | Recipes degrade as target sites change; current evidence is the main trust signal |
-| 2026-11-10 | Bind every agent to an accountable operator | Required for provenance, rate limiting, feedback independence and credits |
+| 2026-11-10 | Bind every agent to an accountable operator | Required for provenance, rate limiting, feedback independence, spending policy and legal accountability for earnings |
 | 2026-11-10 | Keep contribution allow-listed until Phase 5 is accepted | Trust controls must exist before open submissions |
-| 2026-11-10 | Replace cash royalties with non-cash contributor credits | Agents cannot hold money; avoids payout, KYC, tax and money-transmission obligations in the MVP |
-| 2026-11-10 | Earn credits on verified successful use, not on submission | Discourages low-quality and spam contributions |
+| 2026-11-10 | Replace cash royalties with non-cash contributor credits | **Superseded 2026-11-11** by the agent earnings and payout model below |
+| 2026-11-11 | Replace non-cash contributor credits with a concrete agent-earnings, balance and payout model: economic attribution to the agent, legal accountability (legal/KYC/tax party, payout destinations, spending policy) with the one bound operator | Agents earn and spend autonomously within operator limits while a legally accountable party always exists; non-withdrawable credits would not test real incentives |
+| 2026-11-11 | Financial ledger is append-only, records `agentId` and `operatorId` on every entry, and derives `pending`/`available`/`reserved`/`spent`/`withdrawn`/`reversed` balances; credit redemption, credit expiry and the credit ledger are removed | Auditable, reconcilable, and prevents duplicate earnings and payouts |
+| 2026-11-11 | Prefer provider-managed wallets or marketplace subaccounts over Agent Commons holding customer funds; provider not selected; KYC/AML, sanctions, tax, reconciliation and cross-border gates recorded | Reduces custody and money-transmission exposure; selection requires legal review |
+| 2026-11-11 | Existing Phase 2 identity, provenance, contribution, versioning, hashing, D1 and R2 work remains compatible with the new model (`operatorId` is already immutable per agent and `ActorRef` carries both ids); no migrations, financial tables or payout code added | Avoids rework; financial schema is deferred to Phase 6 |
+| 2026-11-10 | Earn on verified successful use, not on submission | Discourages low-quality and spam contributions |
 | 2026-11-10 | Launch with one focused, owner-seeded content domain | Addresses supply-side cold start |
 | 2026-11-10 | Support Knowledge and Execution as separate contribution schema families | Preserves agent-created knowledge beyond action recipes while retaining constrained, safer execution workflows |
 | 2026-11-10 | Confine Knowledge prose to a capped, untrusted `explanation` field | Disguised instructions in prose cannot be reliably detected deterministically; structural limits reduce the injection surface |
 | 2026-11-10 | Define Knowledge corroboration as deterministic checks | Keeps validation consistent with deterministic-first processing; consumer accuracy reports are weak evidence |
-| 2026-11-10 | Apply a stricter credit test to Knowledge than Execution | Knowledge has no objective success check comparable to execution outcomes |
+| 2026-11-10 | Apply a stricter earning test to Knowledge than Execution | Knowledge has no objective success check comparable to execution outcomes |
 | 2026-11-10 | Set platform maximum review intervals per content type | Prevents contributors avoiding freshness decay with long intervals |
 | 2026-11-10 | Envelope splits contributor-supplied from platform-only fields; agents carry a required immutable operatorId | Contributors cannot write reliability fields; enforces one operator per agent |
 | 2026-11-10 | Link related contributions across families by reference, not mixing | Keeps each schema family clean while supporting recipes that depend on knowledge |
@@ -579,13 +614,20 @@ Record future decisions here when they materially change the architecture, scope
 | Copyright, site terms and data permissions | Establish contribution rules; require a licensing declaration |
 | Personal data in snapshots (POPIA) | Scan for personal data; reject or quarantine affected contributions |
 | Payment regulation | Obtain legal review of x402/stablecoin settlement (FSCA crypto-asset rules, SARB exchange control) before live payments |
-| Credit scheme classification | Confirm credits are not treated as e-money or a stored-value instrument; keep them non-cash and non-transferable |
-| Outstanding credit liability | Set caps and expiry; monitor total unredeemed credits |
+| Custody, e-money and money-transmission classification | Prefer provider-managed wallets or marketplace subaccounts; obtain legal advice on whether agent balances are stored value before holding any funds |
+| KYC/AML and sanctions | Require verified operators and screened payout destinations before any withdrawal |
+| Tax reporting | Determine operator reporting obligations and data capture before live payouts |
+| Cross-border payouts | Legal review (FSCA, SARB exchange control and destination jurisdictions) before enabling international payouts |
+| Outstanding earnings liability | Cap balances (maximum autonomous balance), hold pending earnings, and reconcile ledger to provider records |
+| Fraud, self-dealing and wash trading | Block self-purchases and same-operator earnings; settlement finality and refund holds; reverse earnings on refund or chargeback |
+| Inter-agent transfers bypassing operator controls | Allow only operator-policy-permitted, ledgered transfers; refuse others |
+| Duplicate earnings or payouts | Idempotency keys and uniqueness on (source purchase, beneficiary agent, entry type) |
+| Compromised agent credential spending funds | Operator limits, minimum reserve, emergency suspension and withdrawal approval |
 | Evaluate-before-buy paradox | Test whether discovery previews support purchase decisions without leaking content |
 | Content retention after purchase | Define the licence granted per purchase; price accordingly |
-| Operator spending authority | Provide spending limits; test whether operators will authorize autonomous purchases |
+| Operator spending authority | Provide spending limits and policies; test whether operators will authorize autonomous agent spending |
 | Payment economics | Test whether purchase fees exceed processing costs |
-| Contributor incentives | Validate that credits motivate contribution before considering cash payouts |
+| Contributor incentives | Validate that real earnings motivate quality contribution without encouraging spam or collusion |
 | Search quality for agent queries | Test with realistic agent queries; Vectorize as a fallback |
 | Token savings | Measure actual total task-completion costs |
 | Platform competition | Demonstrate verified, fresh content as an advantage over free registries and repositories |
@@ -597,9 +639,9 @@ Do not expand scope solely to solve speculative future problems.
 
 ## 10. Next Development Actions
 
-**Immediate task: Review the Phase 2 contribution versioning PR** (PRs #6–#18 are merged.)
+**Immediate task: Review the agent-earnings architecture PR** (PRs #6–#19 are merged; Phase 2 contribution versioning is merged.)
 
-1. Review `src/registry/creation.ts` (`createContributionVersion`), `test/registry/versioning.test.ts` and `tsconfig.registry-test.json`; merging remains a human decision.
+1. Review the documentation-only changes to `project.md`, `docs/architecture.md` and the identity comment; merging remains a human decision.
 2. Then choose the next separately approved Phase 2 task (e.g. seeding the registry or registry/identity test consolidation; HTTP authentication middleware and spending limits are separate tasks).
 3. Do not create real D1 databases, apply remote migrations, create remote R2 buckets, or implement HTTP authentication or APIs until their tasks are approved.
 
@@ -622,11 +664,11 @@ After every completed development task:
 Maintain the following short record at the end of this document.
 
 **Current phase:** Phase 2 in progress  
-**Last completed task:** Implemented immutable contribution versioning (`ContributionRegistry.createContributionVersion(agentId, contributionId, expectedPreviousVersion, input)`: requires an active agent of the contribution's original operator, who must remain allow-listed; id and family permanent; next contiguous version with previous-version link, author agent, hash and timestamps; rejects stale/concurrent updates (`version_conflict`, race inside the batch caught via the primary key), missing contributions, family changes, other-operator authors, inactive actors, invalid content, unresolved references and duplicate hashes; validation, hashing, R2-then-one-D1-batch shared with creation; earlier versions and R2 objects untouched; 18 Miniflare D1+R2 tests; format, typecheck, lint, 202 passing tests, clean local migration apply, 8 R2 tests, Worker dry-run shows no bindings; no HTTP auth/APIs, search, deletion, remote resources or payments). Previously: Implemented initial contribution creation, version 1 only (`src/registry/creation.ts`: `ContributionRegistry.createContribution(agentId, input)` resolves the active agent and operator, requires the allow-list flag, rejects platform-only fields, runs the family validator, resolves references to exact stored versions, builds canonical JSON and SHA-256, rejects duplicate hashes before any write, assigns UUID id, version 1, contributor and timestamps; writes R2 first, then one atomic D1 batch for contribution, version, platform state, evidence, references and family rows; typed result with structured error codes; `wrangler.registry-local.jsonc` and `tsconfig.registry-test.json` local-only; 13 Miniflare D1+R2 tests covering Knowledge/Execution rows, immutable R2 content, duplicates, references, validation, platform fields, inactive actors, allow-list, D1-batch rollback with harmless R2 orphan and R2 failure writing no D1 rows; format, typecheck, lint, 184 passing tests, clean local migration apply, Worker dry-run shows no bindings; no versioning, HTTP auth/APIs, remote resources, search or payments). Previously: Implemented local D1 agent credentials (`migrations/0002_agent_credentials.sql`: `agent_credentials` table with public 24-hex id, SHA-256 digest only, label, optional expiry, one-way `revoked_at`, immutability/no-delete triggers, multiple per agent; `src/identity/credentials.ts`: `CredentialService` issues `ac1_<id>_<secret>` tokens from 32 random bytes via Web Crypto, returned once, digest domain-separated; verification rejects malformed/unknown/wrong-secret (indistinguishable)/expired/revoked tokens and revoked agents or suspended operators using constant-time digest comparison; idempotent revocation; parameterized queries; 13 Miniflare D1 tests incl. database plaintext absence and rotation overlap; migration test updated for the new table; format, typecheck, lint, 171 passing tests, clean local migration apply plus no-op re-apply, Worker dry-run shows no bindings; no HTTP auth, rate limiting, spending limits, contribution creation or remote resources). Previously: Implemented local D1 identity persistence and lifecycle (`src/identity/repository.ts`: `IdentityRepository` creates/gets operators, registers an agent under exactly one active operator, resolves agent to operator, updates only `displayName`, suspends operators and revokes agents one-way; platform assigns ids, timestamps, status and allow-list flag (preserved, default off); parameterized queries; structured `IdentityError` codes for invalid input, immutable fields, duplicates, not found, invalid transitions, suspended operators and revoked agents; 15 Miniflare D1 tests on the real migration; `tsconfig.identity-test.json`; format, typecheck, lint, 158 passing tests, clean local migration apply plus no-op re-apply, Worker dry-run shows no bindings; no credentials, auth, contribution creation, APIs or remote resources). Previously: Configured local-only R2 storage (`src/storage/content-objects.ts`: typed `CONTENT_BUCKET` binding in placeholder `wrangler.r2-local.jsonc`; key `contributions/sha256/<hash>`; required `application/json` type plus `family`/`contentType`/`sha256` metadata; conditional write-once puts, duplicate no-op, conflict rejection, hash re-verification on read; 8 new Miniflare tests via `npm run r2:verify:local`; `tsconfig.r2-test.json`; format, typecheck, lint, 143 passing tests, Worker dry-run shows no bindings; no remote bucket, D1 writes, creation/versioning, credentials or APIs). Previously: implemented deterministic content hashing (`src/registry/content-hash.ts`: `canonicalJson` with recursively sorted keys, no whitespace, array order preserved; `hashContribution` validates by family then hashes, `hashValidatedContribution` strips platform fields, family included; SHA-256 via Web Crypto, lowercase 64-char hex; 14 new tests; format, typecheck, lint, 135 passing tests, Worker dry-run; no persistence, D1/R2, API or versioning). Previously: implemented the initial D1 migration (`migrations/0001_initial_schema.sql`: all 12 designed tables, keys, FKs, uniqueness, indexes, RESTRICT deletion and immutability triggers; `wrangler.d1-local.jsonc` local-only placeholder binding and `npm run db:migrate:local`; `@types/node` dev dependency and `tsconfig.d1-test.json` for the Node SQLite test; 24 new tests covering one operator per agent, duplicate hashes, immutable versions, exact-version references, family isolation and platform state; format, typecheck, lint, 121 passing tests, clean local migration apply plus no-op re-apply, Worker dry-run; CI step proposed, not added). Previously: designed the D1 tables for identity and the content registry (`docs/d1-schema.md`: operators, agents, contributions, immutable versions, evidence, cross-family references, platform state, Knowledge and Execution extensions; keys, FKs, uniqueness, indexes, deletion/immutability rules, JSON vs normalized, TS mapping; design only, no migrations; DDL and constraints exercised in a throwaway in-memory SQLite check; format, typecheck, lint, tests, Worker dry-run). Previously: defined and implemented cross-family contribution references by ID and exact version (`src/registry/references.ts`: opposite-family `{family, id, version}` shape, ID/version format, duplicate and unknown-field rejection, storage-independent async-capable resolver; integrated into both validators; 32 new tests; format, typecheck, lint, 97 passing tests, Worker dry-run). Previously: defined and enforced platform maximum review intervals per content type (`src/registry/review-intervals.ts`, used by both validators; the unused `reviewIntervalMaxDaysCeiling` limits were removed; 29 new tests; format, typecheck, lint, 65 passing tests, Worker dry-run). Previously: defined and implemented the Execution contribution schema, fixed step vocabulary and deterministic validator (`src/registry/execution.ts`, shared primitives extracted to `src/registry/check.ts`; 18 new unit tests; format, typecheck, lint, 36 passing tests, Worker dry-run). Previously: defined and implemented the Knowledge contribution schema and deterministic validator (`src/registry/knowledge.ts`, 11 new unit tests; format, typecheck, lint, 18 passing tests, Worker dry-run). Previously: designed operator/agent identity model and shared contribution envelope with `family` discriminator (types plus 5 unit tests; format, typecheck, lint, 7 passing tests, Worker dry-run). Previously: upgraded to Wrangler 4.159.0 and Workers types v5; verified by clean install, formatting, typecheck, lint, 2 passing tests, Worker dry-run, local `/health` HTTP 200 smoke test and zero production dependency audit findings  
-**Current task:** None in progress  
+**Last completed task:** Replaced the non-cash contributor-credit model with the agent earnings, balance and payout architecture (documentation and identity comment only; verified by format, typecheck, lint and 202 passing tests; no migrations, tables, x402 or payout code). Previously: Implemented immutable contribution versioning (`ContributionRegistry.createContributionVersion(agentId, contributionId, expectedPreviousVersion, input)`: requires an active agent of the contribution's original operator, who must remain allow-listed; id and family permanent; next contiguous version with previous-version link, author agent, hash and timestamps; rejects stale/concurrent updates (`version_conflict`, race inside the batch caught via the primary key), missing contributions, family changes, other-operator authors, inactive actors, invalid content, unresolved references and duplicate hashes; validation, hashing, R2-then-one-D1-batch shared with creation; earlier versions and R2 objects untouched; 18 Miniflare D1+R2 tests; format, typecheck, lint, 202 passing tests, clean local migration apply, 8 R2 tests, Worker dry-run shows no bindings; no HTTP auth/APIs, search, deletion, remote resources or payments). Previously: Implemented initial contribution creation, version 1 only (`src/registry/creation.ts`: `ContributionRegistry.createContribution(agentId, input)` resolves the active agent and operator, requires the allow-list flag, rejects platform-only fields, runs the family validator, resolves references to exact stored versions, builds canonical JSON and SHA-256, rejects duplicate hashes before any write, assigns UUID id, version 1, contributor and timestamps; writes R2 first, then one atomic D1 batch for contribution, version, platform state, evidence, references and family rows; typed result with structured error codes; `wrangler.registry-local.jsonc` and `tsconfig.registry-test.json` local-only; 13 Miniflare D1+R2 tests covering Knowledge/Execution rows, immutable R2 content, duplicates, references, validation, platform fields, inactive actors, allow-list, D1-batch rollback with harmless R2 orphan and R2 failure writing no D1 rows; format, typecheck, lint, 184 passing tests, clean local migration apply, Worker dry-run shows no bindings; no versioning, HTTP auth/APIs, remote resources, search or payments). Previously: Implemented local D1 agent credentials (`migrations/0002_agent_credentials.sql`: `agent_credentials` table with public 24-hex id, SHA-256 digest only, label, optional expiry, one-way `revoked_at`, immutability/no-delete triggers, multiple per agent; `src/identity/credentials.ts`: `CredentialService` issues `ac1_<id>_<secret>` tokens from 32 random bytes via Web Crypto, returned once, digest domain-separated; verification rejects malformed/unknown/wrong-secret (indistinguishable)/expired/revoked tokens and revoked agents or suspended operators using constant-time digest comparison; idempotent revocation; parameterized queries; 13 Miniflare D1 tests incl. database plaintext absence and rotation overlap; migration test updated for the new table; format, typecheck, lint, 171 passing tests, clean local migration apply plus no-op re-apply, Worker dry-run shows no bindings; no HTTP auth, rate limiting, spending limits, contribution creation or remote resources). Previously: Implemented local D1 identity persistence and lifecycle (`src/identity/repository.ts`: `IdentityRepository` creates/gets operators, registers an agent under exactly one active operator, resolves agent to operator, updates only `displayName`, suspends operators and revokes agents one-way; platform assigns ids, timestamps, status and allow-list flag (preserved, default off); parameterized queries; structured `IdentityError` codes for invalid input, immutable fields, duplicates, not found, invalid transitions, suspended operators and revoked agents; 15 Miniflare D1 tests on the real migration; `tsconfig.identity-test.json`; format, typecheck, lint, 158 passing tests, clean local migration apply plus no-op re-apply, Worker dry-run shows no bindings; no credentials, auth, contribution creation, APIs or remote resources). Previously: Configured local-only R2 storage (`src/storage/content-objects.ts`: typed `CONTENT_BUCKET` binding in placeholder `wrangler.r2-local.jsonc`; key `contributions/sha256/<hash>`; required `application/json` type plus `family`/`contentType`/`sha256` metadata; conditional write-once puts, duplicate no-op, conflict rejection, hash re-verification on read; 8 new Miniflare tests via `npm run r2:verify:local`; `tsconfig.r2-test.json`; format, typecheck, lint, 143 passing tests, Worker dry-run shows no bindings; no remote bucket, D1 writes, creation/versioning, credentials or APIs). Previously: implemented deterministic content hashing (`src/registry/content-hash.ts`: `canonicalJson` with recursively sorted keys, no whitespace, array order preserved; `hashContribution` validates by family then hashes, `hashValidatedContribution` strips platform fields, family included; SHA-256 via Web Crypto, lowercase 64-char hex; 14 new tests; format, typecheck, lint, 135 passing tests, Worker dry-run; no persistence, D1/R2, API or versioning). Previously: implemented the initial D1 migration (`migrations/0001_initial_schema.sql`: all 12 designed tables, keys, FKs, uniqueness, indexes, RESTRICT deletion and immutability triggers; `wrangler.d1-local.jsonc` local-only placeholder binding and `npm run db:migrate:local`; `@types/node` dev dependency and `tsconfig.d1-test.json` for the Node SQLite test; 24 new tests covering one operator per agent, duplicate hashes, immutable versions, exact-version references, family isolation and platform state; format, typecheck, lint, 121 passing tests, clean local migration apply plus no-op re-apply, Worker dry-run; CI step proposed, not added). Previously: designed the D1 tables for identity and the content registry (`docs/d1-schema.md`: operators, agents, contributions, immutable versions, evidence, cross-family references, platform state, Knowledge and Execution extensions; keys, FKs, uniqueness, indexes, deletion/immutability rules, JSON vs normalized, TS mapping; design only, no migrations; DDL and constraints exercised in a throwaway in-memory SQLite check; format, typecheck, lint, tests, Worker dry-run). Previously: defined and implemented cross-family contribution references by ID and exact version (`src/registry/references.ts`: opposite-family `{family, id, version}` shape, ID/version format, duplicate and unknown-field rejection, storage-independent async-capable resolver; integrated into both validators; 32 new tests; format, typecheck, lint, 97 passing tests, Worker dry-run). Previously: defined and enforced platform maximum review intervals per content type (`src/registry/review-intervals.ts`, used by both validators; the unused `reviewIntervalMaxDaysCeiling` limits were removed; 29 new tests; format, typecheck, lint, 65 passing tests, Worker dry-run). Previously: defined and implemented the Execution contribution schema, fixed step vocabulary and deterministic validator (`src/registry/execution.ts`, shared primitives extracted to `src/registry/check.ts`; 18 new unit tests; format, typecheck, lint, 36 passing tests, Worker dry-run). Previously: defined and implemented the Knowledge contribution schema and deterministic validator (`src/registry/knowledge.ts`, 11 new unit tests; format, typecheck, lint, 18 passing tests, Worker dry-run). Previously: designed operator/agent identity model and shared contribution envelope with `family` discriminator (types plus 5 unit tests; format, typecheck, lint, 7 passing tests, Worker dry-run). Previously: upgraded to Wrangler 4.159.0 and Workers types v5; verified by clean install, formatting, typecheck, lint, 2 passing tests, Worker dry-run, local `/health` HTTP 200 smoke test and zero production dependency audit findings  
+**Current task:** None in progress (agent-earnings architecture task complete, awaiting PR review)  
 **Known blockers:** None; 16 development-only audit findings remain for separate Vitest and ESLint upgrade reviews  
-**Next task:** After PR review, a separately approved Phase 2 task (e.g. registry seeding; HTTP authentication is separate)  
-**Last verified commit:** `daaf08d` (main after PR #18) plus the changes in the contribution versioning branch
+**Next task:** After PR review, resume Phase 2 with a separately approved task (e.g. registry seeding; HTTP authentication is separate)  
+**Last verified commit:** `eee6697` (main after PR #19) plus the agent-earnings architecture branch
 
 Update these fields at the end of each working session.
 
@@ -640,13 +682,15 @@ Agent Commons MVP is complete when:
 - [ ] Every agent is bound to an accountable operator.
 - [ ] Agents can submit both structured Knowledge contributions and declarative Execution contributions.
 - [ ] Both families are validated under their own schemas and stored with shared provenance and versioning.
-- [ ] Knowledge corroboration and family-specific credit tests operate deterministically.
+- [ ] Knowledge corroboration and family-specific earning tests operate deterministically.
 - [ ] Agents can search available content, with freshness and reliability visible.
 - [ ] Agents can retrieve sourced Knowledge records and compatible Execution recipes.
 - [ ] Agents can report Knowledge accuracy/usefulness and Execution outcomes with evidence.
-- [ ] Agents can purchase premium content using an authorized payment method or contributor credits.
-- [ ] Contributor credits are accurately recorded and reconcile to successful purchases.
-- [ ] Legal and regulatory review of payments and credits is complete.
+- [ ] Agents can purchase premium content using an authorized payment method or available earnings within operator-defined limits.
+- [ ] Every agent financial account is bound to one accountable operator and every ledger entry records `agentId` and `operatorId`.
+- [ ] Agent earnings from independent-operator purchases are recorded, finalized, and reconcile to successful purchases and provider records.
+- [ ] Withdrawals go only to operator-approved, legally verified destinations.
+- [ ] Legal and regulatory review of payments, earnings and payouts (KYC/AML, sanctions, tax, cross-border) is complete.
 - [ ] Core functions have automated tests.
 - [ ] End-to-end agent interactions have been demonstrated.
 - [ ] Token consumption and operating costs are measurable.

@@ -2,7 +2,7 @@
 
 **Status: Design implemented as a migration.** `migrations/0001_initial_schema.sql` applies this DDL plus the §6 triggers (verified by `test/d1/migration.test.ts` and `npm run db:migrate:local`, local only). No real D1 database or production binding exists (`wrangler.d1-local.jsonc` is a local-only placeholder) and no code reads or writes these tables. If the design and migration differ, the migration is authoritative; change it only through a new numbered migration. `project.md` remains the source of truth for scope; this document records the table design that maps the TypeScript models (`src/identity/types.ts`, `src/registry/envelope.ts`, `knowledge.ts`, `execution.ts`, `review-intervals.ts`, `references.ts`) to D1 (SQLite).
 
-Out of scope here: credentials/API keys, search (FTS5), feedback, purchases, credits, payment tables, verification-event logs and takedown handling (see §9).
+Out of scope here: credentials/API keys, search (FTS5), feedback, purchases, the agent earnings ledger, payment tables, verification-event logs and takedown handling (see §9).
 
 ---
 
