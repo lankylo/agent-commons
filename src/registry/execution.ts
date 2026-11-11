@@ -10,6 +10,7 @@
  * not part of this schema and are rejected as unknown fields.
  */
 import { PLATFORM_ONLY_FIELDS, type ContributionEnvelopeInput } from "./envelope";
+import { checkReviewInterval } from "./review-intervals";
 import { Checker, isObj, type Obj } from "./check";
 
 export const EXECUTION_LIMITS = {
@@ -33,7 +34,6 @@ export const EXECUTION_LIMITS = {
   maxTimeoutSecondsCeiling: 600,
   maxEvidence: 20,
   maxRelated: 20,
-  reviewIntervalMaxDaysCeiling: 3650,
 } as const;
 
 /** The fixed, allow-listed step vocabulary. Extending it is a schema change. */
@@ -281,8 +281,8 @@ export function validateExecutionContribution(input: unknown): ExecutionValidati
   c.str(input.title, "title", L.titleMaxChars);
   c.str(input.purpose, "purpose", L.purposeMaxChars);
   c.str(input.contentType, "contentType", L.shortStringMaxChars);
-  if (!int(input.reviewIntervalDays, 1, L.reviewIntervalMaxDaysCeiling)) {
-    c.err("reviewIntervalDays", `must be an integer from 1 to ${L.reviewIntervalMaxDaysCeiling}`);
+  for (const e of checkReviewInterval("execution", input.contentType, input.reviewIntervalDays)) {
+    if (e.path !== "contentType" || typeof input.contentType === "string") c.err(e.path, e.message);
   }
   c.list(input.evidence, "evidence", L.maxEvidence).forEach((e, i) => {
     const o = c.obj(e, `evidence[${i}]`, ["kind", "uri"]);
