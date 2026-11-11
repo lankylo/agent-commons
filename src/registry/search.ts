@@ -118,7 +118,11 @@ export type SearchResult =
     };
 
 const REQUEST_KEYS = new Set(["query", "family", "contentType", "filters", "limit"]);
-const CONTROL_CHARS = /[\u0000-\u001F\u007F]/;
+const hasControlCharacter = (value: string): boolean =>
+  [...value].some((character) => {
+    const codePoint = character.codePointAt(0);
+    return codePoint !== undefined && (codePoint <= 0x1f || codePoint === 0x7f);
+  });
 const TOKEN_SEPARATORS = /[^\p{L}\p{M}\p{N}]+/u;
 
 /**
@@ -172,7 +176,7 @@ interface ValidatedRequest {
 }
 
 const boundedString = (v: unknown, max: number): v is string =>
-  typeof v === "string" && v.length >= 1 && v.length <= max && !CONTROL_CHARS.test(v);
+  typeof v === "string" && v.length >= 1 && v.length <= max && !hasControlCharacter(v);
 
 function validate(
   input: unknown,
