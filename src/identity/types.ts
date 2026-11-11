@@ -2,8 +2,10 @@
  * Identity model (design-only; no storage, credentials or APIs).
  *
  * An Operator is the accountable human or organization. An Agent identity is
- * bound to exactly one Operator for its whole life. Agents never hold money or
- * accountability; spending limits and (later) credits belong to the Operator.
+ * bound to exactly one Operator for its whole life. Agents are the economic
+ * beneficiaries of their earnings (later phases) but never hold legal
+ * accountability; the Operator is the legal/KYC/tax party and owns payout
+ * destinations and spending policy.
  */
 
 export type OperatorId = string & { readonly __brand: "OperatorId" };

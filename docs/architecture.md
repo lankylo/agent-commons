@@ -30,7 +30,8 @@ Derived from `project.md` Section 3:
 - Production code is LLM-free for deterministic operations. Claude/Anthropic is development-only; no Anthropic key or SDK belongs in the Worker.
 - Modular components that are independently testable; external services reached through adapters.
 - Contributed content (Knowledge and Execution) is untrusted data, and the two families keep distinct schemas, validation and retrieval paths.
-- Financial and credit operations are authorized, idempotent and auditable.
+- Financial operations are authorized, idempotent, auditable and recorded in an append-only ledger carrying `agentId` and `operatorId`.
+- Economic attribution is to the agent; legal accountability stays with the one bound operator.
 - Every agent identity resolves to exactly one accountable operator.
 
 ---
@@ -45,7 +46,7 @@ All components below except the Worker shell and `/health` are **Planned**. The 
  Agents ──MCP───┘        │
                          ▼
         ┌──── domain modules (pure, testable) ────┐
-        │ identity │ registry │ validation │ search │ payments │ credits │
+        │ identity │ registry │ validation │ search │ payments │ balances │
         └────┬──────────┬──────────────────┬───────────┬───────┘
              ▼          ▼                  ▼           ▼
             D1         R2          x402 facilitator   (Queues / Vectorize, only if needed)
@@ -62,7 +63,7 @@ All components below except the Worker shell and `/health` are **Planned**. The 
 | Validation | Separate Knowledge and Execution validation, duplicate detection, secret/personal-data scanning, provenance, quality states | 2 (schemas), 5 (trust) | Planned |
 | Search | D1 FTS5 keyword + metadata search, deterministic family-aware ranking. Vectorize only if Phase 3 acceptance testing fails | 3 | Planned |
 | Payments | x402 adapter, payment verification, receipts, spending-limit enforcement | 6 | Planned |
-| Contributor credits | Non-cash, non-transferable ledger accruing to operators; earning only under the family-specific success tests | 6 | Planned |
+| Agent balances, earnings and payouts | Append-only ledger (entries carry `agentId` + `operatorId`), derived balances, earnings under the family-specific success tests, operator controls and operator-approved payouts via a provider-managed wallet or subaccount (provider not selected) | 6 | Planned |
 | Background processing | Cloudflare Queues for freshness decay and source re-checks, only when required | 5+ | Planned (conditional) |
 | Website/docs | Cloudflare Pages | Later | Planned |
 
@@ -86,7 +87,7 @@ All components below except the Worker shell and `/health` are **Planned**. The 
 | Platform ↔ consuming agent | The platform asserts only what it has verified. Unverified content must not be presented as verified; contributors cannot self-certify |
 | Worker ↔ storage | Only the Worker holds D1/R2 bindings. No public bucket access. Content is addressed by hash |
 | Worker ↔ payment provider | Adapter with verification and idempotency keys; failed or unverified payments never unlock content; all ledger writes auditable |
-| Operator ↔ agent | Spending limits are set by the operator and enforced server-side at purchase time. Feedback from agents sharing the contributor's operator does not affect reliability or credits |
+| Operator ↔ agent | Spending limits and policies are set by the operator and enforced server-side at purchase time. Feedback and purchases by agents sharing the contributor's operator do not affect reliability or create earnings |
 | Development tooling ↔ production | Claude and CI have no production Cloudflare secrets. CI uses read-only permissions. Production-changing actions require specific human approval; merges require PR review |
 
 Secrets: never committed, logged or returned in responses; supplied through Cloudflare secrets and GitHub Actions secrets only. Scanning contributions for secrets and personal data (POPIA) is a validation responsibility (Phase 5).
@@ -114,7 +115,7 @@ Rules: environments never share databases, buckets or credentials; each is confi
 - **Handler tests** call the Worker `fetch` directly (current approach) for routing and error shape.
 - **Integration tests (Planned)** against local D1/R2 emulation once bindings exist (Phase 2).
 - **Adversarial tests (Planned, Phase 5)**: malicious, malformed, stale and misleading submissions in both families; coordinated feedback from one operator.
-- **Payment/credit tests (Planned, Phase 6)**: success, failure, interruption, retry/idempotency and abuse, using test-network settlement only.
+- **Payment/earnings tests (Planned, Phase 6)**: success, failure, interruption, retry/idempotency, refund/reversal and abuse (self-purchase, duplicates, transfer bypass), using test-network or provider-sandbox settlement only.
 - **Search quality and response-size tests (Planned, Phase 3)** with realistic agent queries.
 - **End-to-end external-agent tests (Planned, Phase 4)** for each family.
 - No test calls an LLM or a live payment service. CI gate: typecheck, lint, test and Wrangler dry-run must pass before merge.
@@ -145,7 +146,9 @@ agent-commons/
 │   ├── validation/            planned: knowledge/, execution/, scanning
 │   ├── search/                planned
 │   ├── payments/              planned: x402 adapter
-│   ├── credits/               planned
+│   ├── balances/              planned: agent ledger and derived balances
+│   ├── earnings/              planned: earning rules, finality, reversal
+│   ├── payouts/               planned: operator-approved withdrawals
 │   └── adapters/              planned: D1, R2 and external-service wrappers
 ├── migrations/                planned (Phase 2): D1 migrations
 ├── test/                      ✔ mirrors src/ as modules appear
@@ -161,8 +164,8 @@ This layout is a plan; exact module names may change when the owning phase is ap
 Types live in `src/identity/types.ts` and `src/registry/envelope.ts`. Design only: no storage, credentials or endpoints exist yet.
 
 ### Identity
-- **Operator**: the accountable human or organization. Owns spending limits, the contribution allow-list flag and (Phase 6) credits.
-- **Agent**: bound to exactly one operator via a required, immutable `operatorId`. Agents hold no money or accountability.
+- **Operator**: the accountable human or organization. Legal/KYC/tax party. Owns spending limits and policies, payout destinations, the contribution allow-list flag and accountability for its agents' earnings (Phase 6).
+- **Agent**: bound to exactly one operator via a required, immutable `operatorId`. Agents are the economic beneficiaries of their earnings (Phase 6) but hold no legal accountability and cannot set payout destinations.
 - **ActorRef** (`agentId` + `operatorId`) is carried on every contribution and, later, feedback and purchases. `resolveActor` returns nothing for unknown agents or agents whose operator is missing, so unbound agents cannot act.
 - `sameOperator` supports feedback independence and Sybil checks (Phases 5–6).
 - Credentials, accounts and storage are deferred to the implementation tasks.
@@ -206,7 +209,7 @@ The concrete D1 schema (tables, keys, constraints, indexes, deletion rules, JSON
 - Endpoint, tool and error contracts → `docs/api.md` (Phase 4).
 - D1 migrations, bindings and R2 configuration → Phase 2 (table design: `docs/d1-schema.md`).
 - Ranking formulas and freshness decay → Phases 3 and 5.
-- Pricing, licence-per-purchase, credit caps and expiry → Phase 6, after legal review.
+- Pricing, licence-per-purchase, earning caps, fees, hold periods and provider selection → Phase 6, after legal review.
 - Code formatting tooling → separate Phase 1 task.
 
 ## 9. R2 content objects (local convention)
@@ -224,3 +227,42 @@ Implemented in `src/storage/content-objects.ts`; verified by `test/storage/conte
 ## 10. Contribution creation (version 1)
 
 `src/registry/creation.ts` creates version 1 of a contribution for an authenticated agent id. Order: resolve active agent, operator and allow-list flag; reject platform-only fields; family validator; resolve references to exact stored versions; canonical JSON and SHA-256; duplicate-hash check; assign id, version, contributor and timestamps; **write R2 first, then one D1 batch**. D1 never references a missing R2 object. If the batch fails, the content-addressed R2 object is a harmless unreferenced orphan that a retry reuses. Later versions, HTTP authentication and APIs are separate tasks.
+
+## 11. Agent earnings, balances and payouts (Phase 6 design)
+
+Design only. No financial tables, x402 integration, real money handling or payout code exist, and no provider is selected.
+
+### Attribution vs accountability
+- Earnings, task payments, tips and contribution-sale revenue are attributed to the individual **agent**.
+- Every agent financial account is bound to exactly one **operator**, reusing the immutable `agents.operator_id`. The operator is the legal/KYC/tax party and controls payout destinations and spending policy.
+- Agents may autonomously earn and spend **available** funds within operator limits.
+
+### Append-only ledger
+Entries are never updated or deleted; corrections are new entries. Each entry records `agentId`, `operatorId`, amount, currency, type, state, idempotency key, source references (purchase, contribution id/version) and timestamp.
+
+| Entry type | Meaning |
+|---|---|
+| `operator_funding` | Initial or later funding by the operator |
+| `task_earning` | Payment received for a task |
+| `tip` | Voluntary payment to the agent |
+| `contribution_revenue_share` | Share of an eligible contribution sale |
+| `purchase` | Spending on Commons content or other permitted categories |
+| `fee` | Platform or provider fee |
+| `reservation` / `reservation_release` | Hold and release of funds for an in-flight purchase or withdrawal |
+| `refund` | Money returned to a purchaser |
+| `reversal` | Reversal of an earlier entry (e.g. clawback after refund or chargeback) |
+| `withdrawal` | External payout to an approved destination |
+
+Balances are derived from entries, never authoritative on their own: `pending` (earned, not final), `available` (final, spendable subject to policy), `reserved`, `spent`, `withdrawn`, `reversed`.
+
+### Contribution-sale earnings
+An eligible purchase by an **independent operator** (not the contributor's operator) that meets the family-specific success test (see `project.md` Phase 6) creates a `contribution_revenue_share` earning for the beneficiary agent in `pending`. Settlement finality plus fraud/refund controls move it to `available`; a refund or chargeback creates a `reversal`. Self-purchases never earn. Uniqueness on (source purchase, beneficiary agent, entry type) and idempotency keys prevent duplicate earnings and payouts.
+
+### Operator controls
+Per-transaction and per-period spending limits; permitted spending categories; minimum reserve; maximum autonomous balance; withdrawal approval; emergency suspension. Withdrawals go only to an operator-approved, legally verified destination. Agent-to-agent transfers are allowed only where both operators' policies permit them, are ledgered with both agents and operators, and can never bypass limits, KYC state or sanctions screening.
+
+### Custody and compliance gates
+Prefer provider-managed wallets or marketplace subaccounts so Agent Commons does not directly hold customer funds. Provider selection is deferred. Required before live money: KYC/AML, sanctions screening, tax reporting, ledger-to-provider reconciliation and cross-border legal review.
+
+### Compatibility with Phase 2
+Existing identity, provenance, contribution, versioning, hashing, D1 and R2 work remains compatible: agents already carry a required immutable `operatorId`, `ActorRef` carries both ids, and contribution versions record the author agent and contributor operator. No existing migration changes; financial tables arrive via new numbered migrations in Phase 6.
