@@ -1,3 +1,4 @@
+import { MAX_REVIEW_INTERVAL_DAYS } from "../../src/registry/review-intervals";
 import { describe, expect, it } from "vitest";
 import {
   EXECUTION_LIMITS,
@@ -370,5 +371,21 @@ describe("validateExecutionContribution: rejections", () => {
     expect(errorsFor((v) => ((v.inputs as Rec[])[0]!.type = "object"))[0]).toContain(
       "inputs[0].type",
     );
+  });
+});
+
+describe("execution review-interval maxima", () => {
+  const types = Object.entries(MAX_REVIEW_INTERVAL_DAYS.execution);
+  it.each(types)("%s: boundary and above-maximum", (t, max) => {
+    expect(errorsFor((v) => ((v.contentType = t), (v.reviewIntervalDays = max)))).toEqual([]);
+    expect(errorsFor((v) => ((v.contentType = t), (v.reviewIntervalDays = 1)))).toEqual([]);
+    expect(
+      errorsFor((v) => ((v.contentType = t), (v.reviewIntervalDays = max + 1))).join(),
+    ).toContain("exceeds the platform maximum");
+  });
+  it("rejects missing interval and unknown or knowledge-only content types", () => {
+    expect(errorsFor((v) => delete v.reviewIntervalDays).join()).toContain("is required");
+    expect(errorsFor((v) => (v.contentType = "api-reference")).join()).toContain("contentType");
+    expect(errorsFor((v) => delete v.contentType).join()).toContain("contentType");
   });
 });

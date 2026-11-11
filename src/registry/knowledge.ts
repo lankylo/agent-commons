@@ -5,6 +5,7 @@
  * domains) are intentionally not part of this schema and are rejected.
  */
 import { PLATFORM_ONLY_FIELDS, type ContributionEnvelopeInput } from "./envelope";
+import { checkReviewInterval } from "./review-intervals";
 import { Checker, SHA256_HEX, isObj } from "./check";
 
 export const KNOWLEDGE_LIMITS = {
@@ -21,7 +22,6 @@ export const KNOWLEDGE_LIMITS = {
   maxSources: 20,
   maxEvidence: 20,
   maxRelated: 20,
-  reviewIntervalMaxDaysCeiling: 3650,
 } as const;
 
 export const HASH_ALGORITHMS = ["sha256"] as const;
@@ -123,17 +123,8 @@ export function validateKnowledgeContribution(input: unknown): KnowledgeValidati
   c.str(input.purpose, "purpose", KNOWLEDGE_LIMITS.purposeMaxChars);
   c.str(input.contentType, "contentType", KNOWLEDGE_LIMITS.shortStringMaxChars);
 
-  const days = input.reviewIntervalDays;
-  if (
-    typeof days !== "number" ||
-    !Number.isInteger(days) ||
-    days < 1 ||
-    days > KNOWLEDGE_LIMITS.reviewIntervalMaxDaysCeiling
-  ) {
-    c.err(
-      "reviewIntervalDays",
-      `must be an integer from 1 to ${KNOWLEDGE_LIMITS.reviewIntervalMaxDaysCeiling}`,
-    );
+  for (const e of checkReviewInterval("knowledge", input.contentType, input.reviewIntervalDays)) {
+    if (e.path !== "contentType" || typeof input.contentType === "string") c.err(e.path, e.message);
   }
 
   c.list(input.evidence, "evidence", KNOWLEDGE_LIMITS.maxEvidence).forEach((e, i) => {

@@ -168,15 +168,30 @@ Types live in `src/identity/types.ts` and `src/registry/envelope.ts`. Design onl
 
 ### Envelope
 - `family` is a mandatory discriminator: `knowledge` | `execution`. Anything else is invalid. Each record has exactly one family; family payloads are validated by family-specific schemas (`knowledge.ts`, `execution.ts`) and never share required fields (Knowledge has no steps).
-- **Contributor-supplied** (`ContributionEnvelopeInput`): family, title, purpose, content type, evidence references, licensing/data-permission declaration, review interval (days; must not exceed the platform maximum per content type, enforced when maxima are defined), optional related `ContributionRef`s.
+- **Contributor-supplied** (`ContributionEnvelopeInput`): family, title, purpose, content type, evidence references, licensing/data-permission declaration, review interval (days; must not exceed the platform maximum per content type, see "Review-interval maxima" below), optional related `ContributionRef`s.
 - **Platform-only** (`PlatformEnvelopeFields`): id, immutable version, content hash, contributor `ActorRef`, created/last-verified timestamps, reliability score, consumer count. `findPlatformFieldViolations` identifies these keys in untrusted input so they can be rejected.
 - **Cross-family references** are `{id, version}` pairs, never embedded; resolution against stored versions is deferred to the registry task.
 - Contributed content remains untrusted data in both families.
+
+### Review-interval maxima
+
+Defined centrally in `src/registry/review-intervals.ts` (`MAX_REVIEW_INTERVAL_DAYS`), keyed by family then content type. Content types are an enumerated per-family allow-list; unknown or wrong-family content types are rejected (lookup uses own-property checks). Both family validators call `checkReviewInterval`, which rejects a missing interval, a non-integer or non-positive interval, and anything above the maximum. The maximum is inclusive. Contributors can choose a shorter interval only; the table is code, not input.
+
+| Family | Content type | Max days | Rationale |
+|---|---|---|---|
+| knowledge | `api-limits` | 30 | Rate limits, quotas and pricing change frequently |
+| knowledge | `api-reference` | 90 | Endpoints and parameters change with API releases |
+| knowledge | `error-reference` | 180 | Error semantics are more stable than endpoints |
+| knowledge | `concept-summary` | 365 | Conceptual material changes slowly |
+| execution | `api-recipe` | 60 | Recipes break when target APIs or sites change; shorter than matching Knowledge |
+| execution | `diagnostic-recipe` | 90 | Diagnostics depend less on exact request shapes |
+
+These are initial values for the API Integration and Troubleshooting domain; changing them is a code change reviewed by PR. Adding a content type requires an explicit entry. Intervals are not retroactive to stored data (none exists yet).
 
 ## 9. Open Items Deferred to Later Documents or Phases
 
 - Endpoint, tool and error contracts → `docs/api.md` (Phase 4).
 - Family schemas, step vocabulary (envelope and identity model: section 8), D1 tables and migrations → Phase 2.
-- Ranking formulas, freshness decay and review-interval maxima → Phases 2–3 and 5.
+- Ranking formulas and freshness decay → Phases 3 and 5.
 - Pricing, licence-per-purchase, credit caps and expiry → Phase 6, after legal review.
 - Code formatting tooling → separate Phase 1 task.
