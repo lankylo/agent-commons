@@ -318,7 +318,10 @@ describe("ranking", () => {
 
   it("breaks full ties by latest creation time, then contribution id, deterministically", async () => {
     const older = await create(knowledge("dunnock"), "2026-11-11T00:00:00.000Z");
-    const same = [await create(knowledge("dunnock")), await create(knowledge("dunnock"))];
+    const same = [
+      await create(knowledge("dunnock"), "2026-11-11T06:00:00.000Z"),
+      await create(knowledge("dunnock")),
+    ];
     const newer = await create(knowledge("dunnock"), "2026-11-12T00:00:00.000Z");
     const expected = [newer, ...[...same].sort(), older];
     expect(await found({ query: "dunnock" })).toEqual(expected);
