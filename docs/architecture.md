@@ -56,7 +56,7 @@ All components below except the Worker shell and `/health` are **Planned**. The 
 | Worker shell | Request entry, routing, `/health` | 1 | Implemented |
 | REST interface | Thin HTTP adapter over domain modules; machine-readable errors | 4 | Planned |
 | MCP interface | Thin MCP adapter over the same domain modules, so REST and MCP behave identically | 4 | Planned |
-| Identity | Operators, agents bound to one operator, per-agent credentials, operator spending limits | 2 | Planned |
+| Identity | Operators, agents bound to one operator, per-agent credentials, operator spending limits | 2 | Partial: operators, agents and local D1 credentials implemented; spending limits and HTTP authentication planned |
 | Registry (D1 metadata) | Contribution envelope, `family` discriminator, immutable versions, hashes, freshness/reliability fields, cross-family references | 2 | Planned |
 | Artifact storage (R2) | Full contribution payloads, addressed by content hash/version. D1 holds metadata and the pointer; R2 holds bodies | 2 | Planned |
 | Validation | Separate Knowledge and Execution validation, duplicate detection, secret/personal-data scanning, provenance, quality states | 2 (schemas), 5 (trust) | Planned |

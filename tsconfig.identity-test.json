@@ -1,6 +1,6 @@
 {
   "extends": "./tsconfig.json",
   "compilerOptions": { "types": ["@cloudflare/workers-types", "node"] },
-  "include": ["test/identity/repository.test.ts"],
+  "include": ["test/identity/repository.test.ts", "test/identity/credentials.test.ts"],
   "exclude": []
 }

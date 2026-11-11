@@ -404,7 +404,7 @@ WHERE NOT EXISTS (SELECT 1 FROM contribution_versions v WHERE v.contribution_id 
 ## 9. Deferred
 
 - **Real D1 databases, production binding, remote migrations and R2 configuration:** separate approved tasks. Staging and production databases stay separate (`docs/architecture.md` §5).
-- **Credentials:** a separate table keyed by `agent_id` that stores only hashed secrets; designed with the credentials task.
+- **Credentials:** implemented in `migrations/0002_agent_credentials.sql` (`agent_credentials`, keyed by public credential id, FK to `agent_id`, stores only a SHA-256 digest of the secret).
 - **Search:** FTS5 virtual tables and ranking (Phase 3) will be derived from these tables, excluding `explanation`.
 - **Verification events, feedback, retrieval records, ledgers and payments:** Phases 5–6; they will reference `contribution_versions` and `operators` by FK.
 - **Takedown / erasure:** needs a legal decision. A likely shape is a tombstone table that withdraws a version from serving while keeping its identity, hash and references intact, plus purging the R2 body; the immutability triggers would need a documented exception path.
