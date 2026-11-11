@@ -170,8 +170,17 @@ Types live in `src/identity/types.ts` and `src/registry/envelope.ts`. Design onl
 - `family` is a mandatory discriminator: `knowledge` | `execution`. Anything else is invalid. Each record has exactly one family; family payloads are validated by family-specific schemas (`knowledge.ts`, `execution.ts`) and never share required fields (Knowledge has no steps).
 - **Contributor-supplied** (`ContributionEnvelopeInput`): family, title, purpose, content type, evidence references, licensing/data-permission declaration, review interval (days; must not exceed the platform maximum per content type, see "Review-interval maxima" below), optional related `ContributionRef`s.
 - **Platform-only** (`PlatformEnvelopeFields`): id, immutable version, content hash, contributor `ActorRef`, created/last-verified timestamps, reliability score, consumer count. `findPlatformFieldViolations` identifies these keys in untrusted input so they can be rejected.
-- **Cross-family references** are `{id, version}` pairs, never embedded; resolution against stored versions is deferred to the registry task.
+- **Cross-family references**: see "Cross-family references" below.
 - Contributed content remains untrusted data in both families.
+
+### Cross-family references
+Implemented in `src/registry/references.ts`; used by both family validators for the optional `related` array.
+- Shape: `{family, id, version}`, exactly these keys; unknown fields (e.g. embedded content) are rejected. Payloads are never embedded, so the Knowledge and Execution schemas stay separate.
+- `family` is the family of the **referenced** contribution and must be the **opposite** of the referencing one. Same-family references are rejected.
+- `id` must match `^[a-z0-9][a-z0-9-]{7,63}$`. `version` must be a positive safe integer. There is no "latest" reference; the version is always explicit.
+- Exact duplicates (same family, ID and version) are rejected; different versions of one contribution may both be referenced.
+- Structural validation is part of each family validator and needs no storage. Existence is checked separately by `resolveContributionRefs(ownFamily, refs, resolver)`, which takes a `ContributionVersionResolver` (sync or async; `createVersionSetResolver` wraps a supplied set). A reference resolves only if that exact family/ID/version exists; any non-`true` answer or resolver error counts as unresolved. Structurally invalid references never reach the resolver.
+- **Immutability expectations:** a stored `(family, id, version)` is immutable and never deleted or rewritten, so a reference that resolved once resolves forever and always denotes the same content. Changes create a new version; existing references keep pointing at the old one. The registry task (D1) must implement the resolver against this guarantee and run resolution at submission time. References grant no access: retrieving a contribution does not purchase what it references.
 
 ### Review-interval maxima
 

@@ -144,8 +144,12 @@ describe("validateKnowledgeContribution", () => {
     expect(errorsFor((v) => (v.explanation = "a\u0000b"))).not.toEqual([]);
     expect(errorsFor((v) => (v.title = ""))).not.toEqual([]);
     expect(errorsFor((v) => (v.licensing = { license: "MIT" }))).not.toEqual([]);
-    expect(errorsFor((v) => (v.related = [{ id: "k1", version: 0 }]))).not.toEqual([]);
-    expect(errorsFor((v) => (v.related = [{ id: "k1", version: 2 }]))).toEqual([]);
+    expect(
+      errorsFor((v) => (v.related = [{ family: "execution", id: "exec-0001", version: 0 }])),
+    ).not.toEqual([]);
+    expect(
+      errorsFor((v) => (v.related = [{ family: "execution", id: "exec-0001", version: 2 }])),
+    ).toEqual([]);
   });
 });
 

@@ -11,6 +11,7 @@
  */
 import { PLATFORM_ONLY_FIELDS, type ContributionEnvelopeInput } from "./envelope";
 import { checkReviewInterval } from "./review-intervals";
+import { checkContributionRefs } from "./references";
 import { Checker, isObj, type Obj } from "./check";
 
 export const EXECUTION_LIMITS = {
@@ -296,14 +297,7 @@ export function validateExecutionContribution(input: unknown): ExecutionValidati
     c.str(lic.dataPermission, "licensing.dataPermission", L.shortStringMaxChars);
   }
   if (input.related !== undefined) {
-    c.list(input.related, "related", L.maxRelated).forEach((r, i) => {
-      const o = c.obj(r, `related[${i}]`, ["id", "version"]);
-      if (!o) return;
-      c.str(o.id, `related[${i}].id`, L.shortStringMaxChars);
-      if (!int(o.version, 1, Number.MAX_SAFE_INTEGER)) {
-        c.err(`related[${i}].version`, "must be a positive integer");
-      }
-    });
+    checkContributionRefs(c, input.related, "related", "execution", L.maxRelated);
   }
 
   c.str(input.objective, "objective", L.objectiveMaxChars);
