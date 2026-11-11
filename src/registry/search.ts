@@ -1,8 +1,9 @@
 /**
- * Internal D1 full-text search over the FTS5 index (Phase 3), with metadata filtering.
+ * Internal D1 full-text search over the FTS5 index (Phase 3), with metadata filtering and a
+ * deterministic baseline ranking.
  *
- * Internal only: no HTTP, MCP or Worker route, no ranking, no discovery response, no pagination,
- * caching or Vectorize. Reads D1 only; never touches R2. No LLM calls.
+ * Internal only: no HTTP, MCP or Worker route, no discovery response, no pagination, caching or
+ * Vectorize. Reads D1 only; never touches R2. No LLM calls.
  *
  * Query handling: the query is PLAIN TEXT, never FTS syntax. It is NFKC-normalized, lowercased and
  * split on every character that is not a Unicode letter, mark or number. Each token is emitted as an
@@ -14,10 +15,32 @@
  * matches but the latest does not, the contribution is not returned. Historical versions remain
  * available only through exact-version retrieval.
  *
- * Ordering (not ranking): latest-version creation time descending, then contribution ID ascending.
+ * Freshness (computed from persisted D1 metadata against an injected reference time):
+ *   anchor       = the later of `asOf` and platform `lastVerifiedAt` (when set)
+ *   reviewDueAt  = anchor + `reviewIntervalDays` × 24 h (millisecond precision, UTC)
+ *   freshness    = "current" when referenceTime < reviewDueAt, otherwise "stale"
+ *                  (exactly at reviewDueAt is stale). An unparseable anchor is "stale" with a
+ *                  null `reviewDueAt`.
  *
- * Results carry only typed metadata from `contribution_versions` and `version_platform_state`; no
- * indexed text, facts, summary, explanation, objective, steps, R2 content, identities or hashes.
+ * Ranking contract (baseline, deterministic, applied in SQL before LIMIT; lexicographic keys):
+ *   1. freshness: current before stale (stale is demoted below every current match);
+ *   2. evidence tier, descending, family-aware on a common 0–2 scale ({@link EVIDENCE_TIERS}):
+ *      Knowledge cross-source 2, source-checked 1, owner-tested 1, unverified 0;
+ *      Execution owner-tested 2, simulated 1, unverified 0;
+ *   3. platform `reliabilityScore` descending, null after any score (no Phase 5 data exists yet);
+ *   4. Knowledge corroboration descending: distinct source URIs beyond the first, capped at
+ *      {@link SEARCH_RANKING.maxCorroboration}; Execution is always 0 (it has no persisted
+ *      equivalent);
+ *   5. latest-version creation time descending;
+ *   6. contribution ID ascending (final, unique tie-break).
+ * Every key is defined for both families, so the order is total and transitive across mixed
+ * results. Ranking never reads indexed text, Knowledge `explanation`, steps or R2 content. Not
+ * implemented (Phase 5): recent Execution outcomes, consumer feedback, trust or source re-checks;
+ * `consumerCount` is not a ranking input.
+ *
+ * Results carry only typed metadata from `contribution_versions` and `version_platform_state` plus
+ * the derived freshness state and review-due time; no indexed text, facts, summary, explanation,
+ * objective, steps, R2 content, identities or hashes.
  */
 import type { ContributionFamily } from "./envelope";
 import { EXECUTION_VERIFICATION_METHODS, SIDE_EFFECTS } from "./execution";
@@ -36,6 +59,28 @@ export const SEARCH_LIMITS = {
   maxTargetDomainLength: 253,
   maxCapabilityLength: 64,
 } as const;
+
+/** Family-aware evidence tiers (ranking key 2), on a common 0–2 scale. */
+export const EVIDENCE_TIERS = {
+  knowledge: { "cross-source": 2, "source-checked": 1, "owner-tested": 1, unverified: 0 },
+  execution: { "owner-tested": 2, simulated: 1, unverified: 0 },
+} as const satisfies {
+  knowledge: Record<(typeof VERIFICATION_METHODS)[number], number>;
+  execution: Record<(typeof EXECUTION_VERIFICATION_METHODS)[number], number>;
+};
+
+export const SEARCH_RANKING = {
+  /** Cap on Knowledge corroboration (distinct source URIs beyond the first). */
+  maxCorroboration: 4,
+  msPerDay: 86_400_000,
+} as const;
+
+export type FreshnessState = "current" | "stale";
+
+export interface ContributionSearchOptions {
+  /** Reference time for freshness; injected for deterministic tests. Defaults to the clock. */
+  readonly now?: () => Date;
+}
 
 export const KNOWLEDGE_SEARCH_FILTERS = ["verificationMethod", "permittedUse"] as const;
 export const EXECUTION_SEARCH_FILTERS = [
@@ -87,6 +132,10 @@ export interface SearchResultItem {
   readonly lastVerifiedAt: string | null;
   readonly reliabilityScore: number | null;
   readonly consumerCount: number;
+  /** Derived at the reference time; see the freshness contract above. */
+  readonly freshness: FreshnessState;
+  /** ISO-8601 UTC; null only when the stored anchor cannot be parsed. */
+  readonly reviewDueAt: string | null;
 }
 
 export type SearchIssueCode =
@@ -321,16 +370,36 @@ interface ResultRow {
   last_verified_at: string | null;
   reliability_score: number | null;
   consumer_count: number;
+  review_due_ms: number | null;
+  stale: number;
 }
 
-export class ContributionSearch {
-  constructor(private readonly env: { readonly DB: D1Database }) {}
+const tierCase = (column: string, tiers: Readonly<Record<string, number>>): string =>
+  `CASE ${column} ${Object.entries(tiers)
+    .map(([method, tier]) => `WHEN '${method}' THEN ${tier}`)
+    .join(" ")} ELSE 0 END`;
 
-  /** Plain-text search over the latest version of each contribution; D1 only. */
+/** Exact integer epoch milliseconds of an ISO timestamp column (NULL if unparseable). */
+const epochMs = (expr: string): string =>
+  `CAST(ROUND((julianday(${expr}) - 2440587.5) * ${SEARCH_RANKING.msPerDay}) AS INTEGER)`;
+
+export class ContributionSearch {
+  private readonly now: () => Date;
+
+  constructor(
+    private readonly env: { readonly DB: D1Database },
+    options: ContributionSearchOptions = {},
+  ) {
+    this.now = options.now ?? (() => new Date());
+  }
+
+  /** Ranked plain-text search over the latest version of each contribution; D1 only. */
   async search(request: SearchRequest | unknown): Promise<SearchResult> {
     const v = validate(request);
     if (!v.ok) return { ok: false, error: { code: "invalid_search_request", issues: v.issues } };
     const { match, family, contentType, clauses, limit } = v.req;
+    const referenceMs = this.now().getTime();
+    if (!Number.isFinite(referenceMs)) throw new RangeError("invalid search reference time");
 
     const where: string[] = [];
     const params: (string | number)[] = [match];
@@ -346,14 +415,8 @@ export class ContributionSearch {
       where.push(c.sql);
       params.push(c.value);
     }
-    params.push(limit);
-
-    const familyJoin =
-      family === "knowledge"
-        ? "JOIN knowledge_versions k ON k.contribution_id = v.contribution_id AND k.version = v.version"
-        : family === "execution"
-          ? "JOIN execution_versions e ON e.contribution_id = v.contribution_id AND e.version = v.version"
-          : "";
+    // Bound in SQL order: match, filters, reference time, limit.
+    params.push(referenceMs, limit);
 
     const sql = `
       WITH matched AS (
@@ -365,17 +428,39 @@ export class ContributionSearch {
       latest AS (
         SELECT contribution_id, MAX(version) AS version
           FROM contribution_versions GROUP BY contribution_id
+      ),
+      candidates AS (
+        SELECT v.contribution_id AS id, v.version, v.family, v.content_type, v.title, v.purpose,
+               v.as_of, v.created_at, v.review_interval_days,
+               p.last_verified_at, p.reliability_score, p.consumer_count,
+               MAX(${epochMs("v.as_of")}, COALESCE(${epochMs("p.last_verified_at")}, ${epochMs("v.as_of")}))
+                 + v.review_interval_days * ${SEARCH_RANKING.msPerDay} AS review_due_ms,
+               CASE v.family
+                 WHEN 'knowledge' THEN ${tierCase("k.verification_method", EVIDENCE_TIERS.knowledge)}
+                 ELSE ${tierCase("e.verification_method", EVIDENCE_TIERS.execution)}
+               END AS evidence_tier,
+               CASE v.family WHEN 'knowledge' THEN
+                 MIN(MAX((SELECT COUNT(DISTINCT ks.uri) FROM knowledge_sources ks
+                           WHERE ks.contribution_id = v.contribution_id AND ks.version = v.version)
+                         - 1, 0), ${SEARCH_RANKING.maxCorroboration})
+               ELSE 0 END AS corroboration
+          FROM matched m
+          JOIN latest l ON l.contribution_id = m.contribution_id AND l.version = m.version
+          JOIN contribution_versions v
+            ON v.contribution_id = m.contribution_id AND v.version = m.version
+          JOIN version_platform_state p
+            ON p.contribution_id = v.contribution_id AND p.version = v.version
+          LEFT JOIN knowledge_versions k
+            ON k.contribution_id = v.contribution_id AND k.version = v.version
+          LEFT JOIN execution_versions e
+            ON e.contribution_id = v.contribution_id AND e.version = v.version
+         ${where.length > 0 ? `WHERE ${where.join(" AND ")}` : ""}
       )
-      SELECT v.contribution_id AS id, v.version, v.family, v.content_type, v.title, v.purpose,
-             v.as_of, v.created_at, v.review_interval_days,
-             p.last_verified_at, p.reliability_score, p.consumer_count
-        FROM matched m
-        JOIN latest l ON l.contribution_id = m.contribution_id AND l.version = m.version
-        JOIN contribution_versions v ON v.contribution_id = m.contribution_id AND v.version = m.version
-        JOIN version_platform_state p ON p.contribution_id = v.contribution_id AND p.version = v.version
-        ${familyJoin}
-       ${where.length > 0 ? `WHERE ${where.join(" AND ")}` : ""}
-       ORDER BY v.created_at DESC, v.contribution_id ASC
+      SELECT c.*, CASE WHEN c.review_due_ms IS NULL OR ? >= c.review_due_ms THEN 1 ELSE 0 END
+                    AS stale
+        FROM candidates c
+       ORDER BY stale ASC, c.evidence_tier DESC, c.reliability_score IS NULL ASC,
+                c.reliability_score DESC, c.corroboration DESC, c.created_at DESC, c.id ASC
        LIMIT ?`;
 
     const { results } = await this.env.DB.prepare(sql)
@@ -397,6 +482,8 @@ export class ContributionSearch {
           lastVerifiedAt: r.last_verified_at,
           reliabilityScore: r.reliability_score,
           consumerCount: r.consumer_count,
+          freshness: r.stale === 0 ? ("current" as const) : ("stale" as const),
+          reviewDueAt: r.review_due_ms === null ? null : new Date(r.review_due_ms).toISOString(),
         }),
       ),
     };
