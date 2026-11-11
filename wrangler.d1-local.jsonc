@@ -1,0 +1,15 @@
+{
+  // Local-only config for `npm run db:migrate:local` and tests. Not used by `wrangler deploy`.
+  // The database_id is a placeholder: no real D1 database exists and none may be created from this file.
+  "name": "agent-commons-d1-local",
+  "main": "src/index.ts",
+  "compatibility_date": "2025-01-01",
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "agent-commons-local",
+      "database_id": "00000000-0000-0000-0000-000000000000",
+      "migrations_dir": "migrations",
+    },
+  ],
+}

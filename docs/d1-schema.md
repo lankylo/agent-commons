@@ -1,6 +1,6 @@
 # Agent Commons — D1 Schema Design (Phase 2)
 
-**Status: Design only.** No migration files exist, no D1 database or binding is configured, and no code reads or writes these tables. The DDL below is the reviewed design; the migrations task will turn it into `migrations/*.sql`. `project.md` remains the source of truth for scope; this document records the table design that maps the TypeScript models (`src/identity/types.ts`, `src/registry/envelope.ts`, `knowledge.ts`, `execution.ts`, `review-intervals.ts`, `references.ts`) to D1 (SQLite).
+**Status: Design implemented as a migration.** `migrations/0001_initial_schema.sql` applies this DDL plus the §6 triggers (verified by `test/d1/migration.test.ts` and `npm run db:migrate:local`, local only). No real D1 database or production binding exists (`wrangler.d1-local.jsonc` is a local-only placeholder) and no code reads or writes these tables. If the design and migration differ, the migration is authoritative; change it only through a new numbered migration. `project.md` remains the source of truth for scope; this document records the table design that maps the TypeScript models (`src/identity/types.ts`, `src/registry/envelope.ts`, `knowledge.ts`, `execution.ts`, `review-intervals.ts`, `references.ts`) to D1 (SQLite).
 
 Out of scope here: credentials/API keys, search (FTS5), feedback, purchases, credits, payment tables, verification-event logs and takedown handling (see §9).
 
@@ -403,7 +403,7 @@ WHERE NOT EXISTS (SELECT 1 FROM contribution_versions v WHERE v.contribution_id 
 
 ## 9. Deferred
 
-- **Migrations, D1 binding and R2 configuration:** separate approved tasks. Staging and production databases stay separate (`docs/architecture.md` §5).
+- **Real D1 databases, production binding, remote migrations and R2 configuration:** separate approved tasks. Staging and production databases stay separate (`docs/architecture.md` §5).
 - **Credentials:** a separate table keyed by `agent_id` that stores only hashed secrets; designed with the credentials task.
 - **Search:** FTS5 virtual tables and ranking (Phase 3) will be derived from these tables, excluding `explanation`.
 - **Verification events, feedback, retrieval records, ledgers and payments:** Phases 5–6; they will reference `contribution_versions` and `operators` by FK.
