@@ -9,6 +9,7 @@
  * indexed search text, Knowledge summary/explanation/facts/sources, Execution objective/steps, R2
  * content, identities, hashes or other contribution content. Internal only: no public route.
  */
+import type { ContributionRef } from "./envelope";
 import type { FreshnessState, SearchResultItem } from "./search";
 
 export const DISCOVERY_RESPONSE_VERSION = "discovery-response/v1" as const;
@@ -25,6 +26,8 @@ interface DiscoveryItemBase {
   readonly lastVerifiedAt: string | null;
   readonly reliabilityScore: number | null;
   readonly consumerCount: number;
+  /** Exact `{ family, id, version }` references in stored order; empty when none. */
+  readonly related: readonly ContributionRef[];
 }
 
 export interface KnowledgeDiscoveryItem extends DiscoveryItemBase {
@@ -56,6 +59,7 @@ export const DISCOVERY_ITEM_KEYS = [
   "lastVerifiedAt",
   "reliabilityScore",
   "consumerCount",
+  "related",
 ] as const;
 
 function toDiscoveryItem(item: SearchResultItem): DiscoveryItem {
@@ -71,6 +75,9 @@ function toDiscoveryItem(item: SearchResultItem): DiscoveryItem {
     lastVerifiedAt: item.lastVerifiedAt,
     reliabilityScore: item.reliabilityScore,
     consumerCount: item.consumerCount,
+    related: Object.freeze(
+      item.related.map((r) => Object.freeze({ family: r.family, id: r.id, version: r.version })),
+    ),
   };
   switch (item.family) {
     case "knowledge":
