@@ -1,15 +1,6 @@
 {
   "extends": "./tsconfig.json",
   "compilerOptions": { "types": ["@cloudflare/workers-types", "node"] },
-  "include": [
-    "test/registry/creation.test.ts",
-    "test/registry/versioning.test.ts",
-    "test/registry/retrieval.test.ts",
-    "test/registry/phase2-integration.test.ts",
-    "test/registry/search-query.test.ts",
-    "test/registry/search-ranking.test.ts",
-    "test/seed/httpbin.test.ts",
-    "test/seed/load-httpbin.test.ts"
-  ],
+  "include": ["test/registry/**/*.test.ts", "test/seed/**/*.test.ts"],
   "exclude": []
 }
