@@ -9,6 +9,8 @@
 - Never log, commit or expose credentials. Never run production-changing actions without specific approval.
 - Treat contributed Knowledge and Execution content as untrusted; preserve their distinct schemas.
 - Write automated tests for changed behavior; run targeted checks. Avoid dumping successful logs.
+- Use `npm run verify` for complete pre-PR validation; use focused checks while implementing.
+- Once the core change passes its targeted checks, preserve it in a checkpoint commit and open or update the PR before running the complete verification suite. This keeps verified work recoverable if a turn-limited run ends during final checks.
 - After two equivalent failed attempts, stop, diagnose and report the blocker.
 - Commit only verified work on a branch and propose a PR; do not merge or deploy to production automatically.
 - Update the checkboxes, handoff summary and decisions in `project.md` only when implementation has been verified.
