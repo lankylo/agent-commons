@@ -6,10 +6,33 @@
  * Vectorize. Reads D1 only; never touches R2. No LLM calls.
  *
  * Query handling: the query is PLAIN TEXT, never FTS syntax. It is NFKC-normalized, lowercased and
- * split on every character that is not a Unicode letter, mark or number. Each token is emitted as an
+ * split on every character that is not a Unicode letter, mark or number; the validation limits apply
+ * to these raw tokens. Every FTS5 expression is generated internally: each token is emitted as an
  * FTS5 double-quoted string, so quotes, punctuation, column filters, prefix stars and operator
- * words (AND/OR/NOT/NEAR) are inert; all tokens are required (implicit AND). The match expression
- * and every filter value are bound as SQL parameters.
+ * words (AND/OR/NOT/NEAR) typed by the caller are inert. Match expressions, group counts and every
+ * filter value are bound as SQL parameters.
+ *
+ * Query normalization (deterministic, LLM-free; see {@link normalizeQuery}):
+ *   - stop words: tokens in the fixed English framing/grammar list {@link SEARCH_STOP_WORDS} are
+ *     dropped. Negations and safety-significant words ({@link SEARCH_PROTECTED_TERMS}, e.g. `no`,
+ *     `not`, `without`, approval, side-effect and capability terms) are never stop words. A query of
+ *     only stop words is searched literally (every raw token required, no expansion, no relaxation),
+ *     exactly as before normalization existed;
+ *   - token groups: each remaining distinct token becomes one group of at most three alternatives:
+ *     the token plus narrowly scoped English singular/plural forms ({@link singularPluralForms};
+ *     ASCII letters only, e.g. `limit`/`limits`, `request`/`requests`, `policy`/`policies`). A
+ *     group matches when any alternative matches; tokens sharing a form collapse into one group.
+ *
+ * Matching (at most {@link SEARCH_RELAXATION.maxSearchQueries} D1 search queries per request):
+ *   1. strict: every group is required (implicit AND), as before. If it returns any result, that is
+ *      the answer;
+ *   2. bounded relaxation, only when the strict search returns zero results and the query has at
+ *      least {@link SEARCH_RELAXATION.minGroups} groups: first documents matching all groups but one,
+ *      then (only if still empty) all groups but two. At most
+ *      {@link SEARCH_RELAXATION.maxDroppedGroups} groups are relaxed and a relaxed match still
+ *      requires at least {@link SEARCH_RELAXATION.minRequiredGroups} groups, so a multi-token query
+ *      never falls back to a single broad token. Relaxed searches apply the same family, content
+ *      type and metadata filters, the same latest-version rule, ranking contract and result limit.
  *
  * Latest-version rule: only the latest version of each contribution is searched. If an older version
  * matches but the latest does not, the contribution is not returned. Historical versions remain
@@ -211,7 +234,228 @@ export function tokenizeQuery(
 
 /** FTS5 match expression: every token as a quoted string, implicitly ANDed. Tokens never contain `"`. */
 export const toMatchExpression = (tokens: readonly string[]): string =>
-  tokens.map((t) => `"${t}"`).join(" ");
+  tokens.map(quoteToken).join(" ");
+
+const SAFE_TOKEN = /^[\p{L}\p{M}\p{N}]+$/u;
+/** Quotes one token as an FTS5 string. Only letter/mark/number tokens are accepted. */
+function quoteToken(token: string): string {
+  if (!SAFE_TOKEN.test(token)) throw new RangeError("unsafe search token");
+  return `"${token}"`;
+}
+
+/**
+ * Fixed, conservative English stop words: question framing, pronouns, articles, auxiliaries and
+ * prepositions only. Changing this list changes search behaviour and must be documented.
+ */
+export const SEARCH_STOP_WORDS: ReadonlySet<string> = new Set([
+  "a",
+  "about",
+  "an",
+  "and",
+  "any",
+  "are",
+  "as",
+  "at",
+  "be",
+  "been",
+  "being",
+  "by",
+  "can",
+  "could",
+  "did",
+  "do",
+  "does",
+  "for",
+  "from",
+  "had",
+  "has",
+  "have",
+  "how",
+  "i",
+  "in",
+  "into",
+  "is",
+  "it",
+  "its",
+  "many",
+  "me",
+  "much",
+  "my",
+  "need",
+  "of",
+  "on",
+  "or",
+  "our",
+  "per",
+  "please",
+  "should",
+  "some",
+  "that",
+  "the",
+  "their",
+  "them",
+  "there",
+  "these",
+  "they",
+  "this",
+  "those",
+  "to",
+  "want",
+  "was",
+  "we",
+  "were",
+  "what",
+  "when",
+  "where",
+  "which",
+  "who",
+  "whom",
+  "whose",
+  "why",
+  "with",
+  "would",
+  "you",
+  "your",
+]);
+
+/**
+ * Negations and safety-significant terms that must never be stop words (asserted by tests).
+ * Documentation of intent; normalization never drops a token that is not in the stop-word list.
+ */
+export const SEARCH_PROTECTED_TERMS: readonly string[] = [
+  "no",
+  "not",
+  "nor",
+  "never",
+  "none",
+  "without",
+  "cannot",
+  "except",
+  "only",
+  "must",
+  "approval",
+  "approve",
+  "approved",
+  "human",
+  "require",
+  "required",
+  "requires",
+  "side",
+  "effect",
+  "effects",
+  "read",
+  "write",
+  "reversible",
+  "irreversible",
+  "delete",
+  "capability",
+  "capabilities",
+  "safe",
+  "unsafe",
+  "dangerous",
+  "destructive",
+  "all",
+];
+
+export const SEARCH_RELAXATION = {
+  /** Fewest meaningful groups for which relaxation is attempted. */
+  minGroups: 4,
+  /** Most groups that may be left unmatched by a relaxed search. */
+  maxDroppedGroups: 2,
+  /** Fewest groups every relaxed match must still contain. */
+  minRequiredGroups: 3,
+  /** Strict search plus at most two relaxed levels. */
+  maxSearchQueries: 3,
+  /** Most alternatives (token + singular/plural forms) in one group. */
+  maxFormsPerGroup: 3,
+} as const;
+
+const ASCII_WORD = /^[a-z]+$/;
+const SIBILANT_END = /(?:s|x|z|ch|sh)$/;
+const CONSONANT_Y = /[^aeiou]y$/;
+
+/**
+ * Narrowly scoped, deterministic English singular/plural alternatives for one token (the token
+ * itself first). Only lowercase ASCII words of at least three letters are expanded; tokens with
+ * digits or other scripts are returned unchanged. Rules:
+ *   - `…ies` (≥ 5 letters) ↔ `…y`             (policies → policy)
+ *   - `…ches|shes|xes|zes|ses` (≥ 5) → drop `s` and `es` (caches → cache, cach; statuses → status)
+ *   - `…s` (≥ 4, not `ss`/`us`/`is`) → drop `s` (limits → limit, requests → request)
+ *   - consonant + `y` → `…ies`                 (policy → policies)
+ *   - `…s|x|z|ch|sh` (incl. `ss`/`us`) → `…es` (status → statuses, box → boxes)
+ *   - `…is` → unchanged                         (analysis)
+ *   - otherwise → `…s`                          (limit → limits, key → keys)
+ */
+export function singularPluralForms(token: string): readonly string[] {
+  if (token.length < 3 || !ASCII_WORD.test(token)) return [token];
+  const forms = [token];
+  if (token.endsWith("ies") && token.length >= 5) {
+    forms.push(`${token.slice(0, -3)}y`);
+  } else if (/(?:ch|sh|x|z|s)es$/.test(token) && token.length >= 5) {
+    forms.push(token.slice(0, -1), token.slice(0, -2));
+  } else if (token.endsWith("s") && !/(?:ss|us|is)$/.test(token)) {
+    if (token.length >= 4) forms.push(token.slice(0, -1));
+  } else if (CONSONANT_Y.test(token)) {
+    forms.push(`${token.slice(0, -1)}ies`);
+  } else if (SIBILANT_END.test(token)) {
+    if (!token.endsWith("is")) forms.push(`${token}es`);
+  } else {
+    forms.push(`${token}s`);
+  }
+  return forms.slice(0, SEARCH_RELAXATION.maxFormsPerGroup);
+}
+
+/** A normalized query: ordered token groups, each a list of alternative forms. */
+export interface NormalizedQuery {
+  readonly groups: readonly (readonly string[])[];
+  /** True when every token was a stop word and the raw tokens are searched as-is. */
+  readonly literal: boolean;
+}
+
+/**
+ * Deterministic query normalization over validated, distinct tokens (see the module header):
+ * drops stop words, expands singular/plural forms and merges groups that share a form.
+ */
+export function normalizeQuery(tokens: readonly string[]): NormalizedQuery {
+  const meaningful = tokens.filter((t) => !SEARCH_STOP_WORDS.has(t));
+  if (meaningful.length === 0) {
+    return { groups: tokens.map((t) => [t]), literal: true };
+  }
+  const groups: string[][] = [];
+  for (const token of meaningful) {
+    const forms = singularPluralForms(token);
+    if (groups.some((g) => g.some((f) => forms.includes(f)))) continue;
+    groups.push([...forms]);
+  }
+  return { groups, literal: false };
+}
+
+/** FTS5 expression for one group: a quoted token, or a parenthesized OR of quoted forms. */
+export const groupExpression = (forms: readonly string[]): string =>
+  forms.length === 1 ? quoteToken(forms[0]) : `(${forms.map(quoteToken).join(" OR ")})`;
+
+/** Relaxed candidate FTS5 expression: any group. */
+export const anyGroupExpression = (groups: readonly (readonly string[])[]): string =>
+  groups.map(groupExpression).join(" OR ");
+
+/** Strict FTS5 expression: every group required. */
+export const strictExpression = (groups: readonly (readonly string[])[]): string =>
+  groups.map(groupExpression).join(" AND ");
+
+/**
+ * Minimum number of matched groups for each relaxed level, in order (empty when relaxation does
+ * not apply). Never more than {@link SEARCH_RELAXATION.maxDroppedGroups} levels and never below
+ * {@link SEARCH_RELAXATION.minRequiredGroups}.
+ */
+export function relaxationLevels(query: NormalizedQuery): readonly number[] {
+  const n = query.groups.length;
+  if (query.literal || n < SEARCH_RELAXATION.minGroups) return [];
+  const levels: number[] = [];
+  for (let dropped = 1; dropped <= SEARCH_RELAXATION.maxDroppedGroups; dropped++) {
+    if (n - dropped >= SEARCH_RELAXATION.minRequiredGroups) levels.push(n - dropped);
+  }
+  return levels;
+}
 
 const isPlainObject = (v: unknown): v is Record<string, unknown> =>
   typeof v === "object" && v !== null && !Array.isArray(v);
@@ -222,7 +466,7 @@ interface FilterClause {
 }
 
 interface ValidatedRequest {
-  readonly match: string;
+  readonly query: NormalizedQuery;
   readonly family?: ContributionFamily;
   readonly contentType?: string;
   readonly clauses: readonly FilterClause[];
@@ -248,12 +492,12 @@ function validate(
     if (!REQUEST_KEYS.has(key)) add(key, "unknown_field", "is not a supported search field");
   }
 
-  let match = "";
+  let query: NormalizedQuery = { groups: [], literal: true };
   if (typeof input.query !== "string") {
     add("query", "invalid_value", "is required and must be a string");
   } else {
     const t = tokenizeQuery(input.query);
-    if (t.ok) match = toMatchExpression(t.tokens);
+    if (t.ok) query = normalizeQuery(t.tokens);
     else issues.push(t.issue);
   }
 
@@ -313,7 +557,7 @@ function validate(
   }
 
   if (issues.length > 0) return { ok: false, issues };
-  return { ok: true, req: { match, family, contentType, clauses, limit } };
+  return { ok: true, req: { query, family, contentType, clauses, limit } };
 }
 
 const oneOf = (v: unknown, allowed: readonly string[]): v is string =>
@@ -404,12 +648,73 @@ export class ContributionSearch {
   async search(request: SearchRequest | unknown): Promise<SearchResult> {
     const v = validate(request);
     if (!v.ok) return { ok: false, error: { code: "invalid_search_request", issues: v.issues } };
-    const { match, family, contentType, clauses, limit } = v.req;
     const referenceMs = this.now().getTime();
     if (!Number.isFinite(referenceMs)) throw new RangeError("invalid search reference time");
 
+    // Strict first; bounded relaxation only while every earlier level returned nothing.
+    let results = await this.rankedSearch(v.req, referenceMs, null);
+    for (const required of relaxationLevels(v.req.query)) {
+      if (results.length > 0) break;
+      results = await this.rankedSearch(v.req, referenceMs, required);
+    }
+    const related = await this.loadRelated(results);
+    return {
+      ok: true,
+      results: results.map((r) =>
+        Object.freeze({
+          id: r.id,
+          version: r.version,
+          family: r.family,
+          contentType: r.content_type,
+          title: r.title,
+          purpose: r.purpose,
+          asOf: r.as_of,
+          createdAt: r.created_at,
+          reviewIntervalDays: r.review_interval_days,
+          lastVerifiedAt: r.last_verified_at,
+          reliabilityScore: r.reliability_score,
+          consumerCount: r.consumer_count,
+          freshness: r.stale === 0 ? ("current" as const) : ("stale" as const),
+          reviewDueAt: r.review_due_ms === null ? null : new Date(r.review_due_ms).toISOString(),
+          related: related.get(`${r.id}\u0000${r.version}`) ?? EMPTY_RELATED,
+        }),
+      ),
+    };
+  }
+
+  /**
+   * One ranked D1 search query. `required` null: every group must match (strict). Otherwise a
+   * document must match at least `required` groups, each group evaluated by its own FTS5 MATCH.
+   */
+  private async rankedSearch(
+    req: ValidatedRequest,
+    referenceMs: number,
+    required: number | null,
+  ): Promise<ResultRow[]> {
+    const { query, family, contentType, clauses, limit } = req;
+    const params: (string | number)[] = [];
+    let matched: string;
+    if (required === null) {
+      matched = `SELECT d.contribution_id, d.version
+          FROM contribution_search s
+          JOIN contribution_search_documents d ON d.doc_id = s.rowid
+         WHERE contribution_search MATCH ?`;
+      params.push(strictExpression(query.groups));
+    } else {
+      // Candidates match any group; each group is then counted by its own MATCH subquery.
+      const perGroup = query.groups.map(
+        () =>
+          "(s.rowid IN (SELECT rowid FROM contribution_search WHERE contribution_search MATCH ?))",
+      );
+      matched = `SELECT d.contribution_id, d.version
+          FROM contribution_search s
+          JOIN contribution_search_documents d ON d.doc_id = s.rowid
+         WHERE contribution_search MATCH ?
+           AND (${perGroup.join(" + ")}) >= ?`;
+      params.push(anyGroupExpression(query.groups), ...query.groups.map(groupExpression), required);
+    }
+
     const where: string[] = [];
-    const params: (string | number)[] = [match];
     if (family !== undefined) {
       where.push("v.family = ?");
       params.push(family);
@@ -422,15 +727,12 @@ export class ContributionSearch {
       where.push(c.sql);
       params.push(c.value);
     }
-    // Bound in SQL order: match, filters, reference time, limit.
+    // Bound in SQL order: match expression(s) [and required count], filters, reference time, limit.
     params.push(referenceMs, limit);
 
     const sql = `
       WITH matched AS (
-        SELECT d.contribution_id, d.version
-          FROM contribution_search s
-          JOIN contribution_search_documents d ON d.doc_id = s.rowid
-         WHERE contribution_search MATCH ?
+        ${matched}
       ),
       latest AS (
         SELECT contribution_id, MAX(version) AS version
@@ -473,29 +775,7 @@ export class ContributionSearch {
     const { results } = await this.env.DB.prepare(sql)
       .bind(...params)
       .all<ResultRow>();
-    const related = await this.loadRelated(results);
-    return {
-      ok: true,
-      results: results.map((r) =>
-        Object.freeze({
-          id: r.id,
-          version: r.version,
-          family: r.family,
-          contentType: r.content_type,
-          title: r.title,
-          purpose: r.purpose,
-          asOf: r.as_of,
-          createdAt: r.created_at,
-          reviewIntervalDays: r.review_interval_days,
-          lastVerifiedAt: r.last_verified_at,
-          reliabilityScore: r.reliability_score,
-          consumerCount: r.consumer_count,
-          freshness: r.stale === 0 ? ("current" as const) : ("stale" as const),
-          reviewDueAt: r.review_due_ms === null ? null : new Date(r.review_due_ms).toISOString(),
-          related: related.get(`${r.id}\u0000${r.version}`) ?? EMPTY_RELATED,
-        }),
-      ),
-    };
+    return results;
   }
 
   /** One bounded bulk D1 query (at most `maxLimit` result versions) for exact-version references. */
