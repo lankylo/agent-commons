@@ -221,6 +221,7 @@ const RESULT_KEYS = [
   "id",
   "lastVerifiedAt",
   "purpose",
+  "related",
   "reliabilityScore",
   "reviewDueAt",
   "reviewIntervalDays",
@@ -248,6 +249,7 @@ describe("httpbin seeds", () => {
       consumerCount: 0,
       freshness: "current",
       reviewDueAt: expect.any(String),
+      related: [],
     });
     for (const r of results) expect(Object.keys(r).sort()).toEqual(RESULT_KEYS);
     expect(await found({ query: "diagnostic recipe", family: "execution" })).toEqual([

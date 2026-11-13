@@ -42,7 +42,7 @@
  * the derived freshness state and review-due time; no indexed text, facts, summary, explanation,
  * objective, steps, R2 content, identities or hashes.
  */
-import type { ContributionFamily } from "./envelope";
+import type { ContributionFamily, ContributionId, ContributionRef } from "./envelope";
 import { EXECUTION_VERIFICATION_METHODS, SIDE_EFFECTS } from "./execution";
 import { PERMITTED_USES, VERIFICATION_METHODS } from "./knowledge";
 
@@ -136,6 +136,11 @@ export interface SearchResultItem {
   readonly freshness: FreshnessState;
   /** ISO-8601 UTC; null only when the stored anchor cannot be parsed. */
   readonly reviewDueAt: string | null;
+  /**
+   * Exact cross-family references stored for exactly this result version, in stored order
+   * (`ordinal`). Deeply frozen; empty when none. Never "latest" and never referenced content.
+   */
+  readonly related: readonly ContributionRef[];
 }
 
 export type SearchIssueCode =
@@ -374,6 +379,8 @@ interface ResultRow {
   stale: number;
 }
 
+const EMPTY_RELATED: readonly ContributionRef[] = Object.freeze([]);
+
 const tierCase = (column: string, tiers: Readonly<Record<string, number>>): string =>
   `CASE ${column} ${Object.entries(tiers)
     .map(([method, tier]) => `WHEN '${method}' THEN ${tier}`)
@@ -466,6 +473,7 @@ export class ContributionSearch {
     const { results } = await this.env.DB.prepare(sql)
       .bind(...params)
       .all<ResultRow>();
+    const related = await this.loadRelated(results);
     return {
       ok: true,
       results: results.map((r) =>
@@ -484,8 +492,44 @@ export class ContributionSearch {
           consumerCount: r.consumer_count,
           freshness: r.stale === 0 ? ("current" as const) : ("stale" as const),
           reviewDueAt: r.review_due_ms === null ? null : new Date(r.review_due_ms).toISOString(),
+          related: related.get(`${r.id}\u0000${r.version}`) ?? EMPTY_RELATED,
         }),
       ),
     };
+  }
+
+  /** One bounded bulk D1 query (at most `maxLimit` result versions) for exact-version references. */
+  private async loadRelated(
+    rows: readonly ResultRow[],
+  ): Promise<Map<string, readonly ContributionRef[]>> {
+    const out = new Map<string, ContributionRef[]>();
+    if (rows.length === 0) return new Map();
+    const keys = JSON.stringify(rows.map((r) => ({ id: r.id, version: r.version })));
+    const { results } = await this.env.DB.prepare(
+      `SELECT r.from_contribution_id AS from_id, r.from_version AS from_version,
+              r.to_family AS family, r.to_contribution_id AS id, r.to_version AS version
+         FROM json_each(?) j
+         JOIN contribution_references r
+           ON r.from_contribution_id = json_extract(j.value, '$.id')
+          AND r.from_version = json_extract(j.value, '$.version')
+        ORDER BY r.from_contribution_id, r.from_version, r.ordinal`,
+    )
+      .bind(keys)
+      .all<{
+        from_id: string;
+        from_version: number;
+        family: ContributionFamily;
+        id: string;
+        version: number;
+      }>();
+    for (const r of results) {
+      const k = `${r.from_id}\u0000${r.from_version}`;
+      const list = out.get(k) ?? [];
+      list.push(
+        Object.freeze({ family: r.family, id: r.id as ContributionId, version: r.version }),
+      );
+      out.set(k, list);
+    }
+    return new Map([...out].map(([k, v]) => [k, Object.freeze(v)]));
   }
 }

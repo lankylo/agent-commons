@@ -21,6 +21,7 @@ const item = (over: Partial<SearchResultItem> = {}): SearchResultItem => ({
   consumerCount: 3,
   freshness: "current",
   reviewDueAt: "2026-12-05T00:00:00.000Z",
+  related: [],
   ...over,
 });
 
@@ -49,6 +50,7 @@ describe("buildDiscoveryResponse", () => {
       lastVerifiedAt: "2026-11-05T00:00:00.000Z",
       reliabilityScore: 0.8,
       consumerCount: 3,
+      related: [],
     });
   });
 
