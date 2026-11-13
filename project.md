@@ -701,7 +701,7 @@ Maintain the following short record at the end of this document.
 **Current task:** PR review and CI for the conditional-retrieval response contract  
 **Known blockers:** None; 16 development-only audit findings remain for separate Vitest and ESLint upgrade reviews  
 **Next task:** After this PR merges, a separately approved bounded Phase 3 task (e.g. early retriever integration of conditional retrieval or realistic response-size testing); HTTP authentication/rate limiting are Phase 4, spending limits Phase 6  
-**Last verified commit:** `fa38e10` (`main` after PR #38) plus the `feat/retrieval-not-modified` branch (`npm run verify`: TBD tests)  
+**Last verified commit:** `fa38e10` (`main` after PR #38) plus the `feat/retrieval-not-modified` branch (`npm run verify`: 333 tests)  
 
 Update these fields at the end of each working session.
 
