@@ -14,7 +14,7 @@
 import type { ActorRef, AgentId, OperatorId } from "../identity/types";
 import { CONTENT_HTTP_TYPE, contentObjectKey, sha256OfBytes } from "../storage/content-objects";
 import { canonicalJson } from "./content-hash";
-import type { ContributionFamily } from "./envelope";
+import type { ContributionFamily, ContributionRef } from "./envelope";
 import { isContributionFamily } from "./envelope";
 import { validateExecutionContribution, type ExecutionContributionInput } from "./execution";
 import { validateKnowledgeContribution, type KnowledgeContributionInput } from "./knowledge";
@@ -53,6 +53,8 @@ interface RetrievedBase {
   readonly contributionCreatedAt: string;
   readonly createdAt: string;
   readonly platformState: VersionPlatformState;
+  /** Exact cross-family references of this version, in stored order; empty when none. */
+  readonly related: readonly ContributionRef[];
 }
 
 export type RetrievedContribution =
@@ -265,6 +267,12 @@ export class ContributionRetriever {
       return fail("metadata_inconsistent");
     }
 
+    // Built from the integrity-checked D1 rows (verified identical to the canonical content).
+    const relatedList: ContributionRef[] = refs.results.map((d) => ({
+      family: d.to_family as ContributionRef["family"],
+      id: d.to_contribution_id as ContributionRef["id"],
+      version: d.to_version,
+    }));
     const base: RetrievedBase = {
       id: contributionId,
       version,
@@ -287,6 +295,7 @@ export class ContributionRetriever {
         consumerCount: row.consumer_count,
         updatedAt: row.state_updated_at,
       },
+      related: relatedList,
     };
     return content.family === "knowledge"
       ? { ok: true, contribution: deepFreeze({ ...base, family: "knowledge", content }) }
