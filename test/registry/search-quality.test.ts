@@ -110,43 +110,41 @@ describe("benchmark corpus", () => {
   });
 });
 
-describe("observed baseline search behaviour", () => {
+describe("observed search behaviour", () => {
   it("is deterministic across repeated runs", async () => {
     const a = await runBenchmark(searchKeys);
     const b = await runBenchmark(searchKeys);
     expect(b.outcomes).toEqual(a.outcomes);
   });
 
-  it("misses exactly the three natural-language agent requests (zero results) and nothing else", async () => {
+  it("after query normalization misses only K2 (vocabulary gap) and nothing else", async () => {
     const { outcomes, summary, verdict } = await runBenchmark(searchKeys);
     expect(summary).toEqual({
       cases: 25,
       positiveCases: 22,
       noResultCases: 3,
-      top1Successes: 19,
-      top3Successes: 19,
+      top1Successes: 21,
+      top3Successes: 21,
       relevantExpected: 33,
-      missedRelevant: 3,
+      missedRelevant: 1,
       misplacedRelevant: 0,
-      returnedTotal: 35,
+      returnedTotal: 38,
       unexpectedResults: 0,
       orderViolations: 0,
-      zeroResultPositiveCases: 3,
+      zeroResultPositiveCases: 1,
       nonEmptyNoResultCases: 0,
-      casesPassed: 22,
+      casesPassed: 24,
     });
     expect(outcomes.filter((o) => !o.passed).map((o) => [o.id.slice(0, 2), o.returned])).toEqual([
       ["K2", []],
-      ["K4", []],
-      ["E2", []],
     ]);
-    // Acceptance criteria are not met, so the checklist item stays open.
+    // K4 and E2 are now found through stop words, plural forms and bounded relaxation.
+    const returned = (id: string) => outcomes.find((o) => o.id.startsWith(id))?.returned;
+    expect(returned("K4")).toEqual(["k-github-rate", "k-github-rate-old"]);
+    expect(returned("E2")).toEqual(["e-github-rate"]);
+    // Acceptance criteria are still not met, so the checklist item stays open.
     expect(verdict.met).toBe(false);
-    expect(verdict.failures).toEqual([
-      "top-3 rate",
-      "missed relevant results",
-      "zero-result positive queries",
-    ]);
+    expect(verdict.failures).toEqual(["missed relevant results", "zero-result positive queries"]);
   });
 
   it("returns current before stale, family-correct and filter-correct results", async () => {
@@ -176,15 +174,21 @@ describe("observed baseline search behaviour", () => {
     ).toEqual(["e-github-issue", "e-github-delete"]);
   });
 
-  it("does not stem or drop stop words: observed cause of the missed natural queries", async () => {
-    // No stemming: "limit" matches only the Execution title, "limits" only the Knowledge one.
-    expect(await searchKeys({ query: "github rate limits" })).toEqual([
-      "k-github-rate",
-      "k-github-rate-old",
-    ]);
-    expect(await searchKeys({ query: "github rate limit" })).toEqual(["e-github-rate"]);
-    // Implicit AND: one stop word ("the") makes an otherwise matching query return nothing.
-    expect(await searchKeys({ query: "the github rate limits" })).toEqual([]);
+  it("drops stop words and matches singular and plural forms", async () => {
+    // Plural forms: "limit" and "limits" now find the same Knowledge and Execution items.
+    const both = ["k-github-rate", "e-github-rate", "k-github-rate-old"];
+    expect(await searchKeys({ query: "github rate limits" })).toEqual(both);
+    expect(await searchKeys({ query: "github rate limit" })).toEqual(both);
+    // A stop word no longer makes an otherwise matching query return nothing.
+    expect(await searchKeys({ query: "the github rate limits" })).toEqual(both);
+  });
+
+  it("K2 still misses: the seed stores camelCase predicates as single index tokens", async () => {
+    // Only 3 of 6 groups (httpbin, get, returns) occur; relaxation drops at most 2.
+    expect(
+      await searchKeys({ query: "what status code and fields does httpbin get return" }),
+    ).toEqual([]);
+    expect(await searchKeys({ query: "httpbin get return" })).toEqual(["k-httpbin"]);
   });
 
   it("prints the report when SEARCH_QUALITY_REPORT is set", async () => {
