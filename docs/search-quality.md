@@ -3,9 +3,10 @@
 Offline benchmark of the existing internal D1 FTS5 search (`src/registry/search.ts`) with realistic
 agent-style queries over both contribution families. Deterministic, LLM-free, no network, and
 independent of R2 content (the search service is constructed with D1 only). The baseline results were
-measured before any production change; the post-change results below were measured after the
-deterministic query-normalization change in `src/registry/search.ts` (PR #43). The corpus, queries,
-relevance judgements and thresholds are unchanged between the two runs.
+measured before any production change; the second run after the deterministic query-normalization
+change in `src/registry/search.ts` (PR #43); the final run after structured-identifier index terms
+in `src/registry/search-document.ts` (this change). The corpus, queries, relevance judgements,
+thresholds and expected results are unchanged between all runs.
 
 Files: `test/registry/search-quality-benchmark.ts` (corpus, cases, scoring harness),
 `search-quality.test.ts` (runs the cases on local Miniflare D1 with the real migrations and pins the
@@ -14,10 +15,9 @@ Reference time: `2026-11-20T00:00:00Z`.
 
 ## Verdict
 
-**The acceptance criteria are still NOT met.** After query normalization the numerical top-1
-(21/22 = 95.5%, ≥ 80%) and top-3 (21/22 = 95.5%, ≥ 90%) thresholds now **pass**, but the overall
-criteria require missed relevant results and positive zero-result queries to both be zero, and one of
-each remains (K2). The Phase 3 checklist item "Test search quality…" therefore stays **open**.
+**The acceptance criteria are met.** All 25 cases pass: top-1 22/22 = 100% (≥ 80%), top-3 22/22 =
+100% (≥ 90%), 0 missed, 0 misplaced, 0 unexpected, 0 ordering violations, 0 positive zero-result
+queries and 0 non-empty no-result cases. The Phase 3 checklist item "Test search quality…" is complete.
 
 ## Corpus (21 contributions, all schema-valid, created through `ContributionRegistry`)
 
@@ -48,14 +48,14 @@ Positive cases have at least one relevant contribution; no-result cases expect z
 | zero-result positive cases; non-empty no-result cases | 0 |
 | unexpected results; ordering violations | 0 |
 
-## Query cases (25) and observed ranking (after normalization)
+## Query cases (25) and observed ranking (final)
 
 Expected = relevant item(s) with max rank; observed = returned order. All requests are sent verbatim.
 
 | Case | Query / filters | Expected | Observed | Result |
 |---|---|---|---|---|
 | K1 | `httpbin get contract` (knowledge) | k-httpbin ≤1 | k-httpbin | pass |
-| K2 | `what status code and fields does httpbin get return` | k-httpbin ≤1 | none | **fail** (unchanged) |
+| K2 | `what status code and fields does httpbin get return` | k-httpbin ≤1 | k-httpbin | pass (baseline and PR #43: none, fail) |
 | K3 | `github rate limits` (knowledge) | k-github-rate ≤1 | k-github-rate, k-github-rate-old | pass |
 | K4 | `how many unauthenticated requests per hour does the github api allow` | k-github-rate ≤1 | k-github-rate, k-github-rate-old | pass (baseline: none, fail) |
 | E1 | `github issue` (execution) | e-github-issue ≤1 | e-github-issue | pass |
@@ -88,36 +88,40 @@ no query was reworded, including for the post-change run.
 
 ## Measured results
 
-| Measure | Baseline | After normalization |
-|---|---|---|
-| Cases (positive / no-result) | 25 (22 / 3) | 25 (22 / 3) |
-| Top-1 success | 19 / 22 = 86.4% | 21 / 22 = 95.5% (≥ 80%: **met**) |
-| Top-3 success | 19 / 22 = 86.4% | 21 / 22 = 95.5% (≥ 90%: **met**) |
-| Missed relevant results | 3 of 33 (K2, K4, E2) | 1 of 33 (K2) — **not met** (must be 0) |
-| Misplaced relevant results | 0 | 0 |
-| Unexpected results | 0 of 35 returned | 0 of 38 returned |
-| Ordering violations (freshness, evidence tier) | 0 | 0 |
-| Zero-result queries | 3 positive | 1 positive (K2) — **not met** (must be 0); 0 non-empty no-result cases |
-| Cases fully passed | 22 / 25 | 24 / 25 |
-
-The numerical top-1 and top-3 thresholds now pass, but the overall acceptance criteria remain
-**unmet** because missed relevant results and positive zero-result queries must both be zero. Failed
-criteria: missed relevant results, zero-result positive queries.
+| Measure | Baseline | After normalization (PR #43) | Final (identifier terms) |
+|---|---|---|---|
+| Cases (positive / no-result) | 25 (22 / 3) | 25 (22 / 3) | 25 (22 / 3) |
+| Top-1 success | 19 / 22 = 86.4% | 21 / 22 = 95.5% | 22 / 22 = 100% (≥ 80%: **met**) |
+| Top-3 success | 19 / 22 = 86.4% | 21 / 22 = 95.5% | 22 / 22 = 100% (≥ 90%: **met**) |
+| Missed relevant results | 3 of 33 | 1 of 33 (K2) | 0 of 33 (**met**) |
+| Misplaced relevant results | 0 | 0 | 0 |
+| Unexpected results | 0 of 35 returned | 0 of 38 returned | 0 of 39 returned |
+| Ordering violations (freshness, evidence tier) | 0 | 0 | 0 |
+| Zero-result queries | 3 positive | 1 positive (K2) | 0 positive; 0 non-empty no-result (**met**) |
+| Cases fully passed | 22 / 25 | 24 / 25 | 25 / 25 |
 
 ## Findings
 
-K4 and E2 now pass: stop words are dropped, singular/plural forms are matched, and a bounded relaxation
-(at most two groups dropped, at least three kept) runs only when the strict query returns nothing.
-Concise keyword, family, metadata, compatibility, safety, freshness and tie-break behaviour is
-unchanged, deterministic and correct: filters never leaked other families or unsafe recipes, stale
-items trailed current ones, and repeated runs were identical.
+K4 and E2 were fixed by PR #43 (stop words, singular/plural forms, bounded relaxation: at most two
+groups dropped, at least three kept, only when the strict query returns nothing).
 
-**K2 remains a vocabulary/index-token gap, not a normalization gap.** The httpbin seed stores its
-structured predicates in camelCase (single index tokens under FTS5 `unicode61`), so query words such as
-`status`, `code` and `fields` do not occur as index tokens. Only 3 of the 6 query groups (httpbin, get,
-return) match, below the bounded-relaxation floor; `httpbin get return` finds `k-httpbin`. Loosening the
-relaxation to cover K2 would weaken precision, so it was not done. This is pinned in
-`search-quality.test.ts`.
+K2 was a vocabulary/index-token gap: the httpbin seed stores structured predicates in camelCase
+(`successStatus`, `responseFields`), which are single FTS5 `unicode61` tokens, so `status` and
+`fields` did not occur as index tokens. `buildSearchText` now indexes each Knowledge fact predicate
+and record key as the original identifier **plus** its separated components (`successStatus success
+Status`), using the deterministic `splitIdentifier` helper (camelCase, PascalCase, acronym and
+letter/digit boundaries, `_ - .` separators). No stemming or synonyms; contributed prose, values,
+titles, explanation, sources, evidence, licensing, identities, hashes, timestamps, raw JSON and
+Execution steps are not split or newly indexed. The K2 query is unchanged, and query normalization,
+bounded relaxation, filters, ranking and limits are unchanged. K2 now returns `k-httpbin` at rank 1.
+Concise keyword, family, metadata, compatibility, safety, freshness and tie-break behaviour is
+unchanged: filters never leaked other families or unsafe recipes, stale items trailed current ones,
+and repeated runs were identical.
+
+**Existing indexes:** the migrations are unchanged, and the search documents are immutable per
+version. No remote D1 database exists, so any previously created *local* search index must be
+recreated (fresh local D1) or reseeded to receive the additional derived terms; older documents are
+not rewritten.
 
 ## Limitations
 
@@ -128,10 +132,7 @@ relaxation to cover K2 would weaken precision, so it was not done. This is pinne
 
 ## Recommendation
 
-D1 FTS5 with deterministic normalization is now sufficient for concise keyword, filtered,
-freshness-aware and mixed-family lookup and for the two other natural-language cases, but the
-acceptance criteria are not yet met. Recommend a **separately approved, narrowly scoped K2
-vocabulary/index-token improvement** (for example, splitting camelCase predicate names into separate
-index tokens, which may require an index change or migration), re-running this benchmark unchanged.
-Do not add Vectorize in PR #43; evaluate it (per `project.md`) only if that bounded change still fails
-these criteria. That work needs its own approval and is not part of this task.
+D1 FTS5 with deterministic query normalization and identifier index terms meets the Phase 3 search
+acceptance criteria on this benchmark, so Vectorize is not needed and is not added. Re-run this
+benchmark unchanged whenever the index or query logic changes; broaden the corpus with real agent
+queries before relying on these figures at scale.

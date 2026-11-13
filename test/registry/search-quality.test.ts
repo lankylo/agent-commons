@@ -117,34 +117,32 @@ describe("observed search behaviour", () => {
     expect(b.outcomes).toEqual(a.outcomes);
   });
 
-  it("after query normalization misses only K2 (vocabulary gap) and nothing else", async () => {
+  it("after identifier index terms all 25 cases pass with no misses", async () => {
     const { outcomes, summary, verdict } = await runBenchmark(searchKeys);
     expect(summary).toEqual({
       cases: 25,
       positiveCases: 22,
       noResultCases: 3,
-      top1Successes: 21,
-      top3Successes: 21,
+      top1Successes: 22,
+      top3Successes: 22,
       relevantExpected: 33,
-      missedRelevant: 1,
+      missedRelevant: 0,
       misplacedRelevant: 0,
-      returnedTotal: 38,
+      returnedTotal: 39,
       unexpectedResults: 0,
       orderViolations: 0,
-      zeroResultPositiveCases: 1,
+      zeroResultPositiveCases: 0,
       nonEmptyNoResultCases: 0,
-      casesPassed: 24,
+      casesPassed: 25,
     });
-    expect(outcomes.filter((o) => !o.passed).map((o) => [o.id.slice(0, 2), o.returned])).toEqual([
-      ["K2", []],
-    ]);
+    expect(outcomes.filter((o) => !o.passed)).toEqual([]);
+    expect(outcomes.find((o) => o.id.startsWith("K2"))?.returned).toEqual(["k-httpbin"]);
     // K4 and E2 are now found through stop words, plural forms and bounded relaxation.
     const returned = (id: string) => outcomes.find((o) => o.id.startsWith(id))?.returned;
     expect(returned("K4")).toEqual(["k-github-rate", "k-github-rate-old"]);
     expect(returned("E2")).toEqual(["e-github-rate"]);
-    // Acceptance criteria are still not met, so the checklist item stays open.
-    expect(verdict.met).toBe(false);
-    expect(verdict.failures).toEqual(["missed relevant results", "zero-result positive queries"]);
+    expect(verdict.met).toBe(true);
+    expect(verdict.failures).toEqual([]);
   });
 
   it("returns current before stale, family-correct and filter-correct results", async () => {
@@ -183,11 +181,10 @@ describe("observed search behaviour", () => {
     expect(await searchKeys({ query: "the github rate limits" })).toEqual(both);
   });
 
-  it("K2 still misses: the seed stores camelCase predicates as single index tokens", async () => {
-    // Only 3 of 6 groups (httpbin, get, returns) occur; relaxation drops at most 2.
+  it("K2 is found: camelCase predicates are indexed as separate components", async () => {
     expect(
       await searchKeys({ query: "what status code and fields does httpbin get return" }),
-    ).toEqual([]);
+    ).toEqual(["k-httpbin"]);
     expect(await searchKeys({ query: "httpbin get return" })).toEqual(["k-httpbin"]);
   });
 
