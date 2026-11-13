@@ -368,3 +368,73 @@ describe("integrity failures", () => {
     }
   });
 });
+
+describe("retrieval of cross-family references", () => {
+  const ref = (family: string, id: string, version: number) => ({ family, id, version });
+
+  it("lists Knowledge-to-Execution references with exact versions", async () => {
+    const e = must(await registry.createContribution(agent, execution()));
+    const k = must(
+      await registry.createContribution(agent, {
+        ...knowledge(),
+        related: [ref("execution", e.id, 1)],
+      }),
+    );
+    expect(ok(await registry.getContributionVersion(k.id, 1)).related).toEqual([
+      ref("execution", e.id, 1),
+    ]);
+  });
+
+  it("lists Execution-to-Knowledge references in stored order with exact versions", async () => {
+    const k1 = must(await registry.createContribution(agent, knowledge()));
+    const k2 = must(await registry.createContribution(agent, knowledge()));
+    mustV(await registry.createContributionVersion(agent, k1.id, 1, knowledge()));
+    const e = must(
+      await registry.createContribution(
+        agent,
+        execution([ref("knowledge", k2.id, 1), ref("knowledge", k1.id, 1)]),
+      ),
+    );
+    const got = ok(await registry.getContributionVersion(e.id, 1));
+    expect(got.related).toEqual([ref("knowledge", k2.id, 1), ref("knowledge", k1.id, 1)]);
+    // Pinned to v1 even though k1 now has a v2.
+    expect(got.related[1]?.version).toBe(1);
+  });
+
+  it("returns an empty list when there are no references", async () => {
+    const k = must(await registry.createContribution(agent, knowledge()));
+    const e = must(await registry.createContribution(agent, execution()));
+    expect(ok(await registry.getContributionVersion(k.id, 1)).related).toEqual([]);
+    expect(ok(await registry.getContributionVersion(e.id, 1)).related).toEqual([]);
+  });
+
+  it("deeply freezes the list and every entry", async () => {
+    const k = must(await registry.createContribution(agent, knowledge()));
+    const e = must(
+      await registry.createContribution(agent, execution([ref("knowledge", k.id, 1)])),
+    );
+    const got = ok(await registry.getContributionVersion(e.id, 1));
+    expect(Object.isFrozen(got.related)).toBe(true);
+    expect(Object.isFrozen(got.related[0])).toBe(true);
+    expect(() => (got.related as unknown as unknown[]).push({})).toThrow();
+    expect(() => {
+      (got.related[0] as { version: number }).version = 9;
+    }).toThrow();
+    const none = ok(await registry.getContributionVersion(k.id, 1));
+    expect(Object.isFrozen(none.related)).toBe(true);
+  });
+
+  it("rejects D1 references that differ from the canonical R2 content", async () => {
+    const k = must(await registry.createContribution(agent, knowledge()));
+    mustV(await registry.createContributionVersion(agent, k.id, 1, knowledge()));
+    const e = must(
+      await registry.createContribution(agent, execution([ref("knowledge", k.id, 1)])),
+    );
+    await db.prepare("DROP TRIGGER IF EXISTS contribution_references_no_update").run();
+    await db
+      .prepare("UPDATE contribution_references SET to_version = 2 WHERE from_contribution_id = ?")
+      .bind(e.id)
+      .run();
+    expect(codeOf(await registry.getContributionVersion(e.id, 1))).toBe("metadata_inconsistent");
+  });
+});
