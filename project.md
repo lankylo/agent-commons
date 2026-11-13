@@ -701,7 +701,7 @@ Maintain the following short record at the end of this document.
 **Current task:** PR review and CI for discovery-response byte budgeting  
 **Known blockers:** None; 16 development-only audit findings remain for separate Vitest and ESLint upgrade reviews  
 **Next task:** After this PR merges (retrieval-response budgeting outstanding), a separately approved bounded Phase 3 task; HTTP authentication/rate limiting are Phase 4, spending limits Phase 6  
-**Last verified commit:** `cd475d5` (`main` after PR #36) plus the `feat/discovery-response-budget` branch (targeted checks passed; full `npm run verify` result recorded in the PR)  
+**Last verified commit:** `cd475d5` (`main` after PR #36) plus the `feat/discovery-response-budget` branch (`npm run verify`: 306 tests)  
 
 Update these fields at the end of each working session.
 
