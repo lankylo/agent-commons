@@ -10,6 +10,11 @@
  *
  * Errors carry a code and a generic message only. Which check failed is deliberately not
  * exposed, so a future public layer can map codes without leaking internals.
+ *
+ * `getConditionalContributionVersion` adds the internal `retrieval-not-modified/v1` contract on
+ * top of the unchanged verified retrieval: the validator is compared only AFTER every integrity
+ * check has passed, so a matching validator never conceals missing, corrupted or inconsistent
+ * content. No cache, no public route.
  */
 import type { ActorRef, AgentId, OperatorId } from "../identity/types";
 import { CONTENT_HTTP_TYPE, contentObjectKey, sha256OfBytes } from "../storage/content-objects";
@@ -19,6 +24,11 @@ import { isContributionFamily } from "./envelope";
 import { validateExecutionContribution, type ExecutionContributionInput } from "./execution";
 import { validateKnowledgeContribution, type KnowledgeContributionInput } from "./knowledge";
 import type { RegistryEnv } from "./creation";
+import {
+  buildConditionalRetrievalResponse,
+  type ConditionalRetrievalResponse,
+  type RetrievalValidator,
+} from "./retrieval-conditional";
 
 export type RetrievalErrorCode =
   | "invalid_request"
@@ -68,6 +78,10 @@ export type RetrieveResult =
   | { readonly ok: true; readonly contribution: RetrievedContribution }
   | { readonly ok: false; readonly error: RetrievalError };
 
+export type ConditionalRetrieveResult =
+  | { readonly ok: true; readonly response: ConditionalRetrievalResponse }
+  | { readonly ok: false; readonly error: RetrievalError };
+
 const MESSAGES: Record<RetrievalErrorCode, string> = {
   invalid_request: "invalid contribution id or version",
   contribution_not_found: "contribution not found",
@@ -113,6 +127,25 @@ export class ContributionRetriever {
   constructor(env: RegistryEnv) {
     this.db = env.DB;
     this.bucket = env.CONTENT_BUCKET;
+  }
+
+  /**
+   * Retrieve exactly `version` of `contributionId` with full verification, then map it to either
+   * the minimal `retrieval-not-modified/v1` (validator matches id, version and content hash
+   * exactly) or the complete `retrieval-response/v1` (validator absent or mismatched). Any
+   * retrieval error is returned unchanged, whatever the validator.
+   */
+  async getConditionalContributionVersion(
+    contributionId: string,
+    version: number,
+    validator?: RetrievalValidator | null,
+  ): Promise<ConditionalRetrieveResult> {
+    const result = await this.getContributionVersion(contributionId, version);
+    if (!result.ok) return result;
+    return Object.freeze({
+      ok: true as const,
+      response: buildConditionalRetrievalResponse(result.contribution, validator),
+    });
   }
 
   /** Retrieve exactly `version` of contribution `contributionId`, fully verified. */
