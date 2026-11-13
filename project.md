@@ -701,7 +701,7 @@ Maintain the following short record at the end of this document.
 **Current task:** PR review and CI for the `retrieval-response/v1` mapper  
 **Known blockers:** None; 16 development-only audit findings remain for separate Vitest and ESLint upgrade reviews  
 **Next task:** After this PR merges, a separately approved bounded Phase 3 task; HTTP authentication/rate limiting are Phase 4, spending limits Phase 6  
-**Last verified commit:** `3398316` (`main` after PR #29) plus the `feat/phase3-search-ranking-freshness` branch
+**Last verified commit:** `d58f48f` (`main` after PR #35) plus the `feat/retrieval-response-v1` branch (`npm run verify`: 297 tests)  
 
 Update these fields at the end of each working session.
 
