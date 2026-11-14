@@ -575,7 +575,7 @@ The audit also covers the operator/credential path (`test/identity/credentials.t
 
 **Current phase:** Phase 4 In Progress, 50% acceptance verified. Authenticated REST `commons.search`, exact-version `commons.get`, allow-list-enforced `commons.contribute`, and local stdio MCP tools for those operations use shared Worker validation, credential verification, D1 rate limiting, byte budgets and safe errors. The MCP server uses local D1/R2 only; its credential is supplied through process configuration. `commons.feedback`, complete four-operation support and external-agent acceptance testing remain incomplete. Phase 5 trust controls are outstanding; declared contribution verification metadata is not platform verification. Feedback remains unimplemented pending a receipt-storage phase decision and the Phase 5 assessment schema. Phase 3 Search and Retrieval is complete at 100%; persistent caching remains deferred to Phase 6. Phase 2 is complete.
 **Current blocker:** Before feedback implementation, reconcile the data-model note that places retrieval records in Phases 5–6 with Phase 4's exact-version retrieval eligibility criterion; the feedback assessment schema remains Phase 5 work.
-**Latest verified milestone:** The local stdio MCP server exposes search/get/contribute through the existing Worker handlers. Focused MCP integration tests (4/4), a real stdio process smoke test, typecheck and lint pass; full `npm run verify` is pending.
+**Latest verified milestone:** PR #50 adds the local stdio MCP server over the existing Worker handlers. `npm run verify` passes with 466 tests across 37 files, typecheck, formatting, lint and Wrangler dry-run; the MCP integration tests (4/4) and real stdio process smoke test pass.
 
 Completion percentages must reflect verified acceptance criteria, not merely generated code.
 
@@ -721,13 +721,13 @@ Maintain the following short record at the end of this document.
 
 **Last completed task:** PR #49 merged: authenticated, allow-list-enforced `commons.contribute` route for new Knowledge/Execution contributions and exact-next versions.
 
-**Current task:** Implement local-only stdio MCP tools for search, exact-version get and allow-listed contribute using the official TypeScript SDK and existing Worker handlers. Four MCP integration tests, a stdio process smoke test, typecheck and lint pass; full `npm run verify` is pending. No feedback tool or external MCP service was added.
+**Current task:** Implemented local-only stdio MCP tools for search, exact-version get and allow-listed contribute using the official TypeScript SDK and existing Worker handlers. PR #50 is open; `npm run verify` passes with 466 tests across 37 files. No feedback tool or external MCP service was added.
 
 **Known blockers:** Feedback needs an explicit decision on minimal retrieval-receipt phase ownership; its assessment schema and trust effects remain Phase 5 work. External-agent acceptance testing remains open. Shared caching awaits Phase 4 authentication and Phase 6 paid-access semantics.
 
 **Next task:** Perform external-agent acceptance testing for both families through the implemented interfaces. Resolve retrieval-receipt ownership before `commons.feedback`; define assessment fields and trust controls with Phase 5.
 
-**Last verified commit:** MCP implementation checkpoint pending; focused MCP tests, typecheck and lint pass.
+**Last verified commit:** `291a25e` (`npm run verify`: typecheck, formatting, lint, 466 tests across 37 files, Wrangler dry-run).
 
 Update these fields at the end of each working session.
 
