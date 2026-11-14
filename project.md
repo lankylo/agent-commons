@@ -575,7 +575,7 @@ The audit also covers the operator/credential path (`test/identity/credentials.t
 
 **Current phase:** Phase 4 Not Started. Phase 3 Search and Retrieval is completed at 100% because every current Phase 3 acceptance criterion is verified in the audit above. Persistent caching is not implemented and is deferred to Phase 6; Phase 5 ranking signals remain deferred because their outcomes, feedback and validated reliability inputs do not yet exist. Phase 2 is complete.
 **Current blocker:** None  
-**Latest verified milestone:** PR #44 merged with the unchanged 25-case search-quality benchmark passing 25/25; the Phase 3 completion audit maps all eight current acceptance criteria to existing tests and documentation.
+**Latest verified milestone:** Phase 3 acceptance audit verified against existing test/documentation evidence; `npm run verify` passes on checkpoint `4565959` (typecheck, formatting, lint, 444 tests across 33 files, Wrangler dry-run).
 
 Completion percentages must reflect verified acceptance criteria, not merely generated code.
 
@@ -716,15 +716,15 @@ Maintain the following short record at the end of this document.
 
 **Current phase:** Phase 4 Not Started; Phase 3 completed at 100%
 
-**Last completed task:** Merged PR #44 indexed deterministic Knowledge identifier components; the unchanged search benchmark now passes 25/25, top-1 22/22 and top-3 22/22 (`docs/search-quality.md`). Existing local indexes must be recreated or reseeded.
+**Last completed task:** Audited all Phase 3 checklist items and acceptance criteria against existing tests and documentation; all eight criteria are verified, Phase 3 is complete at 100%, and shared caching is explicitly deferred to Phase 6. PR #45 is open; `npm run verify` passes.
 
-**Current task:** Complete the Phase 3 acceptance audit and document conditional retrieval as complete and persistent caching as deferred to Phase 6.
+**Current task:** Phase 3 completion and cache-deferral audit is verified; PR #45 is open for review. Do not merge automatically.
 
 **Known blockers:** None. Phase 5 ranking signals await outcomes, feedback and validated reliability data; shared caching awaits Phase 4 authentication and Phase 6 paid-access semantics.
 
 **Next task:** Separately approve Phase 4 Agent Interfaces work. Do not begin Phase 5 or Phase 6 tasks automatically.
 
-**Last verified commit:** PR #44 merge commit (`npm run verify`: 444 tests, 33 files); this documentation-only audit is being verified in its PR.
+**Last verified commit:** `4565959` (`npm run verify`: typecheck, formatting, lint, 444 tests across 33 files, Wrangler dry-run).
 
 Update these fields at the end of each working session.
 
