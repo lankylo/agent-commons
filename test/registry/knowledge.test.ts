@@ -1,6 +1,10 @@
 import { MAX_REVIEW_INTERVAL_DAYS } from "../../src/registry/review-intervals";
 import { describe, expect, it } from "vitest";
-import { KNOWLEDGE_LIMITS, validateKnowledgeContribution } from "../../src/registry/knowledge";
+import {
+  KNOWLEDGE_LIMITS,
+  validateKnowledgeContribution,
+  validateKnowledgeContributionJsonSchema,
+} from "../../src/registry/knowledge";
 
 const valid = () => ({
   family: "knowledge",
@@ -150,6 +154,27 @@ describe("validateKnowledgeContribution", () => {
     expect(
       errorsFor((v) => (v.related = [{ family: "execution", id: "exec-0001", version: 2 }])),
     ).toEqual([]);
+  });
+});
+
+describe("Knowledge contribution JSON Schema", () => {
+  it("accepts a complete family input with intentionally open record keys", () => {
+    expect(validateKnowledgeContributionJsonSchema(valid())).toEqual([]);
+  });
+
+  it("rejects missing required fields, another family, and unsupported fields", () => {
+    const missingSources = valid() as Record<string, unknown>;
+    delete missingSources.sources;
+    expect(validateKnowledgeContributionJsonSchema(missingSources)).not.toEqual([]);
+
+    expect(
+      validateKnowledgeContributionJsonSchema({ ...valid(), family: "execution" }),
+    ).not.toEqual([]);
+    expect(validateKnowledgeContributionJsonSchema({ ...valid(), steps: [] })).not.toEqual([]);
+
+    const invalidNestedField = valid() as Record<string, unknown>;
+    invalidNestedField.licensing = { license: "MIT", extra: true };
+    expect(validateKnowledgeContributionJsonSchema(invalidNestedField)).not.toEqual([]);
   });
 });
 

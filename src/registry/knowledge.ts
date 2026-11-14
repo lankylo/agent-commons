@@ -7,7 +7,13 @@
 import { PLATFORM_ONLY_FIELDS, type ContributionEnvelopeInput } from "./envelope";
 import { checkReviewInterval } from "./review-intervals";
 import { checkContributionRefs } from "./references";
-import { Checker, SHA256_HEX, isObj } from "./check";
+import { Checker, ISO_UTC, SHA256_HEX, isObj } from "./check";
+import type { Schema } from "@cfworker/json-schema";
+import {
+  COMMON_CONTRIBUTION_REQUIRED,
+  COMMON_CONTRIBUTION_SCHEMA_PROPERTIES,
+  createJsonSchemaValidator,
+} from "./schema-validation";
 
 export const KNOWLEDGE_LIMITS = {
   /** Untrusted prose; the only free-text field. */
@@ -84,6 +90,135 @@ export type KnowledgeValidation =
   | { readonly ok: true; readonly value: KnowledgeContributionInput }
   | { readonly ok: false; readonly errors: readonly string[] };
 
+const scalarSchema: Schema = {
+  oneOf: [
+    { type: "string", minLength: 1, maxLength: KNOWLEDGE_LIMITS.shortStringMaxChars },
+    { type: "number" },
+    { type: "boolean" },
+    { type: "null" },
+  ],
+};
+
+export const KNOWLEDGE_CONTRIBUTION_JSON_SCHEMA: Schema = {
+  $schema: "http://json-schema.org/draft-07/schema#",
+  type: "object",
+  required: [...COMMON_CONTRIBUTION_REQUIRED, "sources", "rights", "verification", "asOf"],
+  properties: {
+    ...COMMON_CONTRIBUTION_SCHEMA_PROPERTIES,
+    family: { const: "knowledge" },
+    related: COMMON_CONTRIBUTION_SCHEMA_PROPERTIES.related,
+    facts: {
+      type: "array",
+      minItems: 1,
+      maxItems: KNOWLEDGE_LIMITS.maxFacts,
+      items: {
+        type: "object",
+        required: ["subject", "predicate", "value"],
+        properties: {
+          subject: {
+            type: "string",
+            minLength: 1,
+            maxLength: KNOWLEDGE_LIMITS.shortStringMaxChars,
+          },
+          predicate: {
+            type: "string",
+            minLength: 1,
+            maxLength: KNOWLEDGE_LIMITS.shortStringMaxChars,
+          },
+          value: scalarSchema,
+          unit: { type: "string", minLength: 1, maxLength: KNOWLEDGE_LIMITS.shortStringMaxChars },
+        },
+        additionalProperties: false,
+      },
+    },
+    records: {
+      type: "array",
+      minItems: 1,
+      maxItems: KNOWLEDGE_LIMITS.maxRecords,
+      items: {
+        type: "object",
+        minProperties: 1,
+        maxProperties: KNOWLEDGE_LIMITS.maxRecordFields,
+        propertyNames: { type: "string", minLength: 1, maxLength: 64 },
+        additionalProperties: scalarSchema,
+      },
+    },
+    summary: {
+      type: "string",
+      minLength: 1,
+      maxLength: KNOWLEDGE_LIMITS.summaryMaxChars,
+    },
+    explanation: {
+      type: "string",
+      minLength: 1,
+      maxLength: KNOWLEDGE_LIMITS.explanationMaxChars,
+    },
+    sources: {
+      type: "array",
+      minItems: 1,
+      maxItems: KNOWLEDGE_LIMITS.maxSources,
+      items: {
+        type: "object",
+        required: ["uri", "accessedAt", "hash"],
+        properties: {
+          uri: { type: "string", minLength: 1, maxLength: KNOWLEDGE_LIMITS.uriMaxChars },
+          accessedAt: { type: "string", pattern: ISO_UTC.source },
+          sourceDate: { type: "string", pattern: ISO_UTC.source },
+          hash: {
+            type: "object",
+            required: ["algorithm", "digest"],
+            properties: {
+              algorithm: { enum: [...HASH_ALGORITHMS] },
+              digest: { type: "string", pattern: SHA256_HEX.source },
+            },
+            additionalProperties: false,
+          },
+          snapshotRef: {
+            type: "string",
+            minLength: 1,
+            maxLength: KNOWLEDGE_LIMITS.uriMaxChars,
+          },
+        },
+        additionalProperties: false,
+      },
+    },
+    rights: {
+      type: "object",
+      required: ["sourceLicense", "permittedUse"],
+      properties: {
+        sourceLicense: {
+          type: "string",
+          minLength: 1,
+          maxLength: KNOWLEDGE_LIMITS.shortStringMaxChars,
+        },
+        rightsHolder: {
+          type: "string",
+          minLength: 1,
+          maxLength: KNOWLEDGE_LIMITS.shortStringMaxChars,
+        },
+        permittedUse: { enum: [...PERMITTED_USES] },
+      },
+      additionalProperties: false,
+    },
+    verification: {
+      type: "object",
+      required: ["method"],
+      properties: {
+        method: { enum: [...VERIFICATION_METHODS] },
+        declaredConfidence: { type: "number", minimum: 0, maximum: 1 },
+      },
+      additionalProperties: false,
+    },
+    asOf: { type: "string", pattern: ISO_UTC.source },
+  },
+  additionalProperties: false,
+  anyOf: [{ required: ["facts"] }, { required: ["records"] }, { required: ["summary"] }],
+};
+
+export const validateKnowledgeContributionJsonSchema = createJsonSchemaValidator(
+  KNOWLEDGE_CONTRIBUTION_JSON_SCHEMA,
+);
+
 const ALLOWED_KEYS = new Set([
   "family",
   "title",
@@ -105,6 +240,7 @@ const ALLOWED_KEYS = new Set([
 
 /** Validate untrusted input as a Knowledge contribution. Never throws. */
 export function validateKnowledgeContribution(input: unknown): KnowledgeValidation {
+  const schemaErrors = validateKnowledgeContributionJsonSchema(input);
   const c = new Checker();
   if (!isObj(input)) return { ok: false, errors: ["input: must be an object"] };
 
@@ -226,5 +362,6 @@ export function validateKnowledgeContribution(input: unknown): KnowledgeValidati
   c.date(input.asOf, "asOf");
 
   if (c.errors.length > 0) return { ok: false, errors: c.errors };
+  if (schemaErrors.length > 0) return { ok: false, errors: schemaErrors };
   return { ok: true, value: input as unknown as KnowledgeContributionInput };
 }
