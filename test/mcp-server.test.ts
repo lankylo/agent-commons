@@ -221,6 +221,11 @@ describe("local stdio MCP server", () => {
       }
       expect(searchResults.some((result) => result.family === "knowledge")).toBe(true);
       expect(searchResults.some((result) => result.family === "execution")).toBe(true);
+      const receiptsAfterSearch = await db
+        .prepare("SELECT 1 FROM retrieval_receipts WHERE agent_id = ?")
+        .bind(agentId)
+        .all();
+      expect(receiptsAfterSearch.results).toEqual([]);
 
       const knowledgeGet = await callTool(connection.client, "commons.get", {
         contributionId: knowledgeId,
@@ -232,6 +237,17 @@ describe("local stdio MCP server", () => {
       expect(knowledgeData.untrustedExplanation).toEqual({
         label: "untrusted",
         text: "untrusted explanation for MCP retrieval",
+      });
+      const knowledgeReceipt = await db
+        .prepare(
+          "SELECT agent_id, contribution_id, version FROM retrieval_receipts WHERE agent_id = ? AND contribution_id = ? AND version = ?",
+        )
+        .bind(agentId, knowledgeId, 1)
+        .first();
+      expect(knowledgeReceipt).toEqual({
+        agent_id: agentId,
+        contribution_id: knowledgeId,
+        version: 1,
       });
 
       const validatorMismatch = await callTool(connection.client, "commons.get", {
@@ -268,6 +284,13 @@ describe("local stdio MCP server", () => {
       expect(field(structured(executionGet), "data").schemaVersion).toBe(
         "retrieval-not-modified/v1",
       );
+      const executionReceipt = await db
+        .prepare(
+          "SELECT 1 FROM retrieval_receipts WHERE agent_id = ? AND contribution_id = ? AND version = ?",
+        )
+        .bind(agentId, executionMeta.contributionId, 1)
+        .first();
+      expect(executionReceipt).toBeNull();
 
       const versionedKnowledge = await callTool(connection.client, "commons.contribute", {
         contributionId: knowledgeId,

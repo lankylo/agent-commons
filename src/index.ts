@@ -385,6 +385,16 @@ async function handleGet(request: Request, env: WorkerEnv): Promise<Response> {
       );
     }
 
+    if (data.schemaVersion === "retrieval-response/v1") {
+      await env.DB.prepare(
+        `INSERT INTO retrieval_receipts (agent_id, contribution_id, version)
+         VALUES (?, ?, ?)
+         ON CONFLICT (agent_id, contribution_id, version) DO NOTHING`,
+      )
+        .bind(authorization.actor.agentId, record.contributionId, record.version)
+        .run();
+    }
+
     return Response.json({
       data,
       budget: {
