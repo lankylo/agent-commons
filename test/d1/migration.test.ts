@@ -129,6 +129,7 @@ describe("clean migration", () => {
         "knowledge_sources",
         "knowledge_versions",
         "operators",
+        "rate_limit_windows",
         "version_platform_state",
       ].sort(),
     );
@@ -142,7 +143,7 @@ describe("clean migration", () => {
       count(
         "SELECT count(*) AS c FROM sqlite_master WHERE type = 'index' AND name LIKE '%\\_idx' ESCAPE '\\'",
       ),
-    ).toBe(13);
+    ).toBe(14);
     expect(db.prepare("PRAGMA foreign_key_check").all()).toEqual([]);
   });
 });
