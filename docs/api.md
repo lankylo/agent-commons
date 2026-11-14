@@ -248,13 +248,13 @@ or self-service allow-listing.
 
 ### `commons.feedback`
 
-Proposed request envelope:
+Proposed request envelope (Knowledge only; Execution findings are deferred):
 
 ```text
 {
   contributionId: string,
   version: positive integer,
-  assessment: family-specific Phase 5 feedback object
+  assessment: KnowledgeAssessment
 }
 ```
 
@@ -266,27 +266,36 @@ proposal; approve its open evidence and policy decisions before implementing or 
 
 The request contains `contributionId`, positive integer `version`, and `assessment`. It MUST NOT
 contain a client-selected `family`. The server loads that exact stored version and selects its
-family schema; a client cannot choose or reinterpret the schema. `assessment` must contain one or
-both dimensions for that family, and unknown fields are rejected. The assessment object is limited
-to 16,000 UTF-8 bytes.
+family schema; a client cannot choose or reinterpret the schema. Only the Knowledge schema is
+defined in this proposal. Execution feedback remains unsupported until its separate evidence
+design is approved. For Knowledge, `assessment` must contain one or more dimensions below, and
+unknown fields are rejected. The assessment object is limited to 16,000 UTF-8 bytes.
 
-Evidence uses the existing reference shape and existing evidence-kind vocabulary; this design
-adds no evidence kinds:
+The existing contribution `EvidenceRef` is only a pointer:
 
 ```text
 EvidenceRef = {
-  kind: string, // existing allowed contribution-evidence kind; 1–80 UTF-8 bytes
-  uri: string   // absolute URI, at most 2,048 UTF-8 bytes
+  kind: string, // non-empty, at most 200 characters; free-form label
+  uri: string   // valid HTTPS URL, at most 2,048 characters
 }
 ```
 
-Evidence arrays contain at most five references per dimension. Evidence is referenced by URI,
-not embedded in the feedback payload. `scope`, `context`, and `environment` strings below are
-1–300 UTF-8 bytes. Timestamps are ISO 8601 UTC strings. An evidence array is always present;
-non-neutral findings require at least one reference, while explicit not-assessed values require
-an empty array. Evidence must not contain credentials or unrelated personal data. The existing
-allowed `kind` vocabulary is reused exactly; no new run-log, screenshot, or other evidence type is
-defined here.
+The validator does not enumerate or validate `kind` values: labels such as `documentation` in
+fixtures are examples, not an allow-list or proof of evidence class. The URI check establishes only
+HTTPS syntax; it does not fetch, authenticate, inspect, or sanitize the target. For Knowledge,
+references may point only to public documentation or source material relevant to the specific
+finding. The feedback payload must not embed evidence contents. Do not submit URLs containing
+userinfo, credentials, tokens, signed access, personal identifiers, or sensitive query/fragment
+values; do not reference private/internal resources. Keep all free-text scope/context descriptions
+free of credentials, personal data and private details. These are contributor requirements, not
+guarantees enforced by the current validator.
+
+Knowledge feedback may reuse the existing pointer shape, with at most 20 references total per
+assessment (matching the current contribution evidence limit). `scope` and `context` strings are
+1–300 characters. Timestamps are ISO 8601 UTC strings. An evidence array is always present;
+findings that make a factual claim require at least one public reference, while explicit
+not-assessed values require an empty array. References remain unverified reports; a URL and free-form
+kind label do not establish that the referenced material was accessed or supports the claim.
 
 **Knowledge assessment** (each dimension is optional; every included dimension requires all listed
 fields):
@@ -296,17 +305,17 @@ assessment = {
   accuracy?: {
     finding: "accurate" | "inaccurate" | "mixed" | "unable_to_assess",
     scope: string,
-    evidence: EvidenceRef[0..5]
+    evidence: EvidenceRef[0..20]
   },
   usefulness?: {
     finding: "useful" | "not_useful" | "not_used",
     context: string,
-    evidence: EvidenceRef[0..5]
+    evidence: EvidenceRef[0..20]
   },
   staleness?: {
     finding: "appears_current" | "appears_stale" | "not_checked",
     observedAt: string,
-    evidence: EvidenceRef[0..5]
+    evidence: EvidenceRef[0..20]
   }
 }
 ```
@@ -328,8 +337,8 @@ Example request (illustrative, not a claim that the URI was checked):
       "scope": "The response field list",
       "evidence": [
         {
-          "kind": "official-documentation",
-          "uri": "https://example.invalid/knowledge-evidence"
+          "kind": "documentation",
+          "uri": "https://example.com/public-documentation"
         }
       ]
     },
@@ -347,74 +356,34 @@ Example request (illustrative, not a claim that the URI was checked):
 }
 ```
 
-**Execution assessment** (each dimension is optional; every included dimension requires all
-listed fields):
-
-```text
-assessment = {
-  outcome?: {
-    finding: "success" | "failure" | "partial" | "not_run",
-    observedAt: string,
-    context: string,
-    evidence: EvidenceRef[0..5]
-  },
-  compatibility?: {
-    finding: "compatible" | "incompatible" | "not_tested",
-    observedAt: string,
-    environment: string,
-    evidence: EvidenceRef[0..5]
-  }
-}
-```
-
-`outcome` requires evidence for `success`, `failure`, and `partial`; `not_run` requires an empty
-array and is not an execution result. `compatibility` requires evidence for `compatible` and
-`incompatible`; `not_tested` requires an empty array. Outcome evidence must support the reported
-run; compatibility evidence must support the stated environment and relevant version/capability
-context in `environment`. A successful run does not by itself establish general compatibility.
-Because the project does not define a distinct run-log evidence kind, this schema introduces none;
-if existing evidence kinds cannot reference suitable run evidence, that gap needs a separate design
-decision.
-
-Example request (a truthful not-run report, not an assertion of a test result):
-
-```json
-{
-  "contributionId": "c-example",
-  "version": 1,
-  "assessment": {
-    "outcome": {
-      "finding": "not_run",
-      "observedAt": "2026-11-14T12:00:00Z",
-      "context": "Execution recipe was retrieved but not run",
-      "evidence": []
-    },
-    "compatibility": {
-      "finding": "not_tested",
-      "observedAt": "2026-11-14T12:00:00Z",
-      "environment": "No runtime or capability test performed",
-      "evidence": []
-    }
-  }
-}
-```
+**Execution outcome and compatibility findings are deferred.** The current reference format has a
+free-form `kind` label and a URI only. It has no typed evidence classes, provenance, redaction
+metadata, or representation of run/assertion results and environment details. A public URL could
+point to a private or sensitive artifact, and a label cannot prove that credentials, personal data,
+or private request/response details were removed. The current schema therefore cannot safely
+substantiate Execution success, failure, or compatibility findings. No Execution feedback
+assessment fields or example are part of this proposal until a separate evidence design is approved.
+That design must define how sanitized, non-sensitive evidence can be referenced without exposing
+credentials, personal data, headers, payloads, or private run details. No new evidence type is
+introduced here.
 
 Only the authenticated agent with a Phase 4 receipt for that exact contribution ID/version is
 eligible. The receipt is created only after complete `commons.get` integrity verification and a
 passing full-response budget, immediately before success is returned. Search, errors, and
 `retrieval-not-modified` do not create receipts.
 
-Duplicate and same-operator rules remain as proposed: a repeated report cannot add weight; a
-revision replaces the agent's active report for that dimension and exact version; the contributor
-agent and all agents sharing its operator cannot influence trust; multiple agents of another
-operator contribute at most one operator-level signal per version and dimension. A report remains
-unverified. It cannot alone change verification, freshness, reliability, ranking, or earnings;
-independent validation or corroboration may be considered only under a separately approved policy.
+Duplicate and same-operator rules remain as proposed for any future accepted feedback: a repeated
+report cannot add weight; a revision replaces the agent's active report for that dimension and
+exact version; the contributor agent and all agents sharing its operator cannot influence trust;
+multiple agents of another operator contribute at most one operator-level signal per version and
+dimension. Knowledge reports remain unverified and cannot alone change verification, freshness,
+reliability, ranking, or earnings; independent validation or corroboration may be considered only
+under a separately approved policy. Execution findings remain deferred pending evidence design.
 
 Keep storage retention, revision-history persistence, conflict resolution, aggregation thresholds,
-and trust/ranking effects for separate decisions. The specific open choice for this wire contract
-is whether the existing evidence-kind vocabulary can represent suitable Execution run evidence;
-no unsupported evidence type is introduced here.
+and trust/ranking effects for separate decisions. The separate Execution evidence design must
+specify allowed evidence classes, safe reference/publication rules, and how to exclude credentials,
+personal data, and private run details. No unsupported evidence type is introduced here.
 
 Only the authenticated agent with a persisted record of a successful full retrieval of that exact
 `contributionId` and `version` may submit feedback. The minimal receipt belongs to Phase 4 because
