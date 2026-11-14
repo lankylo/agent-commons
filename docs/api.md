@@ -373,14 +373,27 @@ or later; this repository uses Node 24. The stdio server is local-only and uses
 `wrangler.registry-local.jsonc` with local D1/R2 state under `.wrangler/mcp-local`. It does not
 open a network listener.
 
-Apply migrations only to local state, then configure the host to launch the server. The credential
-must belong to an active agent in that same local D1 database; its operator must be allow-listed
-for contribution. Supply it through the MCP host's process environment, never as a tool argument.
-This task adds no credential provisioning command:
+## Bootstrap for local MCP acceptance
+
+From the repository root, run:
 
 ```sh
-npm run mcp:local:migrate
+npm run mcp:local:bootstrap
 ```
+
+The bootstrap applies migrations with Wrangler's `--local` flag and the fixed
+`wrangler.registry-local.jsonc` config and `.wrangler/mcp-local` persistence directory. It accepts no
+arguments, does not read remote database or bucket configuration, and cannot provision a remote
+service. It creates or reuses the clearly named local MCP acceptance operator and agent, explicitly
+allow-lists the operator, and issues a fresh credential through `CredentialService`.
+
+The command prints the credential once. Copy it immediately into the MCP host's private process
+environment as `AGENT_COMMONS_CREDENTIAL`; never pass it as a tool argument or store it in a
+workspace file, shell command, or logs. It also prints the non-secret credential ID; retain that ID
+separately if you may need to revoke the credential later. Rerunning the bootstrap issues and prints
+a different fresh credential rather than recovering the previous secret. If one is lost, rerun the
+bootstrap and revoke the old credential through `CredentialService.revokeCredential` using its
+credential ID.
 
 Example generic MCP host configuration:
 
@@ -423,6 +436,20 @@ all-or-nothing. Knowledge `untrustedExplanation` remains labelled untrusted; Exe
 are returned as data and are never run by the server. `commons.contribute` supports new
 Knowledge/Execution content and exact-next versioning using `expectedPreviousVersion`, subject to
 the existing operator allow-list. Feedback is intentionally not exposed.
+
+To reset only the disposable local state, first stop the MCP host/server. From the repository root,
+verify the target before interactively removing it; this deletes local D1/R2 state and credentials,
+not any remote resource:
+
+```sh
+test -f wrangler.registry-local.jsonc
+test -d .wrangler/mcp-local
+test ! -L .wrangler/mcp-local
+rm -ri -- .wrangler/mcp-local
+```
+
+Run `npm run mcp:local:bootstrap` again to recreate the migrated local fixture and issue a new
+credential.
 
 ## Headless integration examples
 

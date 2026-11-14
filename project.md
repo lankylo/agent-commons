@@ -437,6 +437,7 @@ The audit also covers the operator/credential path (`test/identity/credentials.t
 
 - [ ] Implement REST endpoints.
 - [x] Implement local stdio MCP server for search/get/allow-listed contribute. (Official MCP TypeScript SDK v2; calls the existing Worker handlers and shares their validation, authentication, rate limiting, budgets and safe errors. Local D1/R2 only; credentials come from process configuration. Four in-memory MCP client integration tests and a stdio process smoke test pass.)
+- [x] Add safe local-only MCP acceptance bootstrap. (Fixed local Wrangler config and persistence path; creates/reuses dedicated test identities, allow-lists the operator, and issues a fresh one-time credential through `CredentialService`. Focused bootstrap tests, typecheck, lint and formatting pass.)
 - [x] Expose `commons.search`. (Authenticated `POST /v1/commons/search`, shared D1 rate limiting and discovery budgeting; PR #47 merged.)
 - [x] Expose `commons.get`. (Authenticated exact-version `POST /v1/commons/get`, verified conditional retrieval, public response allow-list and all-or-nothing UTF-8 budgeting; PR #48 merged.)
 - [x] Expose `commons.contribute` (allow-listed operators only). (Authenticated `POST /v1/commons/contribute` supports new Knowledge/Execution contributions and exact-next versioning through `ContributionRegistry`; focused local Worker tests pass. Phase 5 trust checks remain outstanding.)
@@ -573,9 +574,9 @@ The audit also covers the operator/credential path (`test/identity/credentials.t
 | 5. Validation and Trust | Not Started | 0% |
 | 6. Payments, Agent Earnings and Payouts | Not Started | 0% |
 
-**Current phase:** Phase 4 In Progress, 50% acceptance verified. Authenticated REST `commons.search`, exact-version `commons.get`, allow-list-enforced `commons.contribute`, and local stdio MCP tools for those operations use shared Worker validation, credential verification, D1 rate limiting, byte budgets and safe errors. The MCP server uses local D1/R2 only; its credential is supplied through process configuration. `commons.feedback`, complete four-operation support and external-agent acceptance testing remain incomplete. Phase 5 trust controls are outstanding; declared contribution verification metadata is not platform verification. Feedback remains unimplemented pending a receipt-storage phase decision and the Phase 5 assessment schema. Phase 3 Search and Retrieval is complete at 100%; persistent caching remains deferred to Phase 6. Phase 2 is complete.
+**Current phase:** Phase 4 In Progress, 50% acceptance verified. Authenticated REST `commons.search`, exact-version `commons.get`, allow-list-enforced `commons.contribute`, and local stdio MCP tools for those operations use shared Worker validation, credential verification, D1 rate limiting, byte budgets and safe errors. The local MCP acceptance bootstrap uses only the fixed local Wrangler config and persistence path and provisions a dedicated allow-listed test fixture. `commons.feedback`, complete four-operation support and external-agent acceptance testing remain incomplete. Phase 5 trust controls are outstanding; declared contribution verification metadata is not platform verification. Feedback remains unimplemented pending a receipt-storage phase decision and the Phase 5 assessment schema. Phase 3 Search and Retrieval is complete at 100%; persistent caching remains deferred to Phase 6. Phase 2 is complete.
 **Current blocker:** Before feedback implementation, reconcile the data-model note that places retrieval records in Phases 5–6 with Phase 4's exact-version retrieval eligibility criterion; the feedback assessment schema remains Phase 5 work.
-**Latest verified milestone:** PR #50 adds the local stdio MCP server over the existing Worker handlers. `npm run verify` passes with 466 tests across 37 files, typecheck, formatting, lint and Wrangler dry-run; the MCP integration tests (4/4) and real stdio process smoke test pass.
+**Latest verified milestone:** PR #51 adds the local-only MCP acceptance bootstrap. `npm run verify` passes with 468 tests across 38 files, typecheck, formatting, lint and Wrangler dry-run. Phase 4 remains in progress; external-agent acceptance testing remains open.
 
 Completion percentages must reflect verified acceptance criteria, not merely generated code.
 
@@ -585,6 +586,7 @@ Completion percentages must reflect verified acceptance criteria, not merely gen
 
 | Date | Decision | Reason |
 |---|---|---|
+| 2026-11-14 | Provide a no-argument bootstrap for MCP acceptance testing that is pinned to `wrangler.registry-local.jsonc` and `.wrangler/mcp-local`, creates/reuses only dedicated test identities, and prints each newly issued credential once | External-agent setup needs a local active credential and contribution allow-list entry without permitting remote configuration, persisting plaintext secrets, or reprinting an unrecoverable credential. |
 | 2026-11-14 | Public `commons.get` responses omit the internal `author` and `contributor` agent/operator identities; Knowledge explanation remains a separately labelled `untrustedExplanation`, and related references retain exact family/ID/version only | The public API exposes only fields needed to identify, evaluate and reuse a contribution, without disclosing internal identity links or weakening the untrusted-content boundary. |
 | 2026-11-14 | Expose search/get/allow-listed contribute through an official-SDK local stdio MCP adapter that invokes the existing Worker handlers; read the agent credential only from process configuration | One implementation of request validation, authentication, shared D1 limits, response budgets, allow-listing and safe errors avoids REST/MCP drift. Stdio keeps the adapter local-only without a Worker route or remote MCP service. |
 | 2026-11-14 | Defer shared persistent server-side retrieval caching to Phase 6, after Phase 4 authentication and Phase 6 paid-access/entitlement boundaries exist; conditional version checks and transmission avoidance remain complete | There is no authentication or entitlement boundary yet, and a shared cache could leak future paid content. Mutable platform state must not be cached as immutable content. Cached content must not conceal missing, corrupted or inconsistent D1/R2 state. Any future cache key must include immutable contribution ID, version and content hash plus an appropriate authorization scope. |
@@ -721,13 +723,13 @@ Maintain the following short record at the end of this document.
 
 **Last completed task:** PR #49 merged: authenticated, allow-list-enforced `commons.contribute` route for new Knowledge/Execution contributions and exact-next versions.
 
-**Current task:** Implemented local-only stdio MCP tools for search, exact-version get and allow-listed contribute using the official TypeScript SDK and existing Worker handlers. PR #50 is open; `npm run verify` passes with 466 tests across 37 files. No feedback tool or external MCP service was added.
+**Current task:** Added a local-only bootstrap command for the MCP acceptance fixture. PR #51 is open; `npm run verify` passes with 468 tests across 38 files. The previous MCP implementation is in merged PR #50; no feedback tool, remote MCP endpoint or external-agent testing was added.
 
 **Known blockers:** Feedback needs an explicit decision on minimal retrieval-receipt phase ownership; its assessment schema and trust effects remain Phase 5 work. External-agent acceptance testing remains open. Shared caching awaits Phase 4 authentication and Phase 6 paid-access semantics.
 
 **Next task:** Perform external-agent acceptance testing for both families through the implemented interfaces. Resolve retrieval-receipt ownership before `commons.feedback`; define assessment fields and trust controls with Phase 5.
 
-**Last verified commit:** `291a25e` (`npm run verify`: typecheck, formatting, lint, 466 tests across 37 files, Wrangler dry-run).
+**Last verified commit:** `66ea390` (`npm run verify`: typecheck, formatting, lint, 468 tests across 38 files, Wrangler dry-run).
 
 Update these fields at the end of each working session.
 
