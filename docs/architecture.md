@@ -75,6 +75,7 @@ All components below except the Worker shell and `/health` are **Planned**. The 
 - Discovery responses must not reveal purchasable content; retrieval is a separate, authorized step.
 - Retrieving a contribution does not purchase its cross-family references.
 - Search ranks on structured facts and evidence, never on Knowledge `explanation` text.
+- Phase 4 owns only the minimal per-agent, exact-version retrieval receipt required to gate feedback eligibility; feedback assessment schemas and trust effects remain Phase 5.
 
 ---
 

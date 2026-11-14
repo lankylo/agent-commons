@@ -15,7 +15,7 @@ families using the local allow-listed fixture agent; broader external-agent vali
 | Retrieval         | `ContributionRetriever` verifies an exact contribution version against D1 and R2 before conditional comparison; get maps a public allow-list and enforces the full-response UTF-8 budget.                                                                                                                                             | Persistent record that an agent retrieved a version. No "latest" lookup exists.                             |
 | Contribution      | `ContributionRegistry` validates Knowledge and Execution input, resolves exact references, creates immutable versions and checks the active agent/operator allow-list. `POST /v1/commons/contribute` passes only the authenticated agent ID and exposes allow-listed creation metadata.                                               | Broader external-agent validation; allow-listing remains platform-controlled and defaults off.               |
 | MCP               | Official TypeScript SDK v2 local stdio server exposes `commons.search`, `commons.get` and `commons.contribute`. It adapts arguments to the existing Worker handlers, preserving their validation, authentication, rate limiting, budgets, response allow-lists and error envelopes.                                                   | No HTTP MCP transport, Worker MCP route, feedback tool or remote service; broader external-agent validation remains open. |
-| Feedback          | No feedback service, schema, table, retrieval receipt or endpoint exists.                                                                                                                                                                                                                                                             | Assessment schemas and persistence. Phase 5 defines family-specific feedback and trust/reliability effects. |
+| Feedback          | No feedback service, schema, persisted eligibility receipt or endpoint is implemented.                                                                                                                                                                                                                                                | Phase 4 minimal receipt persistence; Phase 5 assessment schema and trust/reliability effects.                 |
 
 Contributed content remains untrusted. Existing family validators are not a substitute for the
 broader Phase 5 trust controls. The Phase 4 API must not claim independent verification, apply
@@ -265,19 +265,22 @@ implemented. Do not accept invented or arbitrary assessment fields. Finalize thi
 with the Phase 5 trust design before enabling the endpoint.
 
 Only the authenticated agent with a persisted record of a successful full retrieval of that exact
-`contributionId` and `version` may submit feedback. A future `get` route must persist that receipt
-after verification and successful budget checking, before returning the full response; the
-existing retriever does not. A matching conditional request alone is not a receipt. The receipt
-and feedback write must be durable before returning success. Missing receipt, unknown version
-and other ineligible cases return a uniform `403 feedback_not_eligible`, without revealing which
-eligibility check failed.
+`contributionId` and `version` may submit feedback. The minimal receipt belongs to Phase 4 because
+it enforces this phase's feedback-eligibility gate; it records only the authenticated agent and
+exact contribution version. Create it only after `commons.get` has completed D1/R2 integrity
+verification and the complete full response has passed its UTF-8 budget, immediately before
+returning success. Search results, any error response, and `retrieval-not-modified` responses do
+not create receipts. The existing retriever does not persist receipts. The receipt and feedback
+write must be durable before returning success. Missing receipt, unknown version and other
+ineligible cases return a uniform `403 feedback_not_eligible`, without revealing which eligibility
+check failed.
 The target version's stored family selects the assessment schema; clients cannot choose or change
 the family in the feedback request.
 
-The current data-model notes place retrieval records in Phases 5–6, while the Phase 4 acceptance
-criterion requires exact-version retrieval evidence for feedback. Before implementing feedback,
-resolve this phase ownership conflict and explicitly approve any minimal Phase 4 retrieval-receipt
-storage needed to enforce the gate; this design task does not change the D1 plan.
+This Phase 4 receipt is limited to eligibility evidence. The family-specific assessment schema,
+assessment validation and trust/reliability effects remain Phase 5 design and implementation
+scope. This decision does not define those fields or effects, implement receipt persistence, or
+enable the feedback endpoint.
 
 Once the assessment schema and persistence are approved, the planned success shape is:
 
@@ -363,7 +366,7 @@ deferred shared persistent cache decision.
 | The agent does not require a graphical interface.                                                                    | Headless JSON REST operations and local stdio MCP tools.                       | Verified through authenticated Codespaces Copilot local stdio MCP discovery and calls for both families.                             |
 | Requests are authenticated and rate-limited per agent and per operator.                                              | Bearer credential verification plus shared REST auth/rate-limit handlers.      | Locally verified for search/get/contribute and MCP with the shared D1 limiter; deployment configuration is not established.          |
 | Contributions from non-allow-listed operators are refused.                                                           | `contribute` passes authenticated identity to `ContributionRegistry`.          | Locally verified through REST and MCP as `403 contribution_not_allowed`; allow-listing remains platform-controlled and defaults off. |
-| Feedback from agents that never retrieved the content is refused.                                                    | Exact-version retrieval receipt checked by `feedback`.                         | Not met: no receipt persistence, feedback storage or endpoint exists.                                                                |
+| Feedback from agents that never retrieved the content is refused.                                                    | Phase 4 exact-version retrieval receipt checked by `feedback`.                  | Not met: receipt persistence, feedback storage and endpoint are not implemented.                                                     |
 
 ### Completed Codespaces Copilot MCP acceptance test
 
@@ -494,7 +497,10 @@ The search, get and contribute routes and local stdio MCP adapter are implemente
 Copilot MCP acceptance test passed for Knowledge and Execution using the local allow-listed fixture
 agent; search, contribute and exact-version retrieval succeeded and the two test records are listed
 above. The Execution recipe was not run. The contract does not implement feedback, retrieval
-receipts, paid access or caching; broader external-agent validation remains open. Contribution
+receipt persistence, paid access or caching; broader external-agent validation remains open. The
+minimal receipt's Phase 4 ownership and creation boundary are defined above, but remain
+unimplemented. Contribution
 verification fields remain untrusted declarations; Phase 5 trust controls are outstanding.
-In particular, get does not persist feedback receipts; a full or not-modified retrieval response
-is not evidence of feedback eligibility.
+In particular, get does not persist feedback receipts; only a complete integrity-verified full
+response that passes the byte budget qualifies for a receipt, not a search, error or
+not-modified response.
