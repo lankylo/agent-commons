@@ -441,8 +441,8 @@ The audit also covers the operator/credential path (`test/identity/credentials.t
 - [ ] Expose `commons.get`.
 - [ ] Expose `commons.contribute` (allow-listed operators only).
 - [ ] Expose `commons.feedback` (agents that retrieved the content only).
-- [ ] Define structured error handling.
-- [ ] Document integration examples for Knowledge lookup and Execution recipe retrieval.
+- [x] Define structured error handling. (Proposed versioned REST error envelope and status/code mapping in `docs/api.md`; no HTTP error mapper implemented.)
+- [x] Document integration examples for Knowledge lookup and Execution recipe retrieval. (Proposed headless REST flows in `docs/api.md`; no endpoints implemented.)
 - [ ] Test end-to-end interaction with an external agent for each family.
 
 **Acceptance criteria:**
@@ -569,13 +569,13 @@ The audit also covers the operator/credential path (`test/identity/credentials.t
 | 1. Foundation | Completed | 100% |
 | 2. Identity and Content Registry | Completed | 100% |
 | 3. Search and Retrieval | Completed | 100% |
-| 4. Agent Interfaces | Not Started | 0% |
+| 4. Agent Interfaces | In Progress | 0% |
 | 5. Validation and Trust | Not Started | 0% |
 | 6. Payments, Agent Earnings and Payouts | Not Started | 0% |
 
-**Current phase:** Phase 4 Not Started. Phase 3 Search and Retrieval is completed at 100% because every current Phase 3 acceptance criterion is verified in the audit above. Persistent caching is not implemented and is deferred to Phase 6; Phase 5 ranking signals remain deferred because their outcomes, feedback and validated reliability inputs do not yet exist. Phase 2 is complete.
-**Current blocker:** None  
-**Latest verified milestone:** Phase 3 acceptance audit verified against existing test/documentation evidence; `npm run verify` passes on checkpoint `4565959` (typecheck, formatting, lint, 444 tests across 33 files, Wrangler dry-run).
+**Current phase:** Phase 4 In Progress, 0% runtime acceptance verified. The versioned REST contract and headless integration examples are documented in `docs/api.md`; no Phase 4 endpoint, authentication/rate-limit middleware or external-agent acceptance criterion is implemented. Feedback remains unimplemented pending a receipt-storage phase decision and the Phase 5 assessment schema. Phase 3 Search and Retrieval is complete at 100%; persistent caching remains deferred to Phase 6. Phase 2 is complete.
+**Current blocker:** Before feedback implementation, reconcile the data-model note that places retrieval records in Phases 5–6 with Phase 4's exact-version retrieval eligibility criterion; the feedback assessment schema remains Phase 5 work.
+**Latest verified milestone:** Phase 3 acceptance audit verified; Phase 4 REST contract documented in `docs/api.md` (documentation-only, pending full verification).
 
 Completion percentages must reflect verified acceptance criteria, not merely generated code.
 
@@ -690,11 +690,11 @@ Do not expand scope solely to solve speculative future problems.
 
 ## 10. Next Development Actions
 
-**Immediate task: Review this Phase 3 completion and cache-deferral audit PR. PR #44 is merged.**
+**Immediate task: Review the Phase 4 versioned REST contract PR.**
 
-1. Phase 3 acceptance criteria are complete; after this PR merges, separately approve Phase 4 Agent Interfaces work. Do not start it automatically.
-2. Keep Phase 5 ranking signals deferred until the required outcomes, feedback and validated reliability data exist. Persistent shared caching is assigned to Phase 6, after authentication and paid-access semantics exist; do not claim or implement it early.
-3. Do not create real D1 databases, apply remote migrations, create remote R2 buckets, seed remotely, or implement authentication, public APIs, payments or caching until their tasks are approved. Authentication/rate limiting belong to Phase 4; paid access and caching belong to Phase 6.
+1. After this contract is reviewed, separately approve Phase 4 endpoint and middleware implementation; this documentation task does not authorize implementation.
+2. Keep Phase 5 ranking signals deferred until outcomes, feedback schemas and validated reliability data exist. Persistent shared caching remains assigned to Phase 6, after authentication and paid-access semantics exist.
+3. Do not create real D1 databases, apply remote migrations, create remote R2 buckets, seed remotely, or add unapproved deployment settings. Authentication/rate limiting belong to Phase 4; paid access and caching belong to Phase 6.
 
 ---
 
@@ -714,17 +714,17 @@ After every completed development task:
 
 Maintain the following short record at the end of this document.
 
-**Current phase:** Phase 4 Not Started; Phase 3 completed at 100%
+**Current phase:** Phase 4 In Progress; 0% runtime acceptance verified. Phase 3 completed at 100%.
 
-**Last completed task:** Audited all Phase 3 checklist items and acceptance criteria against existing tests and documentation; all eight criteria are verified, Phase 3 is complete at 100%, and shared caching is explicitly deferred to Phase 6. PR #45 is open; `npm run verify` passes.
+**Last completed task:** Phase 3 audit verified all current acceptance criteria and deferred shared caching to Phase 6 (PR #45 merged).
 
-**Current task:** Phase 3 completion and cache-deferral audit is verified; PR #45 is open for review. Do not merge automatically.
+**Current task:** Define the versioned Phase 4 REST contract and traceability in `docs/api.md`; no endpoints or runtime controls are implemented.
 
-**Known blockers:** None. Phase 5 ranking signals await outcomes, feedback and validated reliability data; shared caching awaits Phase 4 authentication and Phase 6 paid-access semantics.
+**Known blockers:** Feedback needs an explicit decision on minimal retrieval-receipt phase ownership; its assessment schema and trust effects remain Phase 5 work. Shared caching awaits Phase 4 authentication and Phase 6 paid-access semantics.
 
-**Next task:** Separately approve Phase 4 Agent Interfaces work. Do not begin Phase 5 or Phase 6 tasks automatically.
+**Next task:** After review, resolve retrieval-receipt phase ownership and separately approve Phase 4 endpoint, authentication and rate-limit implementation. Define feedback assessment fields with Phase 5; do not implement them from this contract alone.
 
-**Last verified commit:** `4565959` (`npm run verify`: typecheck, formatting, lint, 444 tests across 33 files, Wrangler dry-run).
+**Last verified commit:** PR #45 merge commit (Phase 3 completion audit; `npm run verify`: typecheck, formatting, lint, 444 tests across 33 files, Wrangler dry-run). Phase 4 documentation verification is pending.
 
 Update these fields at the end of each working session.
 
