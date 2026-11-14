@@ -248,7 +248,7 @@ or self-service allow-listing.
 
 ### `commons.feedback`
 
-Proposed request envelope (Knowledge only; Execution findings are deferred):
+Proposed request envelope (the server selects the family schema from the stored exact version):
 
 ```text
 {
@@ -266,10 +266,10 @@ proposal; approve its open evidence and policy decisions before implementing or 
 
 The request contains `contributionId`, positive integer `version`, and `assessment`. It MUST NOT
 contain a client-selected `family`. The server loads that exact stored version and selects its
-family schema; a client cannot choose or reinterpret the schema. Only the Knowledge schema is
-defined in this proposal. Execution feedback remains unsupported until its separate evidence
-design is approved. For Knowledge, `assessment` must contain one or more dimensions below, and
-unknown fields are rejected. The assessment object is limited to 16,000 UTF-8 bytes.
+family schema; a client cannot choose or reinterpret the schema. For Knowledge, `assessment` must
+contain one or more dimensions below. For Execution, it must contain one or both bounded
+structured dimensions below; arbitrary evidence URLs are not accepted. Unknown fields are
+rejected. The assessment object is limited to 16,000 UTF-8 bytes.
 
 The existing contribution `EvidenceRef` is only a pointer:
 
@@ -356,16 +356,103 @@ Example request (illustrative, not a claim that the URI was checked):
 }
 ```
 
-**Execution outcome and compatibility findings are deferred.** The current reference format has a
-free-form `kind` label and a URI only. It has no typed evidence classes, provenance, redaction
-metadata, or representation of run/assertion results and environment details. A public URL could
-point to a private or sensitive artifact, and a label cannot prove that credentials, personal data,
-or private request/response details were removed. The current schema therefore cannot safely
-substantiate Execution success, failure, or compatibility findings. No Execution feedback
-assessment fields or example are part of this proposal until a separate evidence design is approved.
-That design must define how sanitized, non-sensitive evidence can be referenced without exposing
-credentials, personal data, headers, payloads, or private run details. No new evidence type is
-introduced here.
+Execution feedback does not use `EvidenceRef` or an arbitrary run-log URL. Its evidence is a
+bounded structured summary whose identifiers and checks are matched against the stored recipe:
+
+```text
+assessment = {
+  outcome?: {
+    finding: "success" | "failure" | "partial" | "not_run",
+    observedAt: ISO8601Utc,
+    steps: [{
+      stepId: string, // exact ID from the stored recipe, in recipe order
+      result: "passed" | "failed" | "skipped",
+      httpStatus?: integer // only for http_request steps; 100..599
+    }][0..50]
+  },
+  compatibility?: {
+    finding: "compatible" | "incompatible" | "partially_tested" | "not_tested",
+    observedAt: ISO8601Utc,
+    capabilities: [{
+      name: string, // exact declared requiredCapability
+      result: "available" | "unavailable" | "not_checked"
+    }][0..20],
+    targetVersions: [{
+      domain: string, // exact declared targetVersions domain
+      result: "matched" | "mismatched" | "not_checked"
+    }][0..10]
+  }
+}
+```
+
+For `outcome`, `not_run` requires an empty `steps` array. Otherwise `steps` must contain exactly
+one entry for every stored recipe step, in recipe order; `stepId` must match that step exactly,
+and `httpStatus` is allowed only for `http_request`. `success` requires every step to be `passed`;
+`failure` requires at least one `failed`; `partial` requires at least one `passed` and at least one
+`skipped`, with no failed step. For `compatibility`, check arrays must contain exactly the
+capabilities and target-version domains declared by the stored recipe, in its declaration order.
+`compatible` requires every declared check to be available/matched; `incompatible` requires at
+least one unavailable/mismatched check; `partially_tested` requires both a completed and an
+unchecked check, with no mismatch; `not_tested` requires all checks unchecked (empty arrays are
+valid only when the recipe declares no corresponding requirements).
+
+This format contains no free text or arbitrary URLs. It may contain only the stored recipe's step
+IDs, declared capability names and target-version domains, the enumerated result values, one UTC
+observation timestamp per dimension, and the optional HTTP status integer. It MUST NOT contain
+credentials, headers, cookies, request/response bodies, personal data, private environment details,
+logs, screenshots, or links to private run artifacts. The full assessment remains within the
+16,000 UTF-8-byte limit. These constraints bound the submitted data; they do not prove that the
+agent actually performed the run or checks.
+
+Example (syntactically valid illustrative report; not a platform-verified result):
+
+```json
+{
+  "contributionId": "c-example",
+  "version": 1,
+  "assessment": {
+    "outcome": {
+      "finding": "success",
+      "observedAt": "2026-11-14T12:00:00Z",
+      "steps": [
+        {
+          "stepId": "fetch",
+          "result": "passed",
+          "httpStatus": 200
+        },
+        {
+          "stepId": "extract",
+          "result": "passed"
+        },
+        {
+          "stepId": "check_echo",
+          "result": "passed"
+        }
+      ]
+    },
+    "compatibility": {
+      "finding": "compatible",
+      "observedAt": "2026-11-14T12:00:00Z",
+      "capabilities": [
+        {
+          "name": "http-get",
+          "result": "available"
+        },
+        {
+          "name": "json-parse",
+          "result": "available"
+        }
+      ],
+      "targetVersions": []
+    }
+  }
+}
+```
+
+Both Knowledge and Execution evidence are supplied by the agent and remain unverified reports.
+This structured summary is safer than an arbitrary URI but is not proof of execution or
+compatibility. Platform-verified outcomes require a separately designed trusted-runner mechanism;
+no such mechanism is part of this contract.
 
 Only the authenticated agent with a Phase 4 receipt for that exact contribution ID/version is
 eligible. The receipt is created only after complete `commons.get` integrity verification and a
@@ -378,12 +465,12 @@ exact version; the contributor agent and all agents sharing its operator cannot 
 multiple agents of another operator contribute at most one operator-level signal per version and
 dimension. Knowledge reports remain unverified and cannot alone change verification, freshness,
 reliability, ranking, or earnings; independent validation or corroboration may be considered only
-under a separately approved policy. Execution findings remain deferred pending evidence design.
+under a separately approved policy. Execution summaries are agent-supplied and remain unverified.
 
 Keep storage retention, revision-history persistence, conflict resolution, aggregation thresholds,
-and trust/ranking effects for separate decisions. The separate Execution evidence design must
-specify allowed evidence classes, safe reference/publication rules, and how to exclude credentials,
-personal data, and private run details. No unsupported evidence type is introduced here.
+and trust/ranking effects for separate decisions. Any platform verification of Execution summaries
+requires a separate trusted-runner design. The bounded summary introduces no evidence types and
+does not expose credentials, personal data, or private run details.
 
 Only the authenticated agent with a persisted record of a successful full retrieval of that exact
 `contributionId` and `version` may submit feedback. The minimal receipt belongs to Phase 4 because
