@@ -2,8 +2,8 @@
 
 **Project:** Agent Commons  
 **Version:** 1.4  
-**Status:** Phase 2 Complete  
-**Last updated:** 11 November 2026  
+**Status:** Phase 3 Complete
+**Last updated:** 14 November 2026
 **Source of truth:** `project.md`
 
 ---
@@ -384,23 +384,24 @@ The audit also covers the operator/credential path (`test/identity/credentials.t
 
 ### Phase 3 — Search and Retrieval
 
-**Status:** In Progress
+**Status:** Completed
 
-**Verified so far:** internal D1 FTS5 index foundation (`migrations/0003_contribution_search_index.sql`; `src/registry/search-document.ts`) , internal D1 search-query service (`src/registry/search.ts`; `test/registry/search-query.test.ts`) and baseline deterministic ranking with freshness (`test/registry/search-ranking.test.ts`). Search is deterministic and LLM-free: bounded plain-text tokenization, implicit-AND FTS matching, latest-version-only selection, typed shared and family-specific metadata filters and metadata-only results with a derived `freshness` (`current`/`stale`) and `reviewDueAt`. Ranking uses only persisted D1 metadata, is applied in SQL before the limit and is documented in the `src/registry/search.ts` header: (1) current before stale, where `reviewDueAt` = later of `asOf`/`lastVerifiedAt` + `reviewIntervalDays` and the reference time is injected (stale from `reviewDueAt` inclusive); (2) family-aware evidence tier on a common 0–2 scale (Knowledge cross-source 2, source-checked/owner-tested 1, unverified 0; Execution owner-tested 2, simulated 1, unverified 0); (3) `reliabilityScore` descending, null last; (4) Knowledge corroboration = distinct source URIs beyond the first, capped at 4 (Execution 0); (5) `created_at DESC`; (6) `contribution_id ASC`. Phase 5 signals (recent Execution outcomes, feedback, trust, source re-checks) are not implemented, and no reliability data is populated yet. Internal discovery-response mapper (`src/registry/discovery.ts`, `test/registry/discovery.test.ts`) is implemented: pure, versioned, discriminated by family, explicit field allow-list, ranked order preserved, no paid content. Search results and `discovery-response/v1` items now carry an immutable `related` list of exact `{family, id, version}` references for the exact latest version, in stored order, loaded by one bounded bulk D1 query (`test/registry/search-related.test.ts`); empty when none. Internal `retrieval-response/v1` mapper (`src/registry/retrieval-response.ts`) is implemented with Knowledge explanation structurally labelled untrusted. Internal discovery and retrieval byte budgeting (`src/registry/discovery-budget.ts`, `src/registry/retrieval-budget.ts`) are implemented; the conditional `retrieval-not-modified/v1` contract (`src/registry/retrieval-conditional.ts`) is implemented; persistent caching, public APIs and Phase 5 signals are not implemented. Conditional retrieval is integrated in `ContributionRetriever`.
+**Verified:** The Phase 3 acceptance audit below maps every criterion to tests and documentation; all eight current criteria are met. Search is deterministic and LLM-free: bounded plain-text tokenization, implicit-AND FTS matching, latest-version-only selection, typed shared and family-specific metadata filters and metadata-only results with derived `freshness` (`current`/`stale`) and `reviewDueAt`. Ranking uses persisted D1 metadata and is applied in SQL before the limit: current before stale; family-aware evidence tier; nullable reliability descending; Knowledge source corroboration; creation time; and contribution-ID tie-break. `reliabilityScore` is returned but currently null where no reliability data exists. The internal discovery mapper is family-discriminated, allow-listed and does not expose paid content. Discovery and retrieval responses include exact-version cross-family references. Complete verified retrieval, byte budgets and conditional `retrieval-not-modified/v1` responses are implemented and tested. Persistent shared caching and Phase 5 ranking signals are explicitly deferred and are not implemented.
 
 **Indexed fields:** shared title, purpose, content type; Knowledge summary, fact subject/predicate/scalar value, record keys and scalar values; Execution objective, target domains, input/output names and types, required capabilities.  
 **Deliberately excluded:** Knowledge `explanation`, fact units, sources, rights, evidence, licensing, verification claims, Execution steps, contributor/operator/agent ids, hashes, timestamps, platform state, raw JSON.
 
-- [x] Implement D1 full-text search.
-- [x] Implement metadata filtering, including `family` and family-specific fields.
-- [x] Implement baseline deterministic, family-aware ranking and freshness handling from persisted D1 metadata: freshness state and review-due time, stale demotion, evidence tier per family, null-safe reliability, Knowledge source corroboration (never explanation text), recency and contribution-ID tie-break, ranked before the limit.
-- [ ] Extend ranking with signals that do not exist yet: recent Execution outcomes and compatibility matching, source re-checks and validated reliability (depends on Phase 5 data).
-- [x] Create compact, family-labelled discovery responses that support evaluation before purchase without exposing the full paid contribution (internal pure mapper `src/registry/discovery.ts`, `discovery-response/v1`; no public route yet).
-- [x] Implement full Knowledge and Execution contribution retrieval, with Knowledge `explanation` text delimited and labelled as untrusted. *(Internal `src/registry/retrieval-response.ts`: pure `buildRetrievalResponse` maps a successful `RetrievedContribution` to `retrieval-response/v1`, discriminated by family, allow-listed and deeply frozen; Knowledge `explanation` is removed from `content` and exposed only as `untrustedExplanation` `{label: "untrusted", text}` or `null`; Execution has no explanation field; 12 tests in `test/registry/retrieval-response.test.ts`. No public API, token budget or caching.)*
-- [x] List cross-family references in discovery and retrieval responses. *(Internal search results and `discovery-response/v1` list exact references; internal `RetrievedContribution` has a frozen top-level `related` list.)*
-- [x] Add token-budget controls. *(Discovery: `budgetDiscoveryResponse` in `src/registry/discovery-budget.ts` keeps the largest ranked prefix of `discovery-response/v1` that fits a positive safe-integer UTF-8 byte budget; typed `invalid_budget`/`budget_too_small` errors; frozen `{maxUtf8Bytes, usedUtf8Bytes, omittedResultCount}`; 9 tests. Retrieval: `budgetRetrievalResponse` in `src/registry/retrieval-budget.ts` is all-or-nothing — the complete `retrieval-response/v1` is returned with frozen `{maxUtf8Bytes, usedUtf8Bytes}`, or a typed `response_too_large` error carrying `maxUtf8Bytes` and `requiredUtf8Bytes`, or `invalid_budget`; no truncation of any field, including Knowledge `untrustedExplanation`; 13 tests. UTF-8 bytes of `JSON.stringify` output measured with `TextEncoder` are the deterministic unit and a model-independent proxy for token cost, not an exact token count. Internal only; no public API.)*
-- [ ] Implement retrieval caching and version checks. *(Conditional response contract complete: internal pure `buildConditionalRetrievalResponse` in `src/registry/retrieval-conditional.ts` compares a `{contributionId, version, contentHash}` validator by strict equality with a verified `RetrievedContribution` and returns a deeply frozen four-key `retrieval-not-modified/v1` response on a full match, otherwise the unchanged complete `retrieval-response/v1`; 14 tests in `test/registry/retrieval-conditional.test.ts`. Retriever integration complete: `ContributionRetriever.getConditionalContributionVersion(contributionId, version, validator?)` runs the unchanged verified `getContributionVersion` first, returns its structured errors unchanged whatever the validator, and only after all D1/R2 integrity checks pass maps the result through `buildConditionalRetrievalResponse`; 11 Miniflare D1+R2 tests in `test/registry/retrieval-conditional-retriever.test.ts`. Persistent caching remains; no public API.)*
-- [x] Test search quality for Knowledge and Execution using realistic agent-generated queries. *(Complete. Unchanged 25-case benchmark: after PR #43 query normalization 24/25; after deterministic identifier index terms (`splitIdentifier`/`identifierSearchText` applied only to Knowledge fact predicates and record keys in `buildSearchText`) all 25 pass: top-1 22/22, top-3 22/22, 0 missed, 0 unexpected, 0 positive zero-result. See `docs/search-quality.md`; tests `search-identifiers.test.ts`, `search-quality.test.ts`. Previously created local search indexes must be recreated or reseeded to receive the derived terms; no remote D1 exists. Vectorize not needed.)*
+- [x] Implement D1 full-text search. (`test/registry/search-query.test.ts`; benchmarked against both families in `test/registry/search-quality.test.ts`.)
+- [x] Implement metadata filtering, including `family` and family-specific fields. (`test/registry/search-query.test.ts`: family/content type and every Knowledge and Execution filter; `test/registry/search-quality.test.ts`.)
+- [x] Implement baseline deterministic, family-aware ranking and freshness handling from persisted D1 metadata: freshness state and review-due time, stale demotion, evidence tier per family, null-safe reliability, Knowledge source corroboration (never explanation text), recency and contribution-ID tie-break, ranked before the limit. (`test/registry/search-ranking.test.ts`; repeated-result determinism also covered by `search-quality.test.ts`.)
+- [ ] Extend ranking with Phase 5 signals: recent Execution outcomes, compatibility, source re-checks, feedback and validated reliability. *(Deferred to Phase 5, not a Phase 3 acceptance gap: the required outcomes, feedback and validated reliability data do not yet exist.)*
+- [x] Create compact, family-labelled discovery responses that support evaluation before purchase without exposing the full paid contribution. (`src/registry/discovery.ts`, `discovery-response/v1`; `test/registry/discovery.test.ts` verifies both families, allow-listed fields and no paid-content fields. Internal mapper; no public route yet.)
+- [x] Implement full Knowledge and Execution contribution retrieval, with Knowledge `explanation` text delimited and labelled as untrusted. *(`src/registry/retrieval-response.ts`: complete, family-discriminated, allow-listed and deeply frozen `retrieval-response/v1`; Knowledge `explanation` appears only as `untrustedExplanation`; Execution has no explanation field. `test/registry/retrieval.test.ts` verifies exact-version retrieval and D1/R2 integrity; 12 mapper tests in `test/registry/retrieval-response.test.ts`.)*
+- [x] List cross-family references in discovery and retrieval responses. (`test/registry/search-related.test.ts` verifies search/discovery references; `test/registry/retrieval.test.ts` verifies exact-version references in both directions and D1/R2 agreement.)
+- [x] Add token-budget controls. *(Discovery: `budgetDiscoveryResponse` in `src/registry/discovery-budget.ts` keeps the largest ranked prefix of `discovery-response/v1` that fits a positive safe-integer UTF-8 byte budget; typed `invalid_budget`/`budget_too_small` errors; frozen `{maxUtf8Bytes, usedUtf8Bytes, omittedResultCount}`; 9 tests in `test/registry/discovery-budget.test.ts`. Retrieval: `budgetRetrievalResponse` in `src/registry/retrieval-budget.ts` is all-or-nothing — the complete response is returned or typed `response_too_large`/`invalid_budget`; no field is truncated; 13 tests in `test/registry/retrieval-budget.test.ts`. `test/registry/response-size.test.ts` checks serialized sizes and budget boundaries. UTF-8 bytes of JSON output are a deterministic model-independent proxy for token cost, not an exact token count. Internal only; no public API.)*
+- [x] Implement conditional retrieval/version checks and avoid retransmitting unchanged content when the exact contribution ID, version and content hash match. *(A matching validator returns minimal `retrieval-not-modified/v1`; otherwise the complete response is returned. `test/registry/retrieval-conditional.test.ts` and 11 Miniflare D1+R2 integration tests in `test/registry/retrieval-conditional-retriever.test.ts` verify matching/mismatching validators, both families, and that missing/corrupt/inconsistent D1/R2 state is never concealed. `test/registry/response-size.test.ts` verifies the not-modified response is constant-size and smaller than full responses.)*
+- [ ] Implement shared persistent server-side retrieval caching. *(Deferred to Phase 6; not implemented and not a Phase 3 acceptance criterion. Authentication and entitlement boundaries do not yet exist. See the architecture decision below and the Phase 6 checklist.)*
+- [x] Test search quality for Knowledge and Execution using realistic agent-generated queries. *(Unchanged 25-case benchmark: after PR #44, all 25 pass; top-1 22/22, top-3 22/22, 0 missed, 0 unexpected and 0 positive zero-result. `test/registry/search-quality.test.ts`, `test/registry/search-identifiers.test.ts`, `docs/search-quality.md`. Previously created local indexes must be recreated or reseeded; no remote D1 exists. Vectorize is not needed.)*
 - [x] Test response size (`test/registry/response-size.test.ts`, `docs/response-sizes.md`; exact UTF-8 bytes, a proxy for token cost only).
 
 **Acceptance criteria:**
@@ -412,6 +413,19 @@ The audit also covers the operator/credential path (`test/identity/credentials.t
 - Repeated retrieval avoids unnecessary content transmission.
 - Basic search and retrieval require no LLM calls.
 - If keyword search fails quality testing, record the result and evaluate Vectorize before proceeding.
+
+**Phase 3 acceptance audit (2026-11-14):** All eight current acceptance criteria are verified. Test suites run locally with Miniflare and real local migrations; the benchmark uses no network, remote resources or LLM.
+
+| Acceptance criterion | Direct test and documentation evidence | Result |
+|---|---|---|
+| Find relevant contributions from either family with natural task-oriented queries | `test/registry/search-quality.test.ts` runs both-family benchmark cases; `docs/search-quality.md` records all 25 cases passing, top-1 22/22 and top-3 22/22. | Verified |
+| Return concise actionable metadata, including freshness and reliability | `test/registry/search-query.test.ts`, `test/registry/search-ranking.test.ts` and `test/registry/discovery.test.ts` cover result metadata and discovery fields; nullable reliability is returned as `null` until reliability data exists. | Verified |
+| Demote or flag stale contributions | `test/registry/search-ranking.test.ts` tests review-due boundaries and current-before-stale order; `test/registry/search-quality.test.ts` covers freshness ordering. | Verified |
+| Enable purchase evaluation without revealing purchasable content | `test/registry/discovery.test.ts` verifies both families and rejects paid-content fields from the allow-listed response. | Verified |
+| Retrieve complete contributions in their respective validated schemas | `test/registry/retrieval.test.ts` verifies Knowledge and Execution exact-version reads and integrity; `test/registry/retrieval-response.test.ts` verifies complete family-specific response mapping and untrusted Knowledge explanation handling. | Verified |
+| Avoid retransmitting unchanged content on repeated conditional retrieval | `test/registry/retrieval-conditional.test.ts` and `test/registry/retrieval-conditional-retriever.test.ts` verify minimal matching responses, full responses on mismatch, and integrity errors taking precedence; `test/registry/response-size.test.ts` verifies the not-modified response is smaller. | Verified by conditional responses; no persistent cache |
+| Basic search and retrieval require no LLM calls | `test/registry/search-quality.test.ts` explicitly runs local D1 search with no network, remote resources or LLM; `test/registry/retrieval.test.ts` exercises retrieval against local Miniflare D1/R2 only. The production LLM-free boundary is documented in `docs/architecture.md`. | Verified |
+| Evaluate Vectorize if keyword search fails quality testing | `test/registry/search-quality.test.ts` and `docs/search-quality.md` report the unchanged benchmark at 25/25; `docs/search-quality.md` concludes Vectorize is not needed. | Verified; fallback not triggered |
 
 **Milestone:** First functional Agent Commons content discovery and retrieval workflow.
 
@@ -488,6 +502,7 @@ The audit also covers the operator/credential path (`test/identity/credentials.t
 - [ ] Implement operator controls: per-transaction and period spending limits, permitted categories, minimum reserve, maximum autonomous balance, withdrawal approval and emergency suspension.
 - [ ] Enforce operator controls server-side at purchase time.
 - [ ] Implement paid retrieval for both Knowledge and Execution contributions.
+- [ ] Implement shared persistent server-side content caching only after Phase 4 authentication and Phase 6 paid-access/entitlement semantics exist. Cache keys must include immutable contribution ID, version and content hash plus an appropriate authorization scope; cache hits must not conceal D1/R2 integrity failures or treat mutable platform state as immutable content.
 - [ ] Implement payment receipt records.
 - [ ] Implement operator-approved, legally verified payout destinations and withdrawals.
 - [ ] Implement refund and reversal handling, including clawback of pending and available earnings.
@@ -553,14 +568,14 @@ The audit also covers the operator/credential path (`test/identity/credentials.t
 |---|---|---|
 | 1. Foundation | Completed | 100% |
 | 2. Identity and Content Registry | Completed | 100% |
-| 3. Search and Retrieval | In Progress | 80% |
+| 3. Search and Retrieval | Completed | 100% |
 | 4. Agent Interfaces | Not Started | 0% |
 | 5. Validation and Trust | Not Started | 0% |
 | 6. Payments, Agent Earnings and Payouts | Not Started | 0% |
 
-**Current phase:** Phase 3 In Progress, 80% (internal D1 FTS5 index foundation, deterministic query normalization, identifier index terms and a passing search-quality benchmark, search-query service with filtering, baseline deterministic family-aware ranking with freshness, and internal discovery-response mapper and discovery-side and retrieval-side cross-family `related` references, retrieval byte budgeting and verified conditional retrieval (`retrieval-not-modified/v1`) in `ContributionRetriever` verified; Phase 5 ranking signals and persistent caching not started). Phase 2 complete. Previously: Phase 2 (identity model, shared envelope, Knowledge schema, Execution schema and review-interval maxima and cross-family references defined and D1 table design documented and implemented as the initial local migration; content hashing implemented; local R2 content-object convention implemented; local D1 identity repository (operators and agents) and local D1 agent credentials (issuance, verification, revocation; no HTTP auth) implemented; initial contribution creation (version 1) implemented locally; immutable contribution versioning (version n+1) implemented locally; internal verified retrieval by contribution ID and exact version implemented locally; PRs #6–#33 merged, including the Phase 3 search-index foundation (PR #25); Phase 6 was re-scoped from non-cash credits to agent earnings, balances and payouts by the merged architecture-only PR #20, no financial code or tables)  
+**Current phase:** Phase 4 Not Started. Phase 3 Search and Retrieval is completed at 100% because every current Phase 3 acceptance criterion is verified in the audit above. Persistent caching is not implemented and is deferred to Phase 6; Phase 5 ranking signals remain deferred because their outcomes, feedback and validated reliability inputs do not yet exist. Phase 2 is complete.
 **Current blocker:** None  
-**Latest verified milestone:** Wrangler 4.159.0 and Workers types v5 verified by clean install, formatting, typecheck, lint, tests, Worker dry-run and local `/health` HTTP 200 smoke test
+**Latest verified milestone:** PR #44 merged with the unchanged 25-case search-quality benchmark passing 25/25; the Phase 3 completion audit maps all eight current acceptance criteria to existing tests and documentation.
 
 Completion percentages must reflect verified acceptance criteria, not merely generated code.
 
@@ -570,6 +585,7 @@ Completion percentages must reflect verified acceptance criteria, not merely gen
 
 | Date | Decision | Reason |
 |---|---|---|
+| 2026-11-14 | Defer shared persistent server-side retrieval caching to Phase 6, after Phase 4 authentication and Phase 6 paid-access/entitlement boundaries exist; conditional version checks and transmission avoidance remain complete | There is no authentication or entitlement boundary yet, and a shared cache could leak future paid content. Mutable platform state must not be cached as immutable content. Cached content must not conceal missing, corrupted or inconsistent D1/R2 state. Any future cache key must include immutable contribution ID, version and content hash plus an appropriate authorization scope. |
 | 2026-11-10 | Use Cloudflare serverless infrastructure | Low operating overhead and automated scaling |
 | 2026-11-10 | Use TypeScript | Shared language across backend modules |
 | 2026-11-10 | Prioritize deterministic processing | Reduce token and inference costs |
@@ -674,11 +690,11 @@ Do not expand scope solely to solve speculative future problems.
 
 ## 10. Next Development Actions
 
-**Immediate task: Review the identifier index-terms PR (K2 fix, unchanged benchmark now 25/25). PR #43 is merged.**
+**Immediate task: Review this Phase 3 completion and cache-deferral audit PR. PR #44 is merged.**
 
-1. After this PR merges, separately approve the next remaining Phase 3 item (persistent retrieval caching, if still wanted); do not start it automatically. Vectorize is not needed.
-2. Keep the next task internal and deterministic: no public HTTP/MCP APIs, Vectorize or LLM calls unless separately approved. Phase 5 ranking signals stay deferred until their data exists.
-3. Do not create real D1 databases, apply remote migrations, create remote R2 buckets, seed remotely, or implement HTTP authentication or APIs until their tasks are approved. HTTP authentication and rate limiting belong to Phase 4; spending limits to Phase 6.
+1. Phase 3 acceptance criteria are complete; after this PR merges, separately approve Phase 4 Agent Interfaces work. Do not start it automatically.
+2. Keep Phase 5 ranking signals deferred until the required outcomes, feedback and validated reliability data exist. Persistent shared caching is assigned to Phase 6, after authentication and paid-access semantics exist; do not claim or implement it early.
+3. Do not create real D1 databases, apply remote migrations, create remote R2 buckets, seed remotely, or implement authentication, public APIs, payments or caching until their tasks are approved. Authentication/rate limiting belong to Phase 4; paid access and caching belong to Phase 6.
 
 ---
 
@@ -698,12 +714,17 @@ After every completed development task:
 
 Maintain the following short record at the end of this document.
 
-**Current phase:** Phase 3 In Progress  
-**Last completed task:** Made camelCase/PascalCase/acronym/digit structured identifiers (Knowledge fact predicates and record keys only) separately searchable in `buildSearchText` (original identifier preserved) with tests (`search-identifiers.test.ts`, updated `search-quality.test.ts`) and re-ran the unchanged benchmark: 25/25 cases pass, top-1 22/22, top-3 22/22, 0 missed, 0 unexpected, 0 positive zero-result (`docs/search-quality.md`). Search-quality checklist item complete; Phase 3 set to 80%. Existing local indexes must be recreated or reseeded.
-**Current task:** Review of the identifier index-terms PR (do not merge automatically)  
-**Known blockers:** None; 16 development-only audit findings remain for separate Vitest and ESLint upgrade reviews  
-**Next task:** Separately approved remaining Phase 3 work (persistent retrieval caching); HTTP authentication/rate limiting are Phase 4, spending limits Phase 6  
-**Last verified commit:** the identifier index-terms PR commit (`npm run verify`: 444 tests, 33 files)  
+**Current phase:** Phase 4 Not Started; Phase 3 completed at 100%
+
+**Last completed task:** Merged PR #44 indexed deterministic Knowledge identifier components; the unchanged search benchmark now passes 25/25, top-1 22/22 and top-3 22/22 (`docs/search-quality.md`). Existing local indexes must be recreated or reseeded.
+
+**Current task:** Complete the Phase 3 acceptance audit and document conditional retrieval as complete and persistent caching as deferred to Phase 6.
+
+**Known blockers:** None. Phase 5 ranking signals await outcomes, feedback and validated reliability data; shared caching awaits Phase 4 authentication and Phase 6 paid-access semantics.
+
+**Next task:** Separately approve Phase 4 Agent Interfaces work. Do not begin Phase 5 or Phase 6 tasks automatically.
+
+**Last verified commit:** PR #44 merge commit (`npm run verify`: 444 tests, 33 files); this documentation-only audit is being verified in its PR.
 
 Update these fields at the end of each working session.
 
