@@ -11,6 +11,7 @@ import type { RegistryEnv } from "../src/registry/creation";
 import { getPlatformProxy, type PlatformProxy } from "wrangler";
 import {
   bootstrapLocalMcp,
+  openLocalMcpDatabase,
   LOCAL_MCP_AGENT_ID,
   LOCAL_MCP_AGENT_NAME,
   LOCAL_MCP_CONFIG_PATH,
@@ -62,6 +63,40 @@ function listFiles(directory: string): string[] {
 }
 
 describe("local MCP bootstrap", () => {
+  it("opens a temporary database migrated by Wrangler through the real adapter", async () => {
+    const temporaryPersistence = mkdtempSync(join(tmpdir(), "commons-mcp-wrangler-path-"));
+    try {
+      execFileSync(
+        "npx",
+        [
+          "wrangler",
+          "d1",
+          "migrations",
+          "apply",
+          "DB",
+          "--local",
+          "--config",
+          LOCAL_MCP_CONFIG_PATH,
+          "--persist-to",
+          temporaryPersistence,
+        ],
+        { stdio: "pipe" },
+      );
+
+      const local = await openLocalMcpDatabase(temporaryPersistence);
+      try {
+        const table = await local.DB.prepare(
+          "SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'operators'",
+        ).first<{ name: string }>();
+        expect(table?.name).toBe("operators");
+      } finally {
+        await local.dispose();
+      }
+    } finally {
+      rmSync(temporaryPersistence, { recursive: true, force: true });
+    }
+  }, 180_000);
+
   it("uses only the fixed local config and safely reuses the allow-listed fixture", async () => {
     const migrationCalls: string[][] = [];
     const outputs: string[] = [];

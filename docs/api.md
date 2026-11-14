@@ -384,7 +384,9 @@ npm run mcp:local:bootstrap
 The bootstrap applies migrations with Wrangler's `--local` flag and the fixed
 `wrangler.registry-local.jsonc` config and `.wrangler/mcp-local` persistence directory. It accepts no
 arguments, does not read remote database or bucket configuration, and cannot provision a remote
-service. It creates or reuses the clearly named local MCP acceptance operator and agent, explicitly
+service. Wrangler stores its versioned state beneath that persistence directory; the bootstrap opens
+the matching `.wrangler/mcp-local/v3` state through `getPlatformProxy` with remote bindings disabled.
+It creates or reuses the clearly named local MCP acceptance operator and agent, explicitly
 allow-lists the operator, and issues a fresh credential through `CredentialService`.
 
 The command prints the credential once. Copy it immediately into the MCP host's private process
