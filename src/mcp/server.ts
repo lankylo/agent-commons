@@ -1,0 +1,151 @@
+import { McpServer } from "@modelcontextprotocol/server";
+import * as z from "zod/v4";
+import worker from "../index";
+
+const contributionInput = z
+  .record(z.string(), z.unknown())
+  .describe(
+    "A Knowledge contribution uses the existing family='knowledge' schema (facts/records/summary, sources, rights, verification and asOf). An Execution contribution uses family='execution' with objective, inputs, outputs, targetDomains, compatibility, declarative steps, safety, verification and asOf. Each is validated by its existing family-specific registry validator; Execution steps are never run here.",
+  );
+
+const searchInputSchema = z
+  .object({
+    query: z.string().describe("Plain-text search terms; search is deterministic and LLM-free."),
+    family: z
+      .enum(["knowledge", "execution"])
+      .optional()
+      .describe("Omit to search both Knowledge and Execution contributions."),
+    filters: z
+      .record(z.string(), z.unknown())
+      .optional()
+      .describe(
+        "Knowledge filters: verificationMethod and permittedUse. Execution filters: verificationMethod, targetDomain, requiredCapability, sideEffect and requiresHumanApproval.",
+      ),
+    contentType: z.string().optional(),
+    limit: z.number().int().optional(),
+    maxUtf8Bytes: z.number().int().positive().safe(),
+  })
+  .passthrough();
+
+const getInputSchema = z
+  .object({
+    contributionId: z.string().min(1),
+    version: z.number().int().positive().safe(),
+    validator: z
+      .record(z.string(), z.unknown())
+      .optional()
+      .describe(
+        "Optional exact {contributionId, version, contentHash} validator. Retrieval always verifies D1/R2 integrity first; there is no latest-version alias.",
+      ),
+    maxUtf8Bytes: z.number().int().positive().safe(),
+  })
+  .passthrough();
+
+const contributeInputSchema = z.union([
+  z
+    .object({
+      contribution: contributionInput,
+    })
+    .passthrough(),
+  z
+    .object({
+      contributionId: z.string().min(1),
+      expectedPreviousVersion: z.number().int().positive().safe(),
+      contribution: contributionInput,
+    })
+    .passthrough(),
+]);
+
+type ToolOperation = "search" | "get" | "contribute";
+
+interface JsonObject {
+  readonly [key: string]: unknown;
+}
+
+function isJsonObject(value: unknown): value is JsonObject {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function toolResult(body: JsonObject, isError: boolean) {
+  return {
+    content: [{ type: "text" as const, text: JSON.stringify(body) }],
+    structuredContent: body,
+    ...(isError ? { isError: true } : {}),
+  };
+}
+
+function internalError(operation: ToolOperation) {
+  const message =
+    operation === "get"
+      ? "Retrieval is unavailable."
+      : operation === "contribute"
+        ? "Contribution could not be saved."
+        : "Search is unavailable.";
+  return toolResult({ error: { code: "internal_error", message } }, true);
+}
+
+async function invokeWorker(
+  env: unknown,
+  credential: string,
+  operation: ToolOperation,
+  input: Record<string, unknown>,
+) {
+  try {
+    const response = await worker.fetch(
+      new Request(`https://agent-commons.local/v1/commons/${operation}`, {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${credential}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify(input),
+      }),
+      env,
+    );
+    const body: unknown = await response.json();
+    if (!isJsonObject(body)) return internalError(operation);
+    return toolResult(body, !response.ok);
+  } catch {
+    return internalError(operation);
+  }
+}
+
+export function createCommonsMcpServer(env: unknown, credential: string): McpServer {
+  if (!credential.trim()) {
+    throw new Error("An agent credential is required in process configuration.");
+  }
+
+  const server = new McpServer({ name: "agent-commons", version: "1.0.0" });
+
+  server.registerTool(
+    "commons.search",
+    {
+      description:
+        "Search both Knowledge and Execution contributions, or select one family. Knowledge and Execution metadata filters remain family-specific. Returns deterministic, ranked discovery metadata within the required UTF-8 byte budget; no content is retrieved.",
+      inputSchema: searchInputSchema,
+    },
+    (input) => invokeWorker(env, credential, "search", input),
+  );
+
+  server.registerTool(
+    "commons.get",
+    {
+      description:
+        "Retrieve a complete, integrity-verified exact contribution ID and positive version; there is no latest alias. Knowledge explanations are labelled untrusted, while Execution recipes are returned as data and never run. An exact optional validator can avoid retransmitting an unchanged body after full D1/R2 verification. The UTF-8 budget is all-or-nothing.",
+      inputSchema: getInputSchema,
+    },
+    (input) => invokeWorker(env, credential, "get", input),
+  );
+
+  server.registerTool(
+    "commons.contribute",
+    {
+      description:
+        "Submit a new Knowledge or Execution contribution, or add its exact next immutable version with contributionId and expectedPreviousVersion. Existing family-specific registry validation applies. Only authenticated, active agents for allow-listed operators may contribute; submitted verification remains an untrusted declaration. No feedback operation or retrieval receipt is exposed.",
+      inputSchema: contributeInputSchema,
+    },
+    (input) => invokeWorker(env, credential, "contribute", input),
+  );
+
+  return server;
+}
