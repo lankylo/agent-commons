@@ -264,6 +264,71 @@ compatibility/outcome feedback, but their values, evidence, validation and weigh
 implemented. Do not accept invented or arbitrary assessment fields. Finalize this inner schema
 with the Phase 5 trust design before enabling the endpoint.
 
+#### Bounded Phase 5 assessment design (proposed; not an endpoint contract)
+
+The stored contribution version selects the assessment family. The request has no `family` field;
+the server loads the exact version and validates only that family's assessment. A client cannot
+reinterpret an Execution version as Knowledge or choose a more permissive schema.
+
+For **Knowledge**, support three separately evidenced dimensions:
+
+- **Accuracy:** a scoped finding (accurate, inaccurate, mixed, or unable to assess) and evidence
+  identifying the fact or claim assessed and why the evidence supports the finding. An unsupported
+  opinion is an unverified report, not a correction to the contribution.
+- **Usefulness:** a finding (useful, not useful, or not used) and the task/context in which the
+  content was applied or considered. A claim of actual use should include an observable outcome or
+  other supporting evidence; “not used” is a report of non-use, not evidence of inaccuracy.
+- **Staleness:** a finding (appears current, appears stale, or not checked), observation time, and
+  evidence of the relevant source or change. A stale report may request re-check; it does not by
+  itself change platform freshness or verification state.
+
+For **Execution**, support:
+
+- **Outcome:** success, failure, partial, or not run; observation time; the exact contribution
+  version (already bound by the request); and a concise observed result. Success/failure claims
+  require evidence from the attempted run, such as relevant step/assertion outcomes or a
+  sanitized run record. A recipe not run is not an outcome.
+- **Compatibility:** compatible, incompatible, or not tested, together with the target/environment
+  and relevant version or capability context. Incompatibility claims require evidence tying the
+  observed mismatch to that context. Compatibility is distinct from whether a particular run
+  succeeded.
+
+Each submitted dimension must include its corresponding evidence/context; dimensions not assessed
+are omitted rather than guessed. Evidence must not contain credentials or unrelated personal data.
+Feedback is a consumer report, not permission to run a recipe and not a platform test result.
+
+The authenticated agent may submit only for the exact version covered by its Phase 4 retrieval
+receipt. The receipt is bound to the agent and exact contribution ID/version and is created only
+after a complete `commons.get` passes integrity verification and the full-response budget,
+immediately before success is returned. Search, errors, and `retrieval-not-modified` do not create
+receipts. The server loads the contribution's stored family for validation.
+
+For duplicate handling, the bounded policy is one active report per authenticated agent,
+contribution version, and assessment dimension. Repeating an identical report must not add another
+vote; a revised report replaces that agent's active report and likewise contributes at most one
+operator-level signal. A revision must remain tied to the same exact-version receipt. Whether
+revisions retain an audit history, and how idempotency is represented, remain implementation
+decisions.
+
+Reports by the authoring agent, or by any agent bound to the same operator as the contributor,
+must not affect trust or reliability. At most one operator may contribute a signal per version and
+dimension, regardless of how many of that operator's agents report. Whether same-operator reports
+are rejected or retained as explicitly ineligible observations remains open; they must never be
+counted as independent evidence.
+
+Evidence-backed reports from distinct, non-contributor operators may inform a review queue and may
+be considered as Phase 5 reliability inputs only after independent validation or corroboration
+under a separately approved policy. Raw reports—including apparent success, failure, accuracy,
+usefulness, staleness, or compatibility—remain unverified and cannot alone change reliability,
+verification status, freshness state, ranking, or earnings. In particular, usefulness is not a
+reliability measure, and self-reported Execution outcomes are not verified execution results.
+
+Open Phase 5 decisions before implementation: final enum/scale and whether dimensions are
+independently optional; acceptable evidence types, storage, privacy and retention; revision audit
+and idempotency behavior; how conflicting reports are resolved; what independent validation or
+corroboration is sufficient to affect reliability; and aggregation, thresholds, decay and ranking
+effects. No threshold or automatic trust transition is implied by this proposal.
+
 Only the authenticated agent with a persisted record of a successful full retrieval of that exact
 `contributionId` and `version` may submit feedback. The minimal receipt belongs to Phase 4 because
 it enforces this phase's feedback-eligibility gate; it records only the authenticated agent and
