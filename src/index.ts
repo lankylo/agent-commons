@@ -5,6 +5,11 @@ import { budgetDiscoveryResponse } from "./registry/discovery-budget";
 import { ContributionRetriever } from "./registry/retrieval";
 import type { ConditionalRetrievalResponse } from "./registry/retrieval-conditional";
 import type { RetrievalResponse } from "./registry/retrieval-response";
+import {
+  ContributionRegistry,
+  type CreationErrorCode,
+  type VersionErrorCode,
+} from "./registry/creation";
 import { RateLimitService, DEFAULT_RATE_LIMITS } from "./rate-limit";
 
 interface WorkerEnv {
@@ -82,7 +87,7 @@ type AuthorizationResult =
 async function authenticateAndRateLimit(
   request: Request,
   env: WorkerEnv,
-  operation: "Search" | "Retrieval",
+  operation: "Search" | "Retrieval" | "Contribution",
 ): Promise<AuthorizationResult> {
   if (!env.DB) {
     return {
@@ -392,6 +397,182 @@ async function handleGet(request: Request, env: WorkerEnv): Promise<Response> {
   }
 }
 
+const CONTRIBUTION_PLATFORM_FIELDS = new Set([
+  "id",
+  "version",
+  "previousVersion",
+  "contentHash",
+  "hash",
+  "contentKey",
+  "author",
+  "authorAgentId",
+  "authorOperatorId",
+  "contributor",
+  "contributorAgentId",
+  "contributorOperatorId",
+  "contributorId",
+  "agentId",
+  "operatorId",
+  "createdAt",
+  "contributionCreatedAt",
+  "lastVerifiedAt",
+  "reliabilityScore",
+  "consumerCount",
+  "platformState",
+  "updatedAt",
+  "timestamp",
+]);
+
+function hasReservedContributionFields(record: Record<string, unknown>): boolean {
+  return Object.keys(record).some((field) => CONTRIBUTION_PLATFORM_FIELDS.has(field));
+}
+
+function mapContributionError(code: CreationErrorCode | VersionErrorCode): Response {
+  switch (code) {
+    case "operator_not_allow_listed":
+      return httpError(
+        403,
+        "contribution_not_allowed",
+        "This operator is not allowed to contribute.",
+      );
+    case "actor_not_found":
+    case "actor_inactive":
+      return httpError(401, "unauthorized", "Authentication required.");
+    case "invalid_expected_version":
+      return httpError(
+        400,
+        "invalid_expected_version",
+        "expectedPreviousVersion must be a positive safe integer.",
+      );
+    case "contribution_not_found":
+    case "operator_mismatch":
+      return httpError(404, "not_found", "The requested contribution was not found.");
+    case "version_conflict":
+      return httpError(
+        409,
+        "version_conflict",
+        "expectedPreviousVersion is not the latest version.",
+      );
+    case "duplicate_content":
+      return httpError(409, "duplicate_content", "Identical contribution content already exists.");
+    case "invalid_content":
+      return httpError(422, "invalid_content", "Contribution content failed validation.");
+    case "platform_field_rejected":
+      return httpError(
+        422,
+        "platform_field_rejected",
+        "Platform-managed fields cannot be submitted.",
+      );
+    case "unresolved_reference":
+      return httpError(
+        422,
+        "unresolved_reference",
+        "One or more exact contribution references do not resolve.",
+      );
+    case "family_mismatch":
+      return httpError(422, "family_mismatch", "A contribution version cannot change family.");
+    case "storage_failed":
+    case "persistence_failed":
+      return httpError(500, "internal_error", "Contribution could not be saved.");
+  }
+}
+
+async function handleContribute(request: Request, env: WorkerEnv): Promise<Response> {
+  try {
+    const authorization = await authenticateAndRateLimit(request, env, "Contribution");
+    if (!authorization.ok) return authorization.response;
+    if (!env.DB || !env.CONTENT_BUCKET) {
+      return httpError(500, "internal_error", "Contribution is unavailable.");
+    }
+
+    const parsed = await parseJsonBody(request);
+    if (!parsed.ok) return parsed.response;
+    const body = parsed.value;
+    if (typeof body !== "object" || body === null || Array.isArray(body)) {
+      return httpError(400, "invalid_request", "Contribution request body must be an object.");
+    }
+
+    const record = body as Record<string, unknown>;
+    if (hasReservedContributionFields(record)) {
+      return httpError(
+        400,
+        "invalid_request",
+        "Platform-managed identity and metadata fields are not accepted.",
+      );
+    }
+
+    const isVersion =
+      Object.hasOwn(record, "contributionId") || Object.hasOwn(record, "expectedPreviousVersion");
+    const allowedFields = isVersion
+      ? new Set(["contributionId", "expectedPreviousVersion", "contribution"])
+      : new Set(["contribution"]);
+    if (Object.keys(record).some((field) => !allowedFields.has(field))) {
+      return httpError(400, "invalid_request", "Contribution request contains unsupported fields.");
+    }
+    if (!Object.hasOwn(record, "contribution")) {
+      return httpError(400, "invalid_request", "A contribution object is required.");
+    }
+    if (isVersion) {
+      if (
+        typeof record.contributionId !== "string" ||
+        record.contributionId.length === 0 ||
+        !requirePositiveSafeInteger(record.expectedPreviousVersion)
+      ) {
+        return httpError(
+          400,
+          "invalid_expected_version",
+          "contributionId and a positive safe-integer expectedPreviousVersion are required.",
+        );
+      }
+    } else if (Object.hasOwn(record, "expectedPreviousVersion")) {
+      return httpError(400, "invalid_request", "Version requests require both version fields.");
+    }
+
+    const contribution = record.contribution;
+    if (typeof contribution !== "object" || contribution === null || Array.isArray(contribution)) {
+      return httpError(400, "invalid_request", "contribution must be an object.");
+    }
+    const input = contribution as Record<string, unknown>;
+    if (hasReservedContributionFields(input)) {
+      return httpError(
+        422,
+        "platform_field_rejected",
+        "Platform-managed fields cannot be submitted.",
+      );
+    }
+
+    const registry = new ContributionRegistry({
+      DB: env.DB,
+      CONTENT_BUCKET: env.CONTENT_BUCKET,
+    });
+    const result = isVersion
+      ? await registry.createContributionVersion(
+          authorization.actor.agentId,
+          record.contributionId as string,
+          record.expectedPreviousVersion as number,
+          input,
+        )
+      : await registry.createContribution(authorization.actor.agentId, input);
+    if (!result.ok) return mapContributionError(result.error.code);
+
+    const created = result.contribution;
+    return Response.json({
+      schemaVersion: "contribution-created/v1",
+      contribution: {
+        contributionId: created.id,
+        version: created.version,
+        previousVersion: "previousVersion" in created ? created.previousVersion : null,
+        family: created.family,
+        contentHash: created.contentHash,
+        payloadBytes: created.payloadBytes,
+        createdAt: created.createdAt,
+      },
+    });
+  } catch {
+    return httpError(500, "internal_error", "Contribution could not be saved.");
+  }
+}
+
 export default {
   async fetch(request: Request, env?: unknown): Promise<Response> {
     const workerEnv = (env ?? {}) as WorkerEnv;
@@ -404,6 +585,9 @@ export default {
     }
     if (pathname === "/v1/commons/get" && request.method === "POST") {
       return handleGet(request, workerEnv);
+    }
+    if (pathname === "/v1/commons/contribute" && request.method === "POST") {
+      return handleContribute(request, workerEnv);
     }
     return new Response("Not Found", { status: 404 });
   },

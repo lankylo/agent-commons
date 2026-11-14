@@ -438,11 +438,11 @@ The audit also covers the operator/credential path (`test/identity/credentials.t
 - [ ] Implement REST endpoints.
 - [ ] Implement MCP server.
 - [x] Expose `commons.search`. (Authenticated `POST /v1/commons/search`, shared D1 rate limiting and discovery budgeting; PR #47 merged.)
-- [x] Expose `commons.get`. (Authenticated exact-version `POST /v1/commons/get`, verified conditional retrieval, public response allow-list and all-or-nothing UTF-8 budgeting; locally verified, PR review pending.)
-- [ ] Expose `commons.contribute` (allow-listed operators only).
+- [x] Expose `commons.get`. (Authenticated exact-version `POST /v1/commons/get`, verified conditional retrieval, public response allow-list and all-or-nothing UTF-8 budgeting; PR #48 merged.)
+- [x] Expose `commons.contribute` (allow-listed operators only). (Authenticated `POST /v1/commons/contribute` supports new Knowledge/Execution contributions and exact-next versioning through `ContributionRegistry`; focused local Worker tests pass. Phase 5 trust checks remain outstanding.)
 - [ ] Expose `commons.feedback` (agents that retrieved the content only).
-- [x] Define structured error handling. (Versioned REST error envelope in `docs/api.md`; search/get use the shared safe HTTP error mapper.)
-- [x] Document integration examples for Knowledge lookup and Execution recipe retrieval. (Headless REST flows in `docs/api.md`; search/get are implemented, while external-agent testing remains open.)
+- [x] Define structured error handling. (Versioned REST error envelope in `docs/api.md`; search/get/contribute use the shared safe HTTP error mapper.)
+- [x] Document integration examples for Knowledge lookup and Execution recipe retrieval. (Headless REST flows in `docs/api.md`; search/get/contribute are implemented, while external-agent testing remains open.)
 - [ ] Test end-to-end interaction with an external agent for each family.
 
 **Acceptance criteria:**
@@ -573,9 +573,9 @@ The audit also covers the operator/credential path (`test/identity/credentials.t
 | 5. Validation and Trust | Not Started | 0% |
 | 6. Payments, Agent Earnings and Payouts | Not Started | 0% |
 
-**Current phase:** Phase 4 In Progress, 25% implementation verified. The authenticated REST `commons.search` and exact-version `commons.get` endpoints use the shared credential verification, D1 rate limiter and safe error mapping, and have local Worker coverage. `commons.contribute`, `commons.feedback`, MCP and external-agent acceptance testing remain incomplete. Feedback remains unimplemented pending a receipt-storage phase decision and the Phase 5 assessment schema. Phase 3 Search and Retrieval is complete at 100%; persistent caching remains deferred to Phase 6. Phase 2 is complete.
+**Current phase:** Phase 4 In Progress, 25% acceptance verified. Authenticated REST `commons.search`, exact-version `commons.get` and allow-list-enforced `commons.contribute` use shared credential verification, D1 rate limiting and safe error mapping, with local Worker coverage. The complete four-operation interface, `commons.feedback`, MCP and external-agent acceptance testing remain incomplete. Phase 5 trust controls are outstanding; declared contribution verification metadata is not platform verification. Feedback remains unimplemented pending a receipt-storage phase decision and the Phase 5 assessment schema. Phase 3 Search and Retrieval is complete at 100%; persistent caching remains deferred to Phase 6. Phase 2 is complete.
 **Current blocker:** Before feedback implementation, reconcile the data-model note that places retrieval records in Phases 5–6 with Phase 4's exact-version retrieval eligibility criterion; the feedback assessment schema remains Phase 5 work.
-**Latest verified milestone:** PR #47 merged with the authenticated, D1-rate-limited `commons.search` endpoint. PR #48 adds the authenticated exact-version `commons.get` endpoint; `npm run verify` passes with 457 tests across 35 files and Wrangler dry-run.
+**Latest verified milestone:** PR #48 merged with the authenticated exact-version `commons.get` endpoint; its full `npm run verify` passed with 457 tests across 35 files and Wrangler dry-run. The contribution route passes focused local Worker tests; the full verification run is pending.
 
 Completion percentages must reflect verified acceptance criteria, not merely generated code.
 
@@ -691,9 +691,9 @@ Do not expand scope solely to solve speculative future problems.
 
 ## 10. Next Development Actions
 
-**Immediate task: Review PR #48 for the Phase 4 `commons.get` implementation.**
+**Immediate task: Review the Phase 4 `commons.contribute` implementation PR.**
 
-1. After review, separately approve `commons.contribute`; do not implement `commons.feedback` until exact-version receipt ownership and the Phase 5 assessment schema are resolved.
+1. Do not implement `commons.feedback` until exact-version receipt ownership and the Phase 5 assessment schema are resolved.
 2. Keep Phase 5 ranking signals deferred until outcomes, feedback schemas and validated reliability data exist. Persistent shared caching remains assigned to Phase 6, after authentication and paid-access semantics exist.
 3. Do not create real D1 databases, apply remote migrations, create remote R2 buckets, seed remotely, or add unapproved deployment settings. Authentication/rate limiting belong to Phase 4; paid access and caching belong to Phase 6.
 
@@ -715,15 +715,15 @@ After every completed development task:
 
 Maintain the following short record at the end of this document.
 
-**Current phase:** Phase 4 In Progress; `commons.search` and `commons.get` implemented and locally verified. Phase 3 completed at 100%.
+**Current phase:** Phase 4 In Progress; `commons.search`, `commons.get` and `commons.contribute` implemented with local Worker coverage. Phase 3 completed at 100%.
 
-**Last completed task:** PR #47 merged: authenticated `commons.search` route and shared D1 rate limiting.
+**Last completed task:** PR #48 merged: authenticated exact-version `commons.get` route with integrity-checked conditional retrieval and safe public response fields.
 
-**Current task:** Implemented `commons.get` using the shared auth/rate-limit path, exact-version integrity-checked retrieval, safe public response fields, conditional validation and all-or-nothing UTF-8 budgeting. PR #48 is open; full verification passes.
+**Current task:** Implemented authenticated `commons.contribute` for new Knowledge/Execution contributions and exact-next versions. It uses shared authentication and rate limiting, enforces the registry allow-list and returns only documented metadata. Focused Worker tests pass; full verification and PR review remain. Phase 5 trust controls remain unimplemented.
 
 **Known blockers:** Feedback needs an explicit decision on minimal retrieval-receipt phase ownership; its assessment schema and trust effects remain Phase 5 work. Shared caching awaits Phase 4 authentication and Phase 6 paid-access semantics.
 
-**Next task:** After reviewing the `commons.get` PR, separately approve and implement `commons.contribute`. Resolve retrieval-receipt ownership before `commons.feedback`; define assessment fields with Phase 5.
+**Next task:** Review the `commons.contribute` PR. Resolve retrieval-receipt ownership before `commons.feedback`; define assessment fields and trust controls with Phase 5.
 
 **Last verified commit:** `d1fa2b1` (`npm run verify`: typecheck, formatting, lint, 457 tests across 35 files, Wrangler dry-run).
 

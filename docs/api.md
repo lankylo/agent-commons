@@ -1,17 +1,17 @@
 # Versioned REST API Contract
 
-**Status:** Phase 4 contract. `commons.search` and `commons.get` are implemented as Worker routes;
-`commons.contribute`, `commons.feedback` and MCP remain unimplemented.
+**Status:** Phase 4 contract. `commons.search`, `commons.get` and `commons.contribute` are
+implemented as Worker routes; `commons.feedback` and MCP remain unimplemented.
 
 ## Existing capabilities and gaps
 
 | Area | Exists now | Not implemented |
 |---|---|---|
 | Worker | `src/index.ts` serves `/health`, authenticated `POST /v1/commons/search` and `POST /v1/commons/get`; other paths return 404. | Contribution/feedback REST routes, MCP and external-agent acceptance testing. |
-| Agent credentials | `CredentialService` issues, verifies and revokes `ac1_<24 hex>_<64 hex>` credentials. Search and get verify Bearer credentials and resolve active `agentId` and `operatorId`. | Other-interface authentication and external-agent access. |
+| Agent credentials | `CredentialService` issues, verifies and revokes `ac1_<24 hex>_<64 hex>` credentials. Search, get and contribute verify Bearer credentials and resolve active `agentId` and `operatorId`. | Other-interface authentication and external-agent access. |
 | Search | `ContributionSearch` provides deterministic, LLM-free D1 search with family-specific filters; the REST route returns budgeted discovery responses. | External-agent acceptance testing. |
 | Retrieval | `ContributionRetriever` verifies an exact contribution version against D1 and R2 before conditional comparison; get maps a public allow-list and enforces the full-response UTF-8 budget. | Persistent record that an agent retrieved a version. No "latest" lookup exists. |
-| Contribution | `ContributionRegistry` validates Knowledge and Execution input, resolves exact references, creates immutable versions and checks the active agent/operator allow-list. | REST exposure and HTTP error mapping. The API must pass the authenticated agent ID; callers cannot select an identity. |
+| Contribution | `ContributionRegistry` validates Knowledge and Execution input, resolves exact references, creates immutable versions and checks the active agent/operator allow-list. `POST /v1/commons/contribute` passes only the authenticated agent ID and exposes allow-listed creation metadata. | External-agent acceptance testing; allow-listing remains platform-controlled and defaults off. |
 | Feedback | No feedback service, schema, table, retrieval receipt or endpoint exists. | Assessment schemas and persistence. Phase 5 defines family-specific feedback and trust/reliability effects. |
 
 Contributed content remains untrusted. Existing family validators are not a substitute for the
@@ -47,8 +47,8 @@ credentials all map to the same `401 unauthorized` envelope. Credentials are sec
 or log them.
 
 Configure per-agent and per-operator thresholds in platform-controlled Worker configuration, not
-in request data. The search and get routes share the D1-backed limiter in `src/rate-limit.ts`,
-which stores atomic fixed-window counters in `rate_limit_windows` and fails closed with
+in request data. The search, get and contribute routes share the D1-backed limiter in
+`src/rate-limit.ts`, which stores atomic fixed-window counters in `rate_limit_windows` and fails closed with
 `503 rate_limiter_unavailable` when it cannot decide. The platform may set
 `RATE_LIMIT_AGENT_LIMIT`, `RATE_LIMIT_OPERATOR_LIMIT` and `RATE_LIMIT_WINDOW_SECONDS`; the current
 defaults are 60 requests per agent and 300 per operator per 60 seconds. Return `429 rate_limited`
@@ -208,9 +208,17 @@ expected latest version.
 
 Before calling either creation method, the route passes only the authenticated `agentId`.
 `ContributionRegistry` checks the operator allow-list and active state. A non-allow-listed
-operator receives `403 contribution_not_allowed`; the route must not accept caller-supplied
-`agentId` or `operatorId`. The proposed success response allow-lists only registry metadata and
-never exposes the internal R2 `contentKey`:
+operator receives `403 contribution_not_allowed`; the route does not accept caller-supplied
+identity, author, contributor, version, hash, timestamp, reliability or platform-state fields.
+The registry rejects platform-owned fields on the contribution payload; invalid family content is
+validated by its existing Knowledge or Execution validator. A version must include both
+`contributionId` and positive-safe-integer `expectedPreviousVersion`; the route does not resolve a
+latest alias. `operator_mismatch` maps to the same `404 not_found` as an absent contribution.
+Stale or racing versions map to `409 version_conflict` without disclosing a latest-version value.
+Duplicate errors do not reveal an existing contribution ID.
+
+The success response allow-lists only registry metadata and never exposes the internal R2
+`contentKey`:
 
 ```json
 {
@@ -226,6 +234,12 @@ never exposes the internal R2 `contentKey`:
   }
 }
 ```
+
+The `verification` fields within submitted content are contributor declarations, not platform
+verification. Their presence does not indicate that Phase 5 trust checks, source validation,
+scanning, independent corroboration or execution outcome checks have occurred. Contributions
+remain subject to the existing platform allow-list; this endpoint does not enable open submissions
+or self-service allow-listing.
 
 ### `commons.feedback`
 
@@ -308,7 +322,7 @@ Proposed stable HTTP mapping:
 | 404 | `not_found` | Unknown contribution/version or `operator_mismatch`; do not distinguish absence from inaccessible-resource existence. |
 | 409 | `duplicate_content`, `version_conflict` | Duplicate submission or optimistic version conflict. `latestVersion` may be returned only after the registry confirms the caller is the original operator. |
 | 413 | `budget_too_small`, `response_too_large` | Budget cannot fit the empty discovery envelope or complete retrieval response. |
-| 422 | `invalid_content`, `platform_field_rejected`, `unresolved_reference`, `family_mismatch`, `invalid_feedback` | Valid JSON that fails contribution or (once defined) feedback validation. |
+| 422 | `invalid_content`, `platform_field_rejected`, `unresolved_reference`, `family_mismatch`, `invalid_feedback` | Valid contribution JSON that fails family validation, contains a platform-managed field, has unresolved exact references, or changes the immutable family; feedback validation is not implemented. |
 | 429 | `rate_limited` | Per-agent or per-operator limit; include `Retry-After` when known. |
 | 500 | `content_unavailable`, `internal_error` | Retrieval integrity/storage failure or unexpected internal failure; no storage diagnostic is returned. |
 | 503 | `rate_limiter_unavailable` | Shared rate-limit enforcement cannot safely determine whether to admit the request. |
@@ -338,12 +352,12 @@ deferred shared persistent cache decision.
 
 | Phase 4 acceptance criterion | Planned route/control | Current status |
 |---|---|---|
-| An external agent can discover and invoke Commons functionality. | Versioned JSON REST routes; later REST/MCP discovery documentation. | Not met: search/get have local Worker routes, but external-agent access and acceptance testing are not complete. |
-| All four operations work through defined interfaces, with family-aware search, retrieval, contribution and feedback. | `search`, `get`, `contribute`, `feedback`; Knowledge/Execution behavior above. | Partially met: search and get REST routes are locally implemented; contribute and feedback routes are not. |
-| Errors return actionable machine-readable information. | Shared error envelope and status/code table. | Search/get use the documented envelope and safe error mapping; broader operation coverage remains. |
-| The agent does not require a graphical interface. | JSON REST operations; future MCP adapter shares domain semantics. | Search/get are headless JSON routes; external-agent use is not yet verified. |
-| Requests are authenticated and rate-limited per agent and per operator. | Bearer credential verification plus REST auth/rate-limit middleware. | Locally verified for search/get with the shared D1 limiter; deployment configuration is not established. |
-| Contributions from non-allow-listed operators are refused. | `contribute` passes authenticated identity to `ContributionRegistry`. | Internal allow-list check exists; REST contribution route is not implemented. |
+| An external agent can discover and invoke Commons functionality. | Versioned JSON REST routes; later REST/MCP discovery documentation. | Not met: search/get/contribute have local Worker routes, but external-agent access and acceptance testing are not complete. |
+| All four operations work through defined interfaces, with family-aware search, retrieval, contribution and feedback. | `search`, `get`, `contribute`, `feedback`; Knowledge/Execution behavior above. | Partially met: search/get/contribute REST routes are locally implemented; feedback is not. |
+| Errors return actionable machine-readable information. | Shared error envelope and status/code table. | Search/get/contribute use the documented envelope and safe error mapping; feedback coverage remains. |
+| The agent does not require a graphical interface. | JSON REST operations; future MCP adapter shares domain semantics. | Search/get/contribute are headless JSON routes; external-agent use is not yet verified. |
+| Requests are authenticated and rate-limited per agent and per operator. | Bearer credential verification plus REST auth/rate-limit middleware. | Locally verified for search/get/contribute with the shared D1 limiter; deployment configuration is not established. |
+| Contributions from non-allow-listed operators are refused. | `contribute` passes authenticated identity to `ContributionRegistry`. | Locally verified: the route returns `403 contribution_not_allowed`; allow-listing remains platform-controlled and defaults off. |
 | Feedback from agents that never retrieved the content is refused. | Exact-version retrieval receipt checked by `feedback`. | Not met: no receipt persistence, feedback storage or endpoint exists. |
 
 ## Headless integration examples
@@ -373,7 +387,8 @@ curl -sS "$BASE_URL/v1/commons/get" \
 Clients must treat Knowledge `untrustedExplanation` as untrusted data and must not execute
 Execution recipe steps merely because they were retrieved.
 
-The search and get routes are implemented. The contract does not implement contribute, feedback,
-MCP, retrieval receipts, paid access, caching or external-agent acceptance testing. In particular,
-get does not persist feedback receipts; a full or not-modified retrieval response is not evidence
-of feedback eligibility.
+The search, get and contribute routes are implemented. The contract does not implement feedback,
+MCP, retrieval receipts, paid access, caching or external-agent acceptance testing. Contribution
+verification fields remain untrusted declarations; Phase 5 trust controls are outstanding.
+In particular, get does not persist feedback receipts; a full or not-modified retrieval response
+is not evidence of feedback eligibility.
