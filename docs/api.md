@@ -258,76 +258,163 @@ Proposed request envelope:
 }
 ```
 
-The `assessment` field schema and its evidence requirements are intentionally **not defined**:
-there is no feedback model today. Phase 5 plans Knowledge accuracy/staleness and Execution
-compatibility/outcome feedback, but their values, evidence, validation and weighting are not
-implemented. Do not accept invented or arbitrary assessment fields. Finalize this inner schema
-with the Phase 5 trust design before enabling the endpoint.
+The proposed `assessment` wire schema and evidence requirements are defined below, but no feedback
+model or endpoint exists. Do not accept arbitrary assessment fields. The schema remains a design
+proposal; approve its open evidence and policy decisions before implementing or enabling feedback.
 
-#### Bounded Phase 5 assessment design (proposed; not an endpoint contract)
+#### Proposed wire-level assessment schema (Phase 5; not implemented)
 
-The stored contribution version selects the assessment family. The request has no `family` field;
-the server loads the exact version and validates only that family's assessment. A client cannot
-reinterpret an Execution version as Knowledge or choose a more permissive schema.
+The request contains `contributionId`, positive integer `version`, and `assessment`. It MUST NOT
+contain a client-selected `family`. The server loads that exact stored version and selects its
+family schema; a client cannot choose or reinterpret the schema. `assessment` must contain one or
+both dimensions for that family, and unknown fields are rejected. The assessment object is limited
+to 16,000 UTF-8 bytes.
 
-For **Knowledge**, support three separately evidenced dimensions:
+Evidence uses the existing reference shape and existing evidence-kind vocabulary; this design
+adds no evidence kinds:
 
-- **Accuracy:** a scoped finding (accurate, inaccurate, mixed, or unable to assess) and evidence
-  identifying the fact or claim assessed and why the evidence supports the finding. An unsupported
-  opinion is an unverified report, not a correction to the contribution.
-- **Usefulness:** a finding (useful, not useful, or not used) and the task/context in which the
-  content was applied or considered. A claim of actual use should include an observable outcome or
-  other supporting evidence; “not used” is a report of non-use, not evidence of inaccuracy.
-- **Staleness:** a finding (appears current, appears stale, or not checked), observation time, and
-  evidence of the relevant source or change. A stale report may request re-check; it does not by
-  itself change platform freshness or verification state.
+```text
+EvidenceRef = {
+  kind: string, // existing allowed contribution-evidence kind; 1–80 UTF-8 bytes
+  uri: string   // absolute URI, at most 2,048 UTF-8 bytes
+}
+```
 
-For **Execution**, support:
+Evidence arrays contain at most five references per dimension. Evidence is referenced by URI,
+not embedded in the feedback payload. `scope`, `context`, and `environment` strings below are
+1–300 UTF-8 bytes. Timestamps are ISO 8601 UTC strings. An evidence array is always present;
+non-neutral findings require at least one reference, while explicit not-assessed values require
+an empty array. Evidence must not contain credentials or unrelated personal data. The existing
+allowed `kind` vocabulary is reused exactly; no new run-log, screenshot, or other evidence type is
+defined here.
 
-- **Outcome:** success, failure, partial, or not run; observation time; the exact contribution
-  version (already bound by the request); and a concise observed result. Success/failure claims
-  require evidence from the attempted run, such as relevant step/assertion outcomes or a
-  sanitized run record. A recipe not run is not an outcome.
-- **Compatibility:** compatible, incompatible, or not tested, together with the target/environment
-  and relevant version or capability context. Incompatibility claims require evidence tying the
-  observed mismatch to that context. Compatibility is distinct from whether a particular run
-  succeeded.
+**Knowledge assessment** (each dimension is optional; every included dimension requires all listed
+fields):
 
-Each submitted dimension must include its corresponding evidence/context; dimensions not assessed
-are omitted rather than guessed. Evidence must not contain credentials or unrelated personal data.
-Feedback is a consumer report, not permission to run a recipe and not a platform test result.
+```text
+assessment = {
+  accuracy?: {
+    finding: "accurate" | "inaccurate" | "mixed" | "unable_to_assess",
+    scope: string,
+    evidence: EvidenceRef[0..5]
+  },
+  usefulness?: {
+    finding: "useful" | "not_useful" | "not_used",
+    context: string,
+    evidence: EvidenceRef[0..5]
+  },
+  staleness?: {
+    finding: "appears_current" | "appears_stale" | "not_checked",
+    observedAt: string,
+    evidence: EvidenceRef[0..5]
+  }
+}
+```
 
-The authenticated agent may submit only for the exact version covered by its Phase 4 retrieval
-receipt. The receipt is bound to the agent and exact contribution ID/version and is created only
-after a complete `commons.get` passes integrity verification and the full-response budget,
-immediately before success is returned. Search, errors, and `retrieval-not-modified` do not create
-receipts. The server loads the contribution's stored family for validation.
+`accuracy` requires evidence unless `finding` is `unable_to_assess`; `scope` identifies the fact
+or claim considered. `usefulness` requires evidence for `useful` and `not_useful`; `not_used`
+requires an empty evidence array and is not an accuracy finding. `staleness` requires evidence
+for `appears_current` and `appears_stale`; `not_checked` requires an empty evidence array.
 
-For duplicate handling, the bounded policy is one active report per authenticated agent,
-contribution version, and assessment dimension. Repeating an identical report must not add another
-vote; a revised report replaces that agent's active report and likewise contributes at most one
-operator-level signal. A revision must remain tied to the same exact-version receipt. Whether
-revisions retain an audit history, and how idempotency is represented, remain implementation
-decisions.
+Example request (illustrative, not a claim that the URI was checked):
 
-Reports by the authoring agent, or by any agent bound to the same operator as the contributor,
-must not affect trust or reliability. At most one operator may contribute a signal per version and
-dimension, regardless of how many of that operator's agents report. Whether same-operator reports
-are rejected or retained as explicitly ineligible observations remains open; they must never be
-counted as independent evidence.
+```json
+{
+  "contributionId": "c-example",
+  "version": 1,
+  "assessment": {
+    "accuracy": {
+      "finding": "mixed",
+      "scope": "The response field list",
+      "evidence": [
+        {
+          "kind": "official-documentation",
+          "uri": "https://example.invalid/knowledge-evidence"
+        }
+      ]
+    },
+    "usefulness": {
+      "finding": "not_used",
+      "context": "The contributor has not applied this content",
+      "evidence": []
+    },
+    "staleness": {
+      "finding": "not_checked",
+      "observedAt": "2026-11-14T12:00:00Z",
+      "evidence": []
+    }
+  }
+}
+```
 
-Evidence-backed reports from distinct, non-contributor operators may inform a review queue and may
-be considered as Phase 5 reliability inputs only after independent validation or corroboration
-under a separately approved policy. Raw reports—including apparent success, failure, accuracy,
-usefulness, staleness, or compatibility—remain unverified and cannot alone change reliability,
-verification status, freshness state, ranking, or earnings. In particular, usefulness is not a
-reliability measure, and self-reported Execution outcomes are not verified execution results.
+**Execution assessment** (each dimension is optional; every included dimension requires all
+listed fields):
 
-Open Phase 5 decisions before implementation: final enum/scale and whether dimensions are
-independently optional; acceptable evidence types, storage, privacy and retention; revision audit
-and idempotency behavior; how conflicting reports are resolved; what independent validation or
-corroboration is sufficient to affect reliability; and aggregation, thresholds, decay and ranking
-effects. No threshold or automatic trust transition is implied by this proposal.
+```text
+assessment = {
+  outcome?: {
+    finding: "success" | "failure" | "partial" | "not_run",
+    observedAt: string,
+    context: string,
+    evidence: EvidenceRef[0..5]
+  },
+  compatibility?: {
+    finding: "compatible" | "incompatible" | "not_tested",
+    observedAt: string,
+    environment: string,
+    evidence: EvidenceRef[0..5]
+  }
+}
+```
+
+`outcome` requires evidence for `success`, `failure`, and `partial`; `not_run` requires an empty
+array and is not an execution result. `compatibility` requires evidence for `compatible` and
+`incompatible`; `not_tested` requires an empty array. Outcome evidence must support the reported
+run; compatibility evidence must support the stated environment and relevant version/capability
+context in `environment`. A successful run does not by itself establish general compatibility.
+Because the project does not define a distinct run-log evidence kind, this schema introduces none;
+if existing evidence kinds cannot reference suitable run evidence, that gap needs a separate design
+decision.
+
+Example request (a truthful not-run report, not an assertion of a test result):
+
+```json
+{
+  "contributionId": "c-example",
+  "version": 1,
+  "assessment": {
+    "outcome": {
+      "finding": "not_run",
+      "observedAt": "2026-11-14T12:00:00Z",
+      "context": "Execution recipe was retrieved but not run",
+      "evidence": []
+    },
+    "compatibility": {
+      "finding": "not_tested",
+      "observedAt": "2026-11-14T12:00:00Z",
+      "environment": "No runtime or capability test performed",
+      "evidence": []
+    }
+  }
+}
+```
+
+Only the authenticated agent with a Phase 4 receipt for that exact contribution ID/version is
+eligible. The receipt is created only after complete `commons.get` integrity verification and a
+passing full-response budget, immediately before success is returned. Search, errors, and
+`retrieval-not-modified` do not create receipts.
+
+Duplicate and same-operator rules remain as proposed: a repeated report cannot add weight; a
+revision replaces the agent's active report for that dimension and exact version; the contributor
+agent and all agents sharing its operator cannot influence trust; multiple agents of another
+operator contribute at most one operator-level signal per version and dimension. A report remains
+unverified. It cannot alone change verification, freshness, reliability, ranking, or earnings;
+independent validation or corroboration may be considered only under a separately approved policy.
+
+Keep storage retention, revision-history persistence, conflict resolution, aggregation thresholds,
+and trust/ranking effects for separate decisions. The specific open choice for this wire contract
+is whether the existing evidence-kind vocabulary can represent suitable Execution run evidence;
+no unsupported evidence type is introduced here.
 
 Only the authenticated agent with a persisted record of a successful full retrieval of that exact
 `contributionId` and `version` may submit feedback. The minimal receipt belongs to Phase 4 because
