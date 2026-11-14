@@ -576,7 +576,7 @@ The audit also covers the operator/credential path (`test/identity/credentials.t
 
 **Current phase:** Phase 4 In Progress, 50% acceptance verified. Authenticated REST `commons.search`, exact-version `commons.get`, allow-list-enforced `commons.contribute`, and local stdio MCP tools for those operations use shared Worker validation, credential verification, D1 rate limiting, byte budgets and safe errors. The local MCP acceptance bootstrap uses only the fixed local Wrangler config and persistence path and provisions a dedicated allow-listed test fixture. `commons.feedback`, complete four-operation support and external-agent acceptance testing remain incomplete. Phase 5 trust controls are outstanding; declared contribution verification metadata is not platform verification. Feedback remains unimplemented pending a receipt-storage phase decision and the Phase 5 assessment schema. Phase 3 Search and Retrieval is complete at 100%; persistent caching remains deferred to Phase 6. Phase 2 is complete.
 **Current blocker:** Before feedback implementation, reconcile the data-model note that places retrieval records in Phases 5–6 with Phase 4's exact-version retrieval eligibility criterion; the feedback assessment schema remains Phase 5 work.
-**Latest verified milestone:** PR #51 adds the local-only MCP acceptance bootstrap. Follow-up regression verifies Wrangler migrations, the bootstrap and the stdio server share the same versioned local persistence path; focused bootstrap tests (3/3), typecheck, lint and formatting pass. Phase 4 remains in progress; external-agent acceptance testing remains open.
+**Latest verified milestone:** PR #52 aligns bootstrap and stdio local bindings with Wrangler's versioned persistence path. The temporary-database regression passes; `npm run verify` passes with 469 tests across 38 files, typecheck, formatting, lint and Wrangler dry-run. Phase 4 remains in progress; external-agent acceptance testing remains open.
 
 Completion percentages must reflect verified acceptance criteria, not merely generated code.
 
@@ -723,13 +723,13 @@ Maintain the following short record at the end of this document.
 
 **Last completed task:** PR #49 merged: authenticated, allow-list-enforced `commons.contribute` route for new Knowledge/Execution contributions and exact-next versions.
 
-**Current task:** Corrected the local MCP bootstrap and stdio server to open Wrangler's versioned D1 persistence directory and added a temporary-database regression test using the real platform adapter. Focused bootstrap tests, typecheck, lint and formatting pass; full verification is pending. No existing local state was reset and no remote configuration was changed.
+**Current task:** Corrected the local MCP bootstrap and stdio server to open Wrangler's versioned D1 persistence directory and added a temporary-database regression test using the real platform adapter. PR #52 is open; `npm run verify` passes with 469 tests across 38 files. No existing local state was reset and no remote configuration was changed.
 
 **Known blockers:** Feedback needs an explicit decision on minimal retrieval-receipt phase ownership; its assessment schema and trust effects remain Phase 5 work. External-agent acceptance testing remains open. Shared caching awaits Phase 4 authentication and Phase 6 paid-access semantics.
 
 **Next task:** Perform external-agent acceptance testing for both families through the implemented interfaces. Resolve retrieval-receipt ownership before `commons.feedback`; define assessment fields and trust controls with Phase 5.
 
-**Last verified commit:** `d2a4e03` (`npm run verify`: typecheck, formatting, lint, 468 tests across 38 files, Wrangler dry-run). The local persistence follow-up has passed focused checks but not the full verification suite yet.
+**Last verified commit:** `7c4b349` (`npm run verify`: typecheck, formatting, lint, 469 tests across 38 files, Wrangler dry-run).
 
 Update these fields at the end of each working session.
 
