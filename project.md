@@ -575,7 +575,7 @@ The audit also covers the operator/credential path (`test/identity/credentials.t
 
 **Current phase:** Phase 4 In Progress, 25% implementation verified. The authenticated REST `commons.search` and exact-version `commons.get` endpoints use the shared credential verification, D1 rate limiter and safe error mapping, and have local Worker coverage. `commons.contribute`, `commons.feedback`, MCP and external-agent acceptance testing remain incomplete. Feedback remains unimplemented pending a receipt-storage phase decision and the Phase 5 assessment schema. Phase 3 Search and Retrieval is complete at 100%; persistent caching remains deferred to Phase 6. Phase 2 is complete.
 **Current blocker:** Before feedback implementation, reconcile the data-model note that places retrieval records in Phases 5–6 with Phase 4's exact-version retrieval eligibility criterion; the feedback assessment schema remains Phase 5 work.
-**Latest verified milestone:** PR #47 merged with the authenticated, D1-rate-limited `commons.search` endpoint. The current `commons.get` implementation passes targeted Worker tests, TypeScript checking and lint; full repository verification is pending.
+**Latest verified milestone:** PR #47 merged with the authenticated, D1-rate-limited `commons.search` endpoint. PR #48 adds the authenticated exact-version `commons.get` endpoint; `npm run verify` passes with 457 tests across 35 files and Wrangler dry-run.
 
 Completion percentages must reflect verified acceptance criteria, not merely generated code.
 
@@ -691,7 +691,7 @@ Do not expand scope solely to solve speculative future problems.
 
 ## 10. Next Development Actions
 
-**Immediate task: Review the Phase 4 `commons.get` implementation PR.**
+**Immediate task: Review PR #48 for the Phase 4 `commons.get` implementation.**
 
 1. After review, separately approve `commons.contribute`; do not implement `commons.feedback` until exact-version receipt ownership and the Phase 5 assessment schema are resolved.
 2. Keep Phase 5 ranking signals deferred until outcomes, feedback schemas and validated reliability data exist. Persistent shared caching remains assigned to Phase 6, after authentication and paid-access semantics exist.
@@ -719,13 +719,13 @@ Maintain the following short record at the end of this document.
 
 **Last completed task:** PR #47 merged: authenticated `commons.search` route and shared D1 rate limiting.
 
-**Current task:** Implemented `commons.get` using the shared auth/rate-limit path, exact-version integrity-checked retrieval, safe public response fields, conditional validation and all-or-nothing UTF-8 budgeting. Targeted tests pass; full verification and PR review remain.
+**Current task:** Implemented `commons.get` using the shared auth/rate-limit path, exact-version integrity-checked retrieval, safe public response fields, conditional validation and all-or-nothing UTF-8 budgeting. PR #48 is open; full verification passes.
 
 **Known blockers:** Feedback needs an explicit decision on minimal retrieval-receipt phase ownership; its assessment schema and trust effects remain Phase 5 work. Shared caching awaits Phase 4 authentication and Phase 6 paid-access semantics.
 
 **Next task:** After reviewing the `commons.get` PR, separately approve and implement `commons.contribute`. Resolve retrieval-receipt ownership before `commons.feedback`; define assessment fields with Phase 5.
 
-**Last verified commit:** PR #47 implementation (`npm run verify`: typecheck, formatting, lint, 450 tests across 34 files, Wrangler dry-run).
+**Last verified commit:** `d1fa2b1` (`npm run verify`: typecheck, formatting, lint, 457 tests across 35 files, Wrangler dry-run).
 
 Update these fields at the end of each working session.
 
