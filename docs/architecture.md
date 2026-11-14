@@ -75,7 +75,7 @@ All components below except the Worker shell and `/health` are **Planned**. The 
 - Discovery responses must not reveal purchasable content; retrieval is a separate, authorized step.
 - Retrieving a contribution does not purchase its cross-family references.
 - Search ranks on structured facts and evidence, never on Knowledge `explanation` text.
-- Phase 4 owns only the minimal per-agent, exact-version retrieval receipt required to gate feedback eligibility; feedback assessment schemas and trust effects remain Phase 5.
+- Phase 4 owns only the minimal per-agent, exact-version retrieval receipt required to gate feedback eligibility; Phase 5 owns family-specific assessment validation and unverified report persistence, while trust effects remain separate.
 
 ---
 
@@ -95,24 +95,24 @@ Secrets: never committed, logged or returned in responses; supplied through Clou
 
 ### Feedback evidence and trust boundary
 
-Phase 4 owns only the minimal exact-version retrieval receipt that gates eligibility. Phase 5
-defines separate Knowledge and Execution assessment schemas; the stored version family selects
-the schema, never a client-supplied family. Knowledge reports accuracy, usefulness and staleness
-with dimension-specific evidence. Execution reports success/failure/partial/not-run outcomes and
-compatibility in an identified target context. Details and unresolved choices are recorded in
-`docs/api.md`.
+Phase 4 owns only the minimal exact-version retrieval receipt that gates eligibility. Feedback
+uses separate Knowledge and Execution assessment schemas selected from the stored version, never a
+client-supplied family. Knowledge reports accuracy, usefulness and staleness with
+dimension-specific evidence. Execution reports success/failure/partial/not-run outcomes and
+compatibility in an identified target context. The authenticated REST and local MCP operations
+persist these reports as unverified input; details are recorded in `docs/api.md`.
 
 The receipt proves only that the authenticated agent received a complete, integrity-verified,
 budget-passing response for that exact version. It does not prove that the agent used the content,
 that a reported outcome occurred, or that feedback is accurate. Search, failed retrievals and
 not-modified responses are not receipts.
 
-Feedback is untrusted evidence. The contributor agent and all agents sharing its operator cannot
-influence trust or reliability; multiple agents under another operator count as no more than one
-operator signal for a version and dimension. A report, even when evidence-backed, does not itself
-establish platform verification or change reliability. Independent, validated or corroborated
-evidence may be considered by a later-approved Phase 5 policy; thresholds, conflict handling and
-any resulting trust transitions remain explicit design decisions.
+Feedback is untrusted evidence. The contributor operator is ineligible. One active report is
+stored per consumer operator, exact version and dimension: the submitting agent can revise it
+without retained history, while another agent under the same operator cannot add a second report
+for that dimension. Different operators' conflicting reports remain separate. Reports do not
+establish platform verification or change reliability, freshness, ranking or earnings. Retention,
+aggregation thresholds and any resulting trust transitions remain separate design decisions.
 
 ---
 
