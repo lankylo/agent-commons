@@ -575,7 +575,7 @@ The audit also covers the operator/credential path (`test/identity/credentials.t
 
 **Current phase:** Phase 4 In Progress, 0% runtime acceptance verified. The versioned REST contract and headless integration examples are documented in `docs/api.md`; no Phase 4 endpoint, authentication/rate-limit middleware or external-agent acceptance criterion is implemented. Feedback remains unimplemented pending a receipt-storage phase decision and the Phase 5 assessment schema. Phase 3 Search and Retrieval is complete at 100%; persistent caching remains deferred to Phase 6. Phase 2 is complete.
 **Current blocker:** Before feedback implementation, reconcile the data-model note that places retrieval records in Phases 5–6 with Phase 4's exact-version retrieval eligibility criterion; the feedback assessment schema remains Phase 5 work.
-**Latest verified milestone:** Phase 3 acceptance audit verified; Phase 4 REST contract documented in `docs/api.md` (documentation-only, pending full verification).
+**Latest verified milestone:** Phase 4 REST contract documented in `docs/api.md`; `npm run verify` passes on checkpoint `1ece965` (typecheck, formatting, lint, 444 tests across 33 files, Wrangler dry-run).
 
 Completion percentages must reflect verified acceptance criteria, not merely generated code.
 
@@ -718,13 +718,13 @@ Maintain the following short record at the end of this document.
 
 **Last completed task:** Phase 3 audit verified all current acceptance criteria and deferred shared caching to Phase 6 (PR #45 merged).
 
-**Current task:** Define the versioned Phase 4 REST contract and traceability in `docs/api.md`; no endpoints or runtime controls are implemented.
+**Current task:** Versioned Phase 4 REST contract is documented and verified; PR #46 is open for review. No endpoints or runtime controls are implemented.
 
 **Known blockers:** Feedback needs an explicit decision on minimal retrieval-receipt phase ownership; its assessment schema and trust effects remain Phase 5 work. Shared caching awaits Phase 4 authentication and Phase 6 paid-access semantics.
 
 **Next task:** After review, resolve retrieval-receipt phase ownership and separately approve Phase 4 endpoint, authentication and rate-limit implementation. Define feedback assessment fields with Phase 5; do not implement them from this contract alone.
 
-**Last verified commit:** PR #45 merge commit (Phase 3 completion audit; `npm run verify`: typecheck, formatting, lint, 444 tests across 33 files, Wrangler dry-run). Phase 4 documentation verification is pending.
+**Last verified commit:** `1ece965` (`npm run verify`: typecheck, formatting, lint, 444 tests across 33 files, Wrangler dry-run).
 
 Update these fields at the end of each working session.
 
