@@ -195,7 +195,7 @@ const NAME = /^[a-zA-Z][a-zA-Z0-9_]{0,63}$/;
 const STEP_ID = /^[a-z][a-z0-9_]{0,31}$/;
 const SLUG = /^[a-z0-9][a-z0-9._-]{0,63}$/;
 const HOSTNAME =
-  /^(?=.{1,253}$)(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z](?:[a-z0-9-]{0,61}[a-z0-9])?$/;
+  /^(?=.{1,254}$)(?:[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?\.)+[A-Za-z](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?\.?$/;
 /** Absolute path; no empty segments ("//") and no dot segments. */
 const PATH = /^(?!.*\/\/)(?!.*\/\.\.?(?:\/|$))\/[A-Za-z0-9._~\-/]*$/;
 const POINTER = /^(?:\/[A-Za-z0-9_-]{1,64}){1,10}$/;
@@ -553,6 +553,28 @@ function int(v: unknown, min: number, max: number): v is number {
   return typeof v === "number" && Number.isInteger(v) && v >= min && v <= max;
 }
 
+function canonicalHostname(value: unknown): string | undefined {
+  if (typeof value !== "string" || !HOSTNAME.test(value)) return undefined;
+  const hostname = value.toLowerCase().replace(/\.$/, "");
+  if (
+    hostname.endsWith(".localhost") ||
+    hostname.endsWith(".local") ||
+    hostname.endsWith(".home.arpa")
+  ) {
+    return undefined;
+  }
+  return hostname;
+}
+
+function matchesDeclaredTarget(hostname: unknown, declared: ReadonlySet<string>): boolean {
+  const canonical = canonicalHostname(hostname);
+  if (canonical === undefined) return false;
+  for (const domain of declared) {
+    if (canonical === domain || canonical.endsWith(`.${domain}`)) return true;
+  }
+  return false;
+}
+
 /** Validate untrusted input as an Execution contribution. Never throws. */
 export function validateExecutionContribution(input: unknown): ExecutionValidation {
   const schemaErrors = validateExecutionContributionJsonSchema(input);
@@ -593,13 +615,14 @@ export function validateExecutionContribution(input: unknown): ExecutionValidati
 
   // Target domains: the only hosts any step may address.
   c.list(input.targetDomains, "targetDomains", L.maxTargetDomains, 1).forEach((d, i) => {
-    if (typeof d !== "string" || !HOSTNAME.test(d)) {
+    const domain = canonicalHostname(d);
+    if (domain === undefined) {
       c.err(
         `targetDomains[${i}]`,
-        "must be a lowercase hostname (no scheme, port, path or wildcard)",
+        "must be a DNS hostname (no scheme, port, path, wildcard, IP address or local hostname)",
       );
-    } else if (c.domains.has(d)) c.err(`targetDomains[${i}]`, "duplicate domain");
-    else c.domains.add(d);
+    } else if (c.domains.has(domain)) c.err(`targetDomains[${i}]`, "duplicate domain");
+    else c.domains.add(domain);
   });
 
   // Declared inputs
@@ -640,7 +663,8 @@ export function validateExecutionContribution(input: unknown): ExecutionValidati
           const p = `compatibility.targetVersions[${i}]`;
           const o = c.obj(t, p, ["domain", "version"]);
           if (!o) return;
-          if (typeof o.domain !== "string" || !c.domains.has(o.domain)) {
+          const domain = canonicalHostname(o.domain);
+          if (domain === undefined || !c.domains.has(domain)) {
             c.err(`${p}.domain`, "must be a declared target domain");
           }
           c.name(o.version, `${p}.version`, SLUG);
@@ -674,7 +698,7 @@ export function validateExecutionContribution(input: unknown): ExecutionValidati
         if (!oneOf(HTTP_METHODS, o.method)) {
           c.err(`${p}.method`, `must be one of: ${HTTP_METHODS.join(", ")}`);
         } else if (!SAFE_HTTP_METHODS.includes(o.method as string)) writes = true;
-        if (typeof o.domain !== "string" || !c.domains.has(o.domain)) {
+        if (!matchesDeclaredTarget(o.domain, c.domains)) {
           c.err(`${p}.domain`, "must be one of the declared targetDomains");
         }
         if (typeof o.path !== "string" || !PATH.test(o.path) || o.path.length > L.pathMaxChars) {
