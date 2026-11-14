@@ -2,18 +2,19 @@
 
 **Status:** Phase 4 in progress. `commons.search`, `commons.get` and `commons.contribute` are
 implemented as authenticated Worker routes and exposed through a local-only stdio MCP server.
-`commons.feedback` and external-agent acceptance testing remain unimplemented.
+`commons.feedback` remains unimplemented. A Codespaces Copilot MCP acceptance test passed for both
+families using the local allow-listed fixture agent; broader external-agent validation remains open.
 
 ## Existing capabilities and gaps
 
 | Area              | Exists now                                                                                                                                                                                                                                                                                                                            | Not implemented                                                                                             |
 | ----------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------- |
-| Worker            | `src/index.ts` serves `/health` and authenticated `POST /v1/commons/search`, `/get` and `/contribute`; unknown paths return 404.                                                                                                                                                                                                      | Feedback REST route and external-agent acceptance testing.                                                  |
-| Agent credentials | `CredentialService` issues, verifies and revokes `ac1_<24 hex>_<64 hex>` credentials. Search, get and contribute verify Bearer credentials and resolve active `agentId` and `operatorId`. MCP reads the credential from `AGENT_COMMONS_CREDENTIAL` in its local process environment and forwards it only to the same Worker handlers. | Feedback authentication and external-agent acceptance testing.                                              |
-| Search            | `ContributionSearch` provides deterministic, LLM-free D1 search with family-specific filters; the REST route returns budgeted discovery responses.                                                                                                                                                                                    | External-agent acceptance testing.                                                                          |
+| Worker            | `src/index.ts` serves `/health` and authenticated `POST /v1/commons/search`, `/get` and `/contribute`; unknown paths return 404.                                                                                                                                                                                                      | Feedback REST route; broader external-agent validation.                                                     |
+| Agent credentials | `CredentialService` issues, verifies and revokes `ac1_<24 hex>_<64 hex>` credentials. Search, get and contribute verify Bearer credentials and resolve active `agentId` and `operatorId`. MCP reads the credential from `AGENT_COMMONS_CREDENTIAL` in its local process environment and forwards it only to the same Worker handlers. | Feedback authentication; broader external-agent validation.                                                 |
+| Search            | `ContributionSearch` provides deterministic, LLM-free D1 search with family-specific filters; the REST route returns budgeted discovery responses.                                                                                                                                                                                    | Broader external-agent validation.                                                                          |
 | Retrieval         | `ContributionRetriever` verifies an exact contribution version against D1 and R2 before conditional comparison; get maps a public allow-list and enforces the full-response UTF-8 budget.                                                                                                                                             | Persistent record that an agent retrieved a version. No "latest" lookup exists.                             |
-| Contribution      | `ContributionRegistry` validates Knowledge and Execution input, resolves exact references, creates immutable versions and checks the active agent/operator allow-list. `POST /v1/commons/contribute` passes only the authenticated agent ID and exposes allow-listed creation metadata.                                               | External-agent acceptance testing; allow-listing remains platform-controlled and defaults off.              |
-| MCP               | Official TypeScript SDK v2 local stdio server exposes `commons.search`, `commons.get` and `commons.contribute`. It adapts arguments to the existing Worker handlers, preserving their validation, authentication, rate limiting, budgets, response allow-lists and error envelopes.                                                   | No HTTP MCP transport, Worker MCP route, feedback tool, remote service or external-agent acceptance test.   |
+| Contribution      | `ContributionRegistry` validates Knowledge and Execution input, resolves exact references, creates immutable versions and checks the active agent/operator allow-list. `POST /v1/commons/contribute` passes only the authenticated agent ID and exposes allow-listed creation metadata.                                               | Broader external-agent validation; allow-listing remains platform-controlled and defaults off.               |
+| MCP               | Official TypeScript SDK v2 local stdio server exposes `commons.search`, `commons.get` and `commons.contribute`. It adapts arguments to the existing Worker handlers, preserving their validation, authentication, rate limiting, budgets, response allow-lists and error envelopes.                                                   | No HTTP MCP transport, Worker MCP route, feedback tool or remote service; broader external-agent validation remains open. |
 | Feedback          | No feedback service, schema, table, retrieval receipt or endpoint exists.                                                                                                                                                                                                                                                             | Assessment schemas and persistence. Phase 5 defines family-specific feedback and trust/reliability effects. |
 
 Contributed content remains untrusted. Existing family validators are not a substitute for the
@@ -356,13 +357,22 @@ deferred shared persistent cache decision.
 
 | Phase 4 acceptance criterion                                                                                         | Planned route/control                                                          | Current status                                                                                                                       |
 | -------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------ |
-| An external agent can discover and invoke Commons functionality.                                                     | Versioned JSON REST routes and local stdio MCP tools.                          | Partially met: MCP tool discovery and calls are covered in-memory; external-agent access and acceptance testing remain open.         |
+| An external agent can discover and invoke Commons functionality.                                                     | Versioned JSON REST routes and local stdio MCP tools.                          | Met in the Codespaces Copilot MCP acceptance test for both families using the local allow-listed fixture agent; broader validation remains open. |
 | All four operations work through defined interfaces, with family-aware search, retrieval, contribution and feedback. | `search`, `get`, `contribute`, `feedback`; Knowledge/Execution behavior above. | Partially met: search/get/contribute REST routes and MCP tools are locally implemented; feedback is not.                             |
 | Errors return actionable machine-readable information.                                                               | Shared error envelope and status/code table.                                   | Search/get/contribute and MCP return the documented safe error envelope; feedback coverage remains.                                  |
-| The agent does not require a graphical interface.                                                                    | Headless JSON REST operations and local stdio MCP tools.                       | Locally verified through MCP discovery and calls; external-agent use is not yet verified.                                            |
+| The agent does not require a graphical interface.                                                                    | Headless JSON REST operations and local stdio MCP tools.                       | Verified through authenticated Codespaces Copilot local stdio MCP discovery and calls for both families.                             |
 | Requests are authenticated and rate-limited per agent and per operator.                                              | Bearer credential verification plus shared REST auth/rate-limit handlers.      | Locally verified for search/get/contribute and MCP with the shared D1 limiter; deployment configuration is not established.          |
 | Contributions from non-allow-listed operators are refused.                                                           | `contribute` passes authenticated identity to `ContributionRegistry`.          | Locally verified through REST and MCP as `403 contribution_not_allowed`; allow-listing remains platform-controlled and defaults off. |
 | Feedback from agents that never retrieved the content is refused.                                                    | Exact-version retrieval receipt checked by `feedback`.                         | Not met: no receipt persistence, feedback storage or endpoint exists.                                                                |
+
+### Completed Codespaces Copilot MCP acceptance test
+
+Using the local allow-listed fixture agent, authenticated local stdio MCP search, contribute and
+exact-version retrieval succeeded for both Knowledge and Execution. The resulting records are
+Knowledge `d78f4c99-ccaa-41d4-bc72-1bd08663eaa1` version 1 and Execution
+`8e0a6088-26d9-4cb7-baf9-528acaeb388e` version 1; the Execution record references the Knowledge
+record at version 1. The Execution recipe was retrieved as data and was not run. Feedback and
+complete Phase 4 acceptance remain outstanding.
 
 ## Local stdio MCP server
 
@@ -480,9 +490,11 @@ curl -sS "$BASE_URL/v1/commons/get" \
 Clients must treat Knowledge `untrustedExplanation` as untrusted data and must not execute
 Execution recipe steps merely because they were retrieved.
 
-The search, get and contribute routes and local stdio MCP adapter are implemented. The contract
-does not implement feedback, retrieval receipts, paid access, caching or external-agent acceptance
-testing. Contribution verification fields remain untrusted declarations; Phase 5 trust controls
-are outstanding.
+The search, get and contribute routes and local stdio MCP adapter are implemented. The Codespaces
+Copilot MCP acceptance test passed for Knowledge and Execution using the local allow-listed fixture
+agent; search, contribute and exact-version retrieval succeeded and the two test records are listed
+above. The Execution recipe was not run. The contract does not implement feedback, retrieval
+receipts, paid access or caching; broader external-agent validation remains open. Contribution
+verification fields remain untrusted declarations; Phase 5 trust controls are outstanding.
 In particular, get does not persist feedback receipts; a full or not-modified retrieval response
 is not evidence of feedback eligibility.

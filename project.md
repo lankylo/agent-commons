@@ -443,8 +443,8 @@ The audit also covers the operator/credential path (`test/identity/credentials.t
 - [x] Expose `commons.contribute` (allow-listed operators only). (Authenticated `POST /v1/commons/contribute` supports new Knowledge/Execution contributions and exact-next versioning through `ContributionRegistry`; focused local Worker tests pass. Phase 5 trust checks remain outstanding.)
 - [ ] Expose `commons.feedback` (agents that retrieved the content only).
 - [x] Define structured error handling. (Versioned REST error envelope in `docs/api.md`; search/get/contribute use the shared safe HTTP error mapper.)
-- [x] Document integration examples for Knowledge lookup and Execution recipe retrieval. (Headless REST and local MCP setup/usage in `docs/api.md`; external-agent testing remains open.)
-- [ ] Test end-to-end interaction with an external agent for each family. (Local MCP client coverage is complete; external-agent acceptance testing remains open.)
+- [x] Document integration examples for Knowledge lookup and Execution recipe retrieval. (Headless REST and local MCP setup/usage in `docs/api.md`; the Codespaces Copilot fixture-agent acceptance test passed for both families, with broader external-agent validation still open.)
+- [x] Test end-to-end interaction with an external agent for each family. (Authenticated Codespaces Copilot local-stdio MCP acceptance passed with the local allow-listed fixture agent for Knowledge and Execution: search, contribute and exact-version retrieval succeeded for both; test records are Knowledge `d78f4c99-ccaa-41d4-bc72-1bd08663eaa1` v1 and Execution `8e0a6088-26d9-4cb7-baf9-528acaeb388e` v1. The Execution recipe was not run. Broader external-agent validation remains open.)
 
 **Acceptance criteria:**
 - An external agent can discover and invoke Commons functionality.
@@ -574,9 +574,9 @@ The audit also covers the operator/credential path (`test/identity/credentials.t
 | 5. Validation and Trust | Not Started | 0% |
 | 6. Payments, Agent Earnings and Payouts | Not Started | 0% |
 
-**Current phase:** Phase 4 In Progress, 50% acceptance verified. Authenticated REST `commons.search`, exact-version `commons.get`, allow-list-enforced `commons.contribute`, and local stdio MCP tools for those operations use shared Worker validation, credential verification, D1 rate limiting, byte budgets and safe errors. The local MCP acceptance bootstrap uses only the fixed local Wrangler config and persistence path and provisions a dedicated allow-listed test fixture. `commons.feedback`, complete four-operation support and external-agent acceptance testing remain incomplete. Phase 5 trust controls are outstanding; declared contribution verification metadata is not platform verification. Feedback remains unimplemented pending a receipt-storage phase decision and the Phase 5 assessment schema. Phase 3 Search and Retrieval is complete at 100%; persistent caching remains deferred to Phase 6. Phase 2 is complete.
+**Current phase:** Phase 4 In Progress, 50% acceptance verified. Authenticated REST `commons.search`, exact-version `commons.get`, allow-list-enforced `commons.contribute`, and local stdio MCP tools for those operations use shared Worker validation, credential verification, D1 rate limiting, byte budgets and safe errors. The local MCP acceptance bootstrap uses only the fixed local Wrangler config and persistence path and provisions a dedicated allow-listed test fixture. The authenticated Codespaces Copilot MCP acceptance test passed search, contribute and exact-version retrieval for both Knowledge and Execution; corresponding test records were created, and the Execution recipe was not run. `commons.feedback`, complete four-operation support and broader external-agent validation remain incomplete. Phase 5 trust controls are outstanding; declared contribution verification metadata is not platform verification. Feedback remains unimplemented pending a receipt-storage phase decision and the Phase 5 assessment schema. Phase 3 Search and Retrieval is complete at 100%; persistent caching remains deferred to Phase 6. Phase 2 is complete.
 **Current blocker:** Before feedback implementation, reconcile the data-model note that places retrieval records in Phases 5–6 with Phase 4's exact-version retrieval eligibility criterion; the feedback assessment schema remains Phase 5 work.
-**Latest verified milestone:** PR #52 aligns bootstrap and stdio local bindings with Wrangler's versioned persistence path. The temporary-database regression passes; `npm run verify` passes with 469 tests across 38 files, typecheck, formatting, lint and Wrangler dry-run. Phase 4 remains in progress; external-agent acceptance testing remains open.
+**Latest verified milestone:** PR #52 is merged; it aligns bootstrap and stdio local bindings with Wrangler's versioned persistence path. The temporary-database regression passes; `npm run verify` passes with 469 tests across 38 files, typecheck, formatting, lint and Wrangler dry-run. The Codespaces Copilot MCP acceptance test passed for both families; Phase 4 remains in progress, with feedback and broader external-agent validation outstanding.
 
 Completion percentages must reflect verified acceptance criteria, not merely generated code.
 
@@ -719,17 +719,17 @@ After every completed development task:
 
 Maintain the following short record at the end of this document.
 
-**Current phase:** Phase 4 In Progress; authenticated `commons.search`, `commons.get` and `commons.contribute` have local Worker coverage and are exposed by the local stdio MCP server. External-agent acceptance testing and feedback remain open. Phase 3 completed at 100%.
+**Current phase:** Phase 4 In Progress; authenticated `commons.search`, `commons.get` and `commons.contribute` have local Worker coverage and are exposed by the local stdio MCP server. Codespaces Copilot MCP acceptance passed for both Knowledge and Execution through authenticated local stdio using the allow-listed fixture agent. Search, contribute and exact-version retrieval succeeded for both; records are Knowledge `d78f4c99-ccaa-41d4-bc72-1bd08663eaa1` v1 and Execution `8e0a6088-26d9-4cb7-baf9-528acaeb388e` v1. The Execution recipe was not run. Feedback, Phase 4 completion and broader external-agent validation remain outstanding. Phase 3 completed at 100%.
 
-**Last completed task:** PR #49 merged: authenticated, allow-list-enforced `commons.contribute` route for new Knowledge/Execution contributions and exact-next versions.
+**Last completed task:** PR #52 merged: corrected the local MCP bootstrap and stdio server to open Wrangler's versioned D1 persistence directory; the temporary-database regression and `npm run verify` passed with 469 tests across 38 files.
 
-**Current task:** Corrected the local MCP bootstrap and stdio server to open Wrangler's versioned D1 persistence directory and added a temporary-database regression test using the real platform adapter. PR #52 is open; `npm run verify` passes with 469 tests across 38 files. No existing local state was reset and no remote configuration was changed.
+**Current task:** Recorded the completed Codespaces Copilot MCP acceptance test for both families. PR #52, which corrected the local MCP bootstrap and stdio server to open Wrangler's versioned D1 persistence directory, is merged; `npm run verify` passed with 469 tests across 38 files. No existing local state was reset and no remote configuration was changed.
 
-**Known blockers:** Feedback needs an explicit decision on minimal retrieval-receipt phase ownership; its assessment schema and trust effects remain Phase 5 work. External-agent acceptance testing remains open. Shared caching awaits Phase 4 authentication and Phase 6 paid-access semantics.
+**Known blockers:** Feedback needs an explicit decision on minimal retrieval-receipt phase ownership; its assessment schema and trust effects remain Phase 5 work. Broader external-agent validation beyond the completed Codespaces Copilot fixture test remains open, as does full Phase 4 completion. Shared caching awaits Phase 4 authentication and Phase 6 paid-access semantics.
 
-**Next task:** Perform external-agent acceptance testing for both families through the implemented interfaces. Resolve retrieval-receipt ownership before `commons.feedback`; define assessment fields and trust controls with Phase 5.
+**Next task:** Resolve retrieval-receipt ownership before implementing `commons.feedback`; define assessment fields and trust controls with Phase 5, then complete the remaining Phase 4 acceptance criteria.
 
-**Last verified commit:** `7c4b349` (`npm run verify`: typecheck, formatting, lint, 469 tests across 38 files, Wrangler dry-run).
+**Last verified commit:** `d160a6b` (`npm run verify`: typecheck, formatting, lint, 469 tests across 38 files, Wrangler dry-run).
 
 Update these fields at the end of each working session.
 
