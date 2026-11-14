@@ -111,6 +111,18 @@ async function callGet(
   return worker.fetch(request, getEnv(overrides) as never);
 }
 
+async function callSearch(
+  body: Record<string, unknown>,
+  credential: string = token,
+): Promise<Response> {
+  const request = new Request("https://example.com/v1/commons/search", {
+    method: "POST",
+    headers: new Headers({ Authorization: `Bearer ${credential}` }),
+    body: JSON.stringify(body),
+  });
+  return worker.fetch(request, getEnv() as never);
+}
+
 interface GetPayload {
   data: Record<string, unknown>;
   budget: { usedUtf8Bytes: number };
@@ -125,7 +137,92 @@ function exactRequest(contributionId: string, version = 1, maxUtf8Bytes = 64000)
   return { contributionId, version, maxUtf8Bytes };
 }
 
+async function createGetAgent(name: string) {
+  const operator = await identity.createOperator({
+    kind: "organization",
+    displayName: `${name} Operator`,
+  });
+  const agent = await identity.registerAgent(operator.id, { displayName: `${name} Agent` });
+  const issued = await credentials.issueCredential(agent.id, { label: name });
+  return { agentId: agent.id, token: issued.token };
+}
+
 describe("worker get endpoint", () => {
+  it("records only the authenticated agent and exact version after a full successful get", async () => {
+    const actor = await createGetAgent("receipt-success");
+
+    for (const contributionId of [knowledgeId, executionId]) {
+      const response = await callGet(exactRequest(contributionId), actor.token);
+      expect(response.status).toBe(200);
+      expect((await payload(response)).data.schemaVersion).toBe("retrieval-response/v1");
+    }
+
+    const receipts = await db
+      .prepare(
+        "SELECT agent_id, contribution_id, version FROM retrieval_receipts WHERE agent_id = ? ORDER BY contribution_id",
+      )
+      .bind(actor.agentId)
+      .all<{ agent_id: string; contribution_id: string; version: number }>();
+    expect(receipts.results).toHaveLength(2);
+    expect(new Set(receipts.results.map((receipt) => receipt.contribution_id))).toEqual(
+      new Set([executionId, knowledgeId]),
+    );
+    expect(
+      receipts.results.every(
+        (receipt) => receipt.agent_id === actor.agentId && receipt.version === 1,
+      ),
+    ).toBe(true);
+
+    expect((await callGet(exactRequest(knowledgeId), actor.token)).status).toBe(200);
+    const duplicateCount = await db
+      .prepare("SELECT COUNT(*) AS count FROM retrieval_receipts WHERE agent_id = ?")
+      .bind(actor.agentId)
+      .first<{ count: number }>();
+    expect(duplicateCount?.count).toBe(2);
+  });
+
+  it("does not record receipts for search, errors, budget failures, or not-modified responses", async () => {
+    const actor = await createGetAgent("receipt-exclusions");
+    const fullResponse = await payload(await callGet(exactRequest(knowledgeId), token));
+    const contentHash = fullResponse.data.contentHash as string;
+    const fullResponseBytes = fullResponse.budget.usedUtf8Bytes;
+
+    const searchResponse = await callSearch(
+      { query: "httpbin", family: "knowledge", maxUtf8Bytes: 16000 },
+      actor.token,
+    );
+    expect(searchResponse.status).toBe(200);
+
+    const errorResponse = await callGet(exactRequest("missing-contribution"), actor.token);
+    expect(errorResponse.status).toBe(404);
+
+    const budgetResponse = await callGet(
+      exactRequest(knowledgeId, 1, fullResponseBytes - 1),
+      actor.token,
+    );
+    expect(budgetResponse.status).toBe(413);
+
+    const notModifiedResponse = await callGet(
+      {
+        ...exactRequest(knowledgeId),
+        validator: { contributionId: knowledgeId, version: 1, contentHash },
+      },
+      actor.token,
+    );
+    expect(notModifiedResponse.status).toBe(200);
+    expect((await payload(notModifiedResponse)).data.schemaVersion).toBe(
+      "retrieval-not-modified/v1",
+    );
+
+    const receipts = await db
+      .prepare(
+        "SELECT agent_id, contribution_id, version FROM retrieval_receipts WHERE agent_id = ?",
+      )
+      .bind(actor.agentId)
+      .all();
+    expect(receipts.results).toEqual([]);
+  });
+
   it("retrieves Knowledge and Execution using family-specific safe public fields", async () => {
     const knowledgeRes = await callGet(exactRequest(knowledgeId));
     expect(knowledgeRes.status).toBe(200);

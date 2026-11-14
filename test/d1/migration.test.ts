@@ -130,6 +130,7 @@ describe("clean migration", () => {
         "knowledge_versions",
         "operators",
         "rate_limit_windows",
+        "retrieval_receipts",
         "version_platform_state",
       ].sort(),
     );
@@ -144,6 +145,12 @@ describe("clean migration", () => {
         "SELECT count(*) AS c FROM sqlite_master WHERE type = 'index' AND name LIKE '%\\_idx' ESCAPE '\\'",
       ),
     ).toBe(14);
+    expect(
+      db
+        .prepare("PRAGMA table_info(retrieval_receipts)")
+        .all()
+        .map((row) => row["name"]),
+    ).toEqual(["agent_id", "contribution_id", "version"]);
     expect(db.prepare("PRAGMA foreign_key_check").all()).toEqual([]);
   });
 });
