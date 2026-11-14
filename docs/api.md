@@ -1,21 +1,20 @@
 # Versioned REST and MCP API Contract
 
-**Status:** Phase 4 in progress. `commons.search`, `commons.get` and `commons.contribute` are
-implemented as authenticated Worker routes and exposed through a local-only stdio MCP server.
-`commons.feedback` remains unimplemented. A Codespaces Copilot MCP acceptance test passed for both
-families using the local allow-listed fixture agent; broader external-agent validation remains open.
+**Status:** Authenticated REST and local-only stdio MCP support `commons.search`, `commons.get`,
+`commons.contribute` and `commons.feedback`. Feedback stores family-validated reports as unverified
+input; it does not change trust or reliability. Broader external-agent validation remains open.
 
 ## Existing capabilities and gaps
 
 | Area              | Exists now                                                                                                                                                                                                                                                                                                                            | Not implemented                                                                                             |
 | ----------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------- |
-| Worker            | `src/index.ts` serves `/health` and authenticated `POST /v1/commons/search`, `/get` and `/contribute`; unknown paths return 404.                                                                                                                                                                                                      | Feedback REST route; broader external-agent validation.                                                     |
-| Agent credentials | `CredentialService` issues, verifies and revokes `ac1_<24 hex>_<64 hex>` credentials. Search, get and contribute verify Bearer credentials and resolve active `agentId` and `operatorId`. MCP reads the credential from `AGENT_COMMONS_CREDENTIAL` in its local process environment and forwards it only to the same Worker handlers. | Feedback authentication; broader external-agent validation.                                                 |
+| Worker            | `src/index.ts` serves `/health` and authenticated `POST /v1/commons/search`, `/get`, `/contribute` and `/feedback`; unknown paths return 404.                                                                                                                                                                                          | Broader external-agent validation.                                                                          |
+| Agent credentials | `CredentialService` issues, verifies and revokes `ac1_<24 hex>_<64 hex>` credentials. All four operations verify Bearer credentials and resolve active `agentId` and `operatorId`. MCP reads the credential from `AGENT_COMMONS_CREDENTIAL` in its local process environment and forwards it only to the same Worker handlers. | Broader external-agent validation.                                                                         |
 | Search            | `ContributionSearch` provides deterministic, LLM-free D1 search with family-specific filters; the REST route returns budgeted discovery responses.                                                                                                                                                                                    | Broader external-agent validation.                                                                          |
 | Retrieval         | `ContributionRetriever` verifies an exact contribution version against D1 and R2 before conditional comparison; get maps a public allow-list, enforces the full-response UTF-8 budget and persists the minimal authenticated-agent/exact-version receipt before returning a full response. | No "latest" lookup exists. Conditional not-modified responses do not create receipts.                        |
 | Contribution      | `ContributionRegistry` validates Knowledge and Execution input, resolves exact references, creates immutable versions and checks the active agent/operator allow-list. `POST /v1/commons/contribute` passes only the authenticated agent ID and exposes allow-listed creation metadata.                                               | Broader external-agent validation; allow-listing remains platform-controlled and defaults off.               |
-| MCP               | Official TypeScript SDK v2 local stdio server exposes `commons.search`, `commons.get` and `commons.contribute`. It adapts arguments to the existing Worker handlers, preserving their validation, authentication, rate limiting, budgets, response allow-lists and error envelopes.                                                   | No HTTP MCP transport, Worker MCP route, feedback tool or remote service; broader external-agent validation remains open. |
-| Feedback          | No feedback service, endpoint or trust/reliability effect is implemented. `commons.get` now persists the minimal Phase 4 eligibility receipt.                                                                                                                                                                                          | Phase 5 assessment validation and trust/reliability effects.                                                  |
+| MCP               | Official TypeScript SDK v2 local stdio server exposes `commons.search`, `commons.get`, `commons.contribute` and `commons.feedback`. It adapts arguments to the existing Worker handlers, preserving their validation, authentication, rate limiting, budgets, response allow-lists and error envelopes.                                        | No HTTP MCP transport, Worker MCP route or remote service; broader external-agent validation remains open. |
+| Feedback          | Authenticated `POST /v1/commons/feedback` and MCP `commons.feedback` validate the stored version's Knowledge or Execution schema and persist one unverified active report per consumer operator/version/dimension. Exact-version retrieval receipt and contributor-operator exclusion are enforced. | No trusted-runner, report aggregation, or trust/reliability effect.                                            |
 
 Contributed content remains untrusted. Existing family validators are not a substitute for the
 broader Phase 5 trust controls. The Phase 4 API must not claim independent verification, apply
@@ -248,28 +247,28 @@ or self-service allow-listing.
 
 ### `commons.feedback`
 
-Proposed request envelope (the server selects the family schema from the stored exact version):
+Request envelope (the server selects the family schema from the stored exact version):
 
 ```text
 {
   contributionId: string,
   version: positive integer,
-  assessment: KnowledgeAssessment
+  assessment: KnowledgeAssessment | ExecutionAssessment
 }
 ```
 
-The proposed `assessment` wire schema and evidence requirements are defined below, but no feedback
-model or endpoint exists. Do not accept arbitrary assessment fields. The schema remains a design
-proposal; approve its open evidence and policy decisions before implementing or enabling feedback.
+Only `contributionId`, `version` and `assessment` are accepted; a client-supplied `family` or any
+other top-level field is rejected. The exact stored version selects the schema below. Feedback is
+authenticated and rate-limited through the shared Worker path; all reports remain unverified input.
 
-#### Proposed wire-level assessment schema (Phase 5; not implemented)
+#### Wire-level assessment schema
 
 The request contains `contributionId`, positive integer `version`, and `assessment`. It MUST NOT
 contain a client-selected `family`. The server loads that exact stored version and selects its
 family schema; a client cannot choose or reinterpret the schema. For Knowledge, `assessment` must
-contain one or more dimensions below. For Execution, it must contain one or both bounded
-structured dimensions below; arbitrary evidence URLs are not accepted. Unknown fields are
-rejected. The assessment object is limited to 16,000 UTF-8 bytes.
+contain one or more dimensions below. For Execution, it must contain one or both bounded structured
+dimensions below; arbitrary evidence URLs are not accepted. Unknown fields are rejected. The
+assessment object is limited to 16,000 UTF-8 bytes.
 
 The existing contribution `EvidenceRef` is only a pointer:
 
@@ -281,14 +280,14 @@ EvidenceRef = {
 ```
 
 The validator does not enumerate or validate `kind` values: labels such as `documentation` in
-fixtures are examples, not an allow-list or proof of evidence class. The URI check establishes only
-HTTPS syntax; it does not fetch, authenticate, inspect, or sanitize the target. For Knowledge,
-references may point only to public documentation or source material relevant to the specific
-finding. The feedback payload must not embed evidence contents. Do not submit URLs containing
-userinfo, credentials, tokens, signed access, personal identifiers, or sensitive query/fragment
-values; do not reference private/internal resources. Keep all free-text scope/context descriptions
-free of credentials, personal data and private details. These are contributor requirements, not
-guarantees enforced by the current validator.
+fixtures are examples, not an allow-list or proof of evidence class. Feedback validation checks
+HTTPS URL syntax, length and absence of URL userinfo; it does not fetch, authenticate, inspect,
+sanitize or establish that a target is public. For Knowledge, references may point only to public
+documentation or source material relevant to the specific finding. The feedback payload must not
+embed evidence contents. Do not submit URLs containing credentials, tokens, signed access,
+personal identifiers, or sensitive query/fragment values; do not reference private/internal
+resources. Keep all free-text scope/context descriptions free of credentials, personal data and
+private details. These are contributor requirements, not guarantees enforced by the validator.
 
 Knowledge feedback may reuse the existing pointer shape, with at most 20 references total per
 assessment (matching the current contribution evidence limit). `scope` and `context` strings are
@@ -459,36 +458,42 @@ eligible. The receipt is created only after complete `commons.get` integrity ver
 passing full-response budget, immediately before success is returned. Search, errors, and
 `retrieval-not-modified` do not create receipts.
 
-Duplicate and same-operator rules remain as proposed for any future accepted feedback: a repeated
-report cannot add weight; a revision replaces the agent's active report for that dimension and
-exact version; the contributor agent and all agents sharing its operator cannot influence trust;
-multiple agents of another operator contribute at most one operator-level signal per version and
-dimension. Knowledge reports remain unverified and cannot alone change verification, freshness,
-reliability, ranking, or earnings; independent validation or corroboration may be considered only
-under a separately approved policy. Execution summaries are agent-supplied and remain unverified.
+The authenticated agent's operator must differ from the contribution's original contributor
+operator. Missing receipt, unknown version, and same-contributor-operator submissions all return
+the same generic `403 feedback_not_eligible` response. The family-specific schema and integrity
+checks are selected from the stored exact version.
 
-Keep storage retention, revision-history persistence, conflict resolution, aggregation thresholds,
-and trust/ranking effects for separate decisions. Any platform verification of Execution summaries
-requires a separate trusted-runner design. The bounded summary introduces no evidence types and
-does not expose credentials, personal data, or private run details.
+Each included dimension is persisted as one active report keyed by consumer operator, exact
+contribution ID/version and dimension. An identical retry is idempotent. The agent that submitted
+the active report may replace it; no revision history is retained. A different agent under that
+same consumer operator cannot add or replace a report for the same dimension and receives a
+generic `409 feedback_conflict`. A request containing multiple dimensions is atomic: a conflict
+for any included dimension stores none of them. Different consumer operators' reports remain
+separate, including conflicting findings.
+
+Knowledge reports and Execution summaries remain unverified. Feedback does not change
+verification, freshness, reliability, ranking or earnings. The stored report contains no platform
+trust result. The bounded Execution summary introduces no evidence types and does not expose
+credentials, personal data or private run details; any platform verification would require a
+separate trusted-runner design. Storage retention, aggregation thresholds and trust/ranking effects
+remain separate decisions; revision history is not retained.
 
 Only the authenticated agent with a persisted record of a successful full retrieval of that exact
 `contributionId` and `version` may submit feedback. The Phase 4 receipt records only the
 authenticated agent and exact contribution version. The shared Worker `commons.get` handler
 creates it only after D1/R2 integrity verification and the complete full response passing its
 UTF-8 budget, immediately before returning success. Search results, any error response, budget
-failures, and `retrieval-not-modified` responses do not create receipts. Future feedback handling
-must durably persist its own report before returning success. Missing receipt, unknown version and other
+failures, and `retrieval-not-modified` responses do not create receipts. Feedback persists the
+active reports before returning success. Missing receipt, unknown version and other
 ineligible cases return a uniform `403 feedback_not_eligible`, without revealing which eligibility
 check failed.
 The target version's stored family selects the assessment schema; clients cannot choose or change
 the family in the feedback request.
 
-This Phase 4 receipt is limited to eligibility evidence. The family-specific assessment schema,
-assessment validation and trust/reliability effects remain Phase 5 design and implementation
-scope. The receipt does not implement or enable the feedback endpoint.
+This Phase 4 receipt is limited to eligibility evidence; it does not verify the report or affect
+trust. Feedback assessment validation and persistence do not implement trust/reliability effects.
 
-Once the assessment schema and persistence are approved, the planned success shape is:
+The success response is:
 
 ```json
 {
@@ -499,9 +504,8 @@ Once the assessment schema and persistence are approved, the planned success sha
 }
 ```
 
-Accepting feedback does not itself change reliability, trust status or earnings. Phase 5 defines
-trust effects; Phase 6 defines eligible paid-use earnings. The request/response envelopes above
-are proposals, not existing types or persisted records.
+Accepting feedback does not itself change reliability, trust status or earnings. Phase 5 trust
+effects and Phase 6 eligible paid-use earnings remain separate decisions.
 
 ## Errors
 
@@ -534,9 +538,9 @@ Proposed stable HTTP mapping:
 | 401  | `unauthorized`                                                                                              | Missing/invalid/expired/revoked credential or inactive agent/operator; same public response for all.                                                                                               |
 | 403  | `contribution_not_allowed`, `feedback_not_eligible`                                                         | Authenticated but not allowed to submit, or not eligible to report this exact retrieved version.                                                                                                   |
 | 404  | `not_found`                                                                                                 | Unknown contribution/version or `operator_mismatch`; do not distinguish absence from inaccessible-resource existence.                                                                              |
-| 409  | `duplicate_content`, `version_conflict`                                                                     | Duplicate submission or optimistic version conflict. `latestVersion` may be returned only after the registry confirms the caller is the original operator.                                         |
+| 409  | `duplicate_content`, `version_conflict`, `feedback_conflict`                                                 | Duplicate contribution or optimistic version conflict; feedback conflicts when another agent under the same consumer operator already owns that version/dimension report. No report details are returned. |
 | 413  | `budget_too_small`, `response_too_large`                                                                    | Budget cannot fit the empty discovery envelope or complete retrieval response.                                                                                                                     |
-| 422  | `invalid_content`, `platform_field_rejected`, `unresolved_reference`, `family_mismatch`, `invalid_feedback` | Valid contribution JSON that fails family validation, contains a platform-managed field, has unresolved exact references, or changes the immutable family; feedback validation is not implemented. |
+| 422  | `invalid_content`, `platform_field_rejected`, `unresolved_reference`, `family_mismatch`, `invalid_feedback` | Valid contribution JSON that fails family validation, contains a platform-managed field, has unresolved exact references, changes the immutable family, or has an invalid family-specific feedback assessment.                       |
 | 429  | `rate_limited`                                                                                              | Per-agent or per-operator limit; include `Retry-After` when known.                                                                                                                                 |
 | 500  | `content_unavailable`, `internal_error`                                                                     | Retrieval integrity/storage failure or unexpected internal failure; no storage diagnostic is returned.                                                                                             |
 | 503  | `rate_limiter_unavailable`                                                                                  | Shared rate-limit enforcement cannot safely determine whether to admit the request.                                                                                                                |
@@ -567,12 +571,12 @@ deferred shared persistent cache decision.
 | Phase 4 acceptance criterion                                                                                         | Planned route/control                                                          | Current status                                                                                                                       |
 | -------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------ |
 | An external agent can discover and invoke Commons functionality.                                                     | Versioned JSON REST routes and local stdio MCP tools.                          | Met in the Codespaces Copilot MCP acceptance test for both families using the local allow-listed fixture agent; broader validation remains open. |
-| All four operations work through defined interfaces, with family-aware search, retrieval, contribution and feedback. | `search`, `get`, `contribute`, `feedback`; Knowledge/Execution behavior above. | Partially met: search/get/contribute REST routes and MCP tools are locally implemented; feedback is not.                             |
-| Errors return actionable machine-readable information.                                                               | Shared error envelope and status/code table.                                   | Search/get/contribute and MCP return the documented safe error envelope; feedback coverage remains.                                  |
+| All four operations work through defined interfaces, with family-aware search, retrieval, contribution and feedback. | `search`, `get`, `contribute`, `feedback`; Knowledge/Execution behavior above. | REST routes and MCP tools are locally implemented; both stored families have focused feedback coverage.                               |
+| Errors return actionable machine-readable information.                                                               | Shared error envelope and status/code table.                                   | All four operations return the documented safe error envelope.                                                                       |
 | The agent does not require a graphical interface.                                                                    | Headless JSON REST operations and local stdio MCP tools.                       | Verified through authenticated Codespaces Copilot local stdio MCP discovery and calls for both families.                             |
-| Requests are authenticated and rate-limited per agent and per operator.                                              | Bearer credential verification plus shared REST auth/rate-limit handlers.      | Locally verified for search/get/contribute and MCP with the shared D1 limiter; deployment configuration is not established.          |
+| Requests are authenticated and rate-limited per agent and per operator.                                              | Bearer credential verification plus shared REST auth/rate-limit handlers.      | Locally verified for all four operations and MCP with the shared D1 limiter; deployment configuration is not established.           |
 | Contributions from non-allow-listed operators are refused.                                                           | `contribute` passes authenticated identity to `ContributionRegistry`.          | Locally verified through REST and MCP as `403 contribution_not_allowed`; allow-listing remains platform-controlled and defaults off. |
-| Feedback from agents that never retrieved the content is refused.                                                    | Phase 4 exact-version retrieval receipt checked by `feedback`.                  | Not met: receipt persistence, feedback storage and endpoint are not implemented.                                                     |
+| Feedback from agents that never retrieved the content is refused.                                                    | Phase 4 exact-version retrieval receipt checked by `feedback`.                  | Locally verified: no-receipt, unknown-version and same-contributor-operator cases share `403 feedback_not_eligible`.                 |
 
 ### Completed Codespaces Copilot MCP acceptance test
 
@@ -699,12 +703,13 @@ curl -sS "$BASE_URL/v1/commons/get" \
 Clients must treat Knowledge `untrustedExplanation` as untrusted data and must not execute
 Execution recipe steps merely because they were retrieved.
 
-The search, get and contribute routes and local stdio MCP adapter are implemented. The Codespaces
+The search, get, contribute and feedback routes and local stdio MCP adapter are implemented. The Codespaces
 Copilot MCP acceptance test passed for Knowledge and Execution using the local allow-listed fixture
 agent; search, contribute and exact-version retrieval succeeded and the two test records are listed
-above. The Execution recipe was not run. The contract does not implement feedback, paid access or
-caching; broader external-agent validation remains open. The minimal Phase 4 receipt is persisted
-by `commons.get` under the creation boundary defined above. Contribution
+above. The Execution recipe was not run. Feedback has focused local REST/MCP coverage and persists
+only unverified assessment reports; it does not implement trust effects. Paid access or caching
+remain out of scope; broader external-agent validation remains open. The minimal Phase 4 receipt is
+persisted by `commons.get` under the creation boundary defined above. Contribution
 verification fields remain untrusted declarations; Phase 5 trust controls are outstanding.
 Only a complete integrity-verified full response that passes the byte budget qualifies for a
 receipt, not a search, error, budget failure or not-modified response.

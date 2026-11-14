@@ -125,6 +125,7 @@ describe("clean migration", () => {
         "contributions",
         "execution_target_domains",
         "execution_versions",
+        "feedback_reports",
         "knowledge_facts",
         "knowledge_sources",
         "knowledge_versions",
@@ -151,6 +152,19 @@ describe("clean migration", () => {
         .all()
         .map((row) => row["name"]),
     ).toEqual(["agent_id", "contribution_id", "version"]);
+    expect(
+      db
+        .prepare("PRAGMA table_info(feedback_reports)")
+        .all()
+        .map((row) => row["name"]),
+    ).toEqual([
+      "consumer_operator_id",
+      "agent_id",
+      "contribution_id",
+      "version",
+      "dimension",
+      "assessment_json",
+    ]);
     expect(db.prepare("PRAGMA foreign_key_check").all()).toEqual([]);
   });
 });

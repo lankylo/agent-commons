@@ -10,6 +10,7 @@ import {
   type CreationErrorCode,
   type VersionErrorCode,
 } from "./registry/creation";
+import { FeedbackRegistry } from "./registry/feedback";
 import { RateLimitService, DEFAULT_RATE_LIMITS } from "./rate-limit";
 
 interface WorkerEnv {
@@ -87,7 +88,7 @@ type AuthorizationResult =
 async function authenticateAndRateLimit(
   request: Request,
   env: WorkerEnv,
-  operation: "Search" | "Retrieval" | "Contribution",
+  operation: "Search" | "Retrieval" | "Contribution" | "Feedback",
 ): Promise<AuthorizationResult> {
   if (!env.DB) {
     return {
@@ -583,6 +584,75 @@ async function handleContribute(request: Request, env: WorkerEnv): Promise<Respo
   }
 }
 
+async function handleFeedback(request: Request, env: WorkerEnv): Promise<Response> {
+  try {
+    const authorization = await authenticateAndRateLimit(request, env, "Feedback");
+    if (!authorization.ok) return authorization.response;
+    if (!env.DB || !env.CONTENT_BUCKET) {
+      return httpError(500, "internal_error", "Feedback could not be saved.");
+    }
+
+    const parsed = await parseJsonBody(request);
+    if (!parsed.ok) return parsed.response;
+    if (typeof parsed.value !== "object" || parsed.value === null || Array.isArray(parsed.value)) {
+      return httpError(400, "invalid_request", "Feedback request body must be an object.");
+    }
+    const record = parsed.value as Record<string, unknown>;
+    if (
+      Object.keys(record).some(
+        (field) => !["contributionId", "version", "assessment"].includes(field),
+      )
+    ) {
+      return httpError(400, "invalid_request", "Feedback request contains unsupported fields.");
+    }
+    if (
+      typeof record.contributionId !== "string" ||
+      record.contributionId.length === 0 ||
+      !requirePositiveSafeInteger(record.version)
+    ) {
+      return httpError(
+        400,
+        "invalid_request",
+        "contributionId and a positive safe-integer version are required.",
+      );
+    }
+
+    const result = await new FeedbackRegistry({
+      DB: env.DB,
+      CONTENT_BUCKET: env.CONTENT_BUCKET,
+    }).submit(authorization.actor, record.contributionId, record.version, record.assessment);
+    if (!result.ok) {
+      switch (result.code) {
+        case "feedback_not_eligible":
+          return httpError(
+            403,
+            "feedback_not_eligible",
+            "This agent is not eligible to submit feedback for this exact version.",
+          );
+        case "feedback_conflict":
+          return httpError(
+            409,
+            "feedback_conflict",
+            "A report for this dimension already exists under this operator.",
+          );
+        case "invalid_feedback":
+          return httpError(422, "invalid_feedback", "The feedback assessment is invalid.");
+        case "content_unavailable":
+          return httpError(500, "content_unavailable", "Contribution content is unavailable.");
+      }
+    }
+
+    return Response.json({
+      schemaVersion: "feedback-response/v1",
+      accepted: true,
+      contributionId: record.contributionId,
+      version: record.version,
+    });
+  } catch {
+    return httpError(500, "internal_error", "Feedback could not be saved.");
+  }
+}
+
 export default {
   async fetch(request: Request, env?: unknown): Promise<Response> {
     const workerEnv = (env ?? {}) as WorkerEnv;
@@ -598,6 +668,9 @@ export default {
     }
     if (pathname === "/v1/commons/contribute" && request.method === "POST") {
       return handleContribute(request, workerEnv);
+    }
+    if (pathname === "/v1/commons/feedback" && request.method === "POST") {
+      return handleFeedback(request, workerEnv);
     }
     return new Response("Not Found", { status: 404 });
   },

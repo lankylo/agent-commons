@@ -1,8 +1,8 @@
 # Agent Commons — D1 Schema Design (Phase 2)
 
-**Status: Design implemented as a migration.** `migrations/0001_initial_schema.sql` applies this DDL plus the §6 triggers (verified by `test/d1/migration.test.ts` and `npm run db:migrate:local`, local only). No real D1 database or production binding exists (`wrangler.d1-local.jsonc` is a local-only placeholder) and no code reads or writes these tables. If the design and migration differ, the migration is authoritative; change it only through a new numbered migration. `project.md` remains the source of truth for scope; this document records the table design that maps the TypeScript models (`src/identity/types.ts`, `src/registry/envelope.ts`, `knowledge.ts`, `execution.ts`, `review-intervals.ts`, `references.ts`) to D1 (SQLite).
+**Status: Schema implemented as local migrations 0001–0006.** The migrations apply this DDL plus the §6 triggers (verified by `test/d1/migration.test.ts`; local only). The Worker reads and writes the local D1 schema through its bindings; no real D1 database or production binding exists (`wrangler.d1-local.jsonc` is a local-only placeholder). If the design and migration differ, the migration is authoritative; change it only through a new numbered migration. `project.md` remains the source of truth for scope; this document records the table design that maps the TypeScript models (`src/identity/types.ts`, `src/registry/envelope.ts`, `knowledge.ts`, `execution.ts`, `review-intervals.ts`, `references.ts`) to D1 (SQLite).
 
-Out of scope here: credentials/API keys, search (FTS5), feedback, purchases, the agent earnings ledger, payment tables, verification-event logs and takedown handling (see §9).
+Out of scope here: purchases, the agent earnings ledger, payment tables, verification-event logs, feedback aggregation/trust effects and takedown handling (see §9).
 
 ---
 
@@ -13,7 +13,7 @@ Out of scope here: credentials/API keys, search (FTS5), feedback, purchases, the
 - **Booleans:** `INTEGER` 0/1 with `CHECK`.
 - **IDs:** `contributions.id` follows the existing contribution ID rule (`^[a-z0-9][a-z0-9-]{7,63}$`), expressed with `GLOB` and length checks. Operator and agent IDs are opaque, platform-generated text (their format is not yet specified in the TypeScript models; length-checked only).
 - **Strict tables:** all tables are `STRICT` so column types are enforced.
-- **Two kinds of table:** *immutable* tables (written once, never updated or deleted; enforced by triggers, §6) and *mutable* tables (operators, agents status fields, platform-computed state).
+- **Two kinds of table:** *immutable* tables (written once, never updated or deleted; enforced by triggers, §6) and *mutable* tables (operators, agents status fields, platform-computed state and active feedback reports).
 - **Payload storage split:** the contributor-supplied, validated body is serialized as canonical JSON, hashed (§5) and stored in R2 at the key derived from the hash (`contributions/sha256/<content_hash>`). D1 holds the *queryable projection* of the same validated data. R2 bytes are the authoritative hashed artifact; D1 columns are derived from the same validated input in the same write. R2 configuration is a separate task.
 
 ---
@@ -407,6 +407,7 @@ WHERE NOT EXISTS (SELECT 1 FROM contribution_versions v WHERE v.contribution_id 
 - **Credentials:** implemented in `migrations/0002_agent_credentials.sql` (`agent_credentials`, keyed by public credential id, FK to `agent_id`, stores only a SHA-256 digest of the secret).
 - **Search:** FTS5 virtual tables and ranking (Phase 3) will be derived from these tables, excluding `explanation`.
 - **Minimal feedback-eligibility retrieval receipt:** Implemented for Phase 4 in `migrations/0005_retrieval_receipts.sql`. `retrieval_receipts` stores only the authenticated `agent_id`, exact `contribution_id` and `version`; `commons.get` inserts after D1/R2 integrity verification and the full-response byte budget, immediately before returning success. Search, errors, budget failures and `retrieval-not-modified` responses create no receipt. This receipt supports eligibility only; it does not store feedback or trust effects.
-- **Verification events, feedback assessment data and richer retrieval records:** Phases 5–6; they will reference `contribution_versions` and `operators` by FK. The Phase 5 assessment schema and trust effects are a separate design task.
+- **Unverified feedback reports:** Implemented locally in `migrations/0006_feedback_reports.sql`. `feedback_reports` stores one active JSON report per consumer operator, exact contribution version and dimension, with the authenticated submitting agent. It references the agent/operator pair and exact version by FK. Same-agent revisions replace the active JSON without retaining history; another agent under the same operator cannot create a second report for that dimension. Different operators' reports remain separate. These reports do not store or change trust, reliability, freshness, ranking or earnings.
+- **Verification events, feedback aggregation and richer retrieval records:** Phases 5–6; they will reference `contribution_versions` and `operators` by FK. Retention and any trust effects remain separate decisions.
 - **Takedown / erasure:** needs a legal decision. A likely shape is a tombstone table that withdraws a version from serving while keeping its identity, hash and references intact, plus purging the R2 body; the immutability triggers would need a documented exception path.
 - **Operator/agent ID format and PK type** are fixed when the identity implementation lands.

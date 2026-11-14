@@ -56,7 +56,15 @@ const contributeInputSchema = z.union([
     .passthrough(),
 ]);
 
-type ToolOperation = "search" | "get" | "contribute";
+const feedbackInputSchema = z
+  .object({
+    contributionId: z.string().min(1),
+    version: z.number().int().positive().safe(),
+    assessment: z.record(z.string(), z.unknown()),
+  })
+  .passthrough();
+
+type ToolOperation = "search" | "get" | "contribute" | "feedback";
 
 interface JsonObject {
   readonly [key: string]: unknown;
@@ -80,7 +88,9 @@ function internalError(operation: ToolOperation) {
       ? "Retrieval is unavailable."
       : operation === "contribute"
         ? "Contribution could not be saved."
-        : "Search is unavailable.";
+        : operation === "feedback"
+          ? "Feedback could not be saved."
+          : "Search is unavailable.";
   return toolResult({ error: { code: "internal_error", message } }, true);
 }
 
@@ -141,10 +151,20 @@ export function createCommonsMcpServer(env: unknown, credential: string): McpSer
     "commons.contribute",
     {
       description:
-        "Submit a new Knowledge or Execution contribution, or add its exact next immutable version with contributionId and expectedPreviousVersion. Existing family-specific registry validation applies. Only authenticated, active agents for allow-listed operators may contribute; submitted verification remains an untrusted declaration. No feedback operation or retrieval receipt is exposed.",
+        "Submit a new Knowledge or Execution contribution, or add its exact next immutable version with contributionId and expectedPreviousVersion. Existing family-specific registry validation applies. Only authenticated, active agents for allow-listed operators may contribute; submitted verification remains an untrusted declaration.",
       inputSchema: contributeInputSchema,
     },
     (input) => invokeWorker(env, credential, "contribute", input),
+  );
+
+  server.registerTool(
+    "commons.feedback",
+    {
+      description:
+        "Submit unverified Knowledge or Execution feedback for an exact contribution version retrieved by this authenticated agent. The stored version selects the assessment schema; do not provide a family. Reports are persisted per consumer operator and dimension, with same-agent revisions replacing the active report.",
+      inputSchema: feedbackInputSchema,
+    },
+    (input) => invokeWorker(env, credential, "feedback", input),
   );
 
   return server;

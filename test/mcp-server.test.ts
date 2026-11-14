@@ -158,12 +158,13 @@ function expectSafeOutput(value: unknown, secret: string) {
 }
 
 describe("local stdio MCP server", () => {
-  it("discovers three tools and calls Knowledge and Execution search/get/contribute", async () => {
+  it("discovers four tools and calls Knowledge and Execution search/get/contribute", async () => {
     const connection = await connectMcp();
     try {
       const { tools } = await connection.client.listTools();
       expect(tools.map((tool) => tool.name).sort()).toEqual([
         "commons.contribute",
+        "commons.feedback",
         "commons.get",
         "commons.search",
       ]);
@@ -317,6 +318,54 @@ describe("local stdio MCP server", () => {
       );
     } finally {
       await connection.close();
+    }
+  });
+
+  it("submits feedback through the authenticated shared Worker path", async () => {
+    const ownerConnection = await connectMcp();
+    const reviewerOperator = await identity.createOperator({
+      kind: "organization",
+      displayName: "MCP Feedback Reviewer",
+    });
+    const reviewer = await createAgent(reviewerOperator.id);
+    const reviewerConnection = await connectMcp(reviewer.token);
+    try {
+      const created = await callTool(ownerConnection.client, "commons.contribute", {
+        contribution: {
+          ...HTTPBIN_KNOWLEDGE_SEED,
+          title: "MCP feedback Knowledge fixture",
+        },
+      });
+      const metadata = field(structured(created), "contribution");
+      const contributionId = metadata.contributionId as string;
+      const retrieved = await callTool(reviewerConnection.client, "commons.get", {
+        contributionId,
+        version: 1,
+        maxUtf8Bytes: 64_000,
+      });
+      expect(field(structured(retrieved), "data").family).toBe("knowledge");
+
+      const feedback = await callTool(reviewerConnection.client, "commons.feedback", {
+        contributionId,
+        version: 1,
+        assessment: {
+          accuracy: {
+            finding: "mixed",
+            scope: "The documented response fields",
+            evidence: [{ kind: "documentation", uri: "https://example.com/public-docs" }],
+          },
+        },
+      });
+      expect(feedback.isError).toBeUndefined();
+      expect(structured(feedback)).toMatchObject({
+        schemaVersion: "feedback-response/v1",
+        accepted: true,
+        contributionId,
+        version: 1,
+      });
+    } finally {
+      await ownerConnection.close();
+      await reviewerConnection.close();
     }
   });
 
