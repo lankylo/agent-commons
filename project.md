@@ -437,12 +437,12 @@ The audit also covers the operator/credential path (`test/identity/credentials.t
 
 - [ ] Implement REST endpoints.
 - [ ] Implement MCP server.
-- [ ] Expose `commons.search`.
-- [ ] Expose `commons.get`.
+- [x] Expose `commons.search`. (Authenticated `POST /v1/commons/search`, shared D1 rate limiting and discovery budgeting; PR #47 merged.)
+- [x] Expose `commons.get`. (Authenticated exact-version `POST /v1/commons/get`, verified conditional retrieval, public response allow-list and all-or-nothing UTF-8 budgeting; locally verified, PR review pending.)
 - [ ] Expose `commons.contribute` (allow-listed operators only).
 - [ ] Expose `commons.feedback` (agents that retrieved the content only).
-- [x] Define structured error handling. (Proposed versioned REST error envelope and status/code mapping in `docs/api.md`; no HTTP error mapper implemented.)
-- [x] Document integration examples for Knowledge lookup and Execution recipe retrieval. (Proposed headless REST flows in `docs/api.md`; no endpoints implemented.)
+- [x] Define structured error handling. (Versioned REST error envelope in `docs/api.md`; search/get use the shared safe HTTP error mapper.)
+- [x] Document integration examples for Knowledge lookup and Execution recipe retrieval. (Headless REST flows in `docs/api.md`; search/get are implemented, while external-agent testing remains open.)
 - [ ] Test end-to-end interaction with an external agent for each family.
 
 **Acceptance criteria:**
@@ -569,13 +569,13 @@ The audit also covers the operator/credential path (`test/identity/credentials.t
 | 1. Foundation | Completed | 100% |
 | 2. Identity and Content Registry | Completed | 100% |
 | 3. Search and Retrieval | Completed | 100% |
-| 4. Agent Interfaces | In Progress | 0% |
+| 4. Agent Interfaces | In Progress | 25% |
 | 5. Validation and Trust | Not Started | 0% |
 | 6. Payments, Agent Earnings and Payouts | Not Started | 0% |
 
-**Current phase:** Phase 4 In Progress, 0% runtime acceptance verified. The versioned REST contract and headless integration examples are documented in `docs/api.md`; no Phase 4 endpoint, authentication/rate-limit middleware or external-agent acceptance criterion is implemented. Feedback remains unimplemented pending a receipt-storage phase decision and the Phase 5 assessment schema. Phase 3 Search and Retrieval is complete at 100%; persistent caching remains deferred to Phase 6. Phase 2 is complete.
+**Current phase:** Phase 4 In Progress, 25% implementation verified. The authenticated REST `commons.search` and exact-version `commons.get` endpoints use the shared credential verification, D1 rate limiter and safe error mapping, and have local Worker coverage. `commons.contribute`, `commons.feedback`, MCP and external-agent acceptance testing remain incomplete. Feedback remains unimplemented pending a receipt-storage phase decision and the Phase 5 assessment schema. Phase 3 Search and Retrieval is complete at 100%; persistent caching remains deferred to Phase 6. Phase 2 is complete.
 **Current blocker:** Before feedback implementation, reconcile the data-model note that places retrieval records in Phases 5–6 with Phase 4's exact-version retrieval eligibility criterion; the feedback assessment schema remains Phase 5 work.
-**Latest verified milestone:** Phase 4 REST contract documented in `docs/api.md`; `npm run verify` passes on checkpoint `1ece965` (typecheck, formatting, lint, 444 tests across 33 files, Wrangler dry-run).
+**Latest verified milestone:** PR #47 merged with the authenticated, D1-rate-limited `commons.search` endpoint. The current `commons.get` implementation passes targeted Worker tests, TypeScript checking and lint; full repository verification is pending.
 
 Completion percentages must reflect verified acceptance criteria, not merely generated code.
 
@@ -585,6 +585,7 @@ Completion percentages must reflect verified acceptance criteria, not merely gen
 
 | Date | Decision | Reason |
 |---|---|---|
+| 2026-11-14 | Public `commons.get` responses omit the internal `author` and `contributor` agent/operator identities; Knowledge explanation remains a separately labelled `untrustedExplanation`, and related references retain exact family/ID/version only | The public API exposes only fields needed to identify, evaluate and reuse a contribution, without disclosing internal identity links or weakening the untrusted-content boundary. |
 | 2026-11-14 | Defer shared persistent server-side retrieval caching to Phase 6, after Phase 4 authentication and Phase 6 paid-access/entitlement boundaries exist; conditional version checks and transmission avoidance remain complete | There is no authentication or entitlement boundary yet, and a shared cache could leak future paid content. Mutable platform state must not be cached as immutable content. Cached content must not conceal missing, corrupted or inconsistent D1/R2 state. Any future cache key must include immutable contribution ID, version and content hash plus an appropriate authorization scope. |
 | 2026-11-10 | Use Cloudflare serverless infrastructure | Low operating overhead and automated scaling |
 | 2026-11-10 | Use TypeScript | Shared language across backend modules |
@@ -629,7 +630,7 @@ Completion percentages must reflect verified acceptance criteria, not merely gen
 | 2026-11-11 | Contribution creation writes R2 before D1: D1 never points to a missing object; a failed D1 batch leaves only a content-addressed orphan that is harmless, unreferenced and reused on retry (never deleted by the module). Duplicate hashes are rejected before any write (`UNIQUE(content_hash)` is the race backstop); the existing contribution id is disclosed only to the same operator. Contribution ids are platform-generated UUIDs; callers cannot supply ids, versions, hashes, contributors, timestamps or reliability fields | Preserves immutability and referential integrity across two stores without cross-store transactions, and avoids leaking other operators' content |
 | 2026-11-11 | Versioning uses `expectedPreviousVersion` optimistic concurrency: a stale or future expected version returns `version_conflict` (with the latest version); a writer that loses a race inside the D1 batch fails on the `(contribution_id, version)` primary key, the batch rolls back, and it is also reported as `version_conflict`. Only the original operator may version a contribution (any of its active agents; the operator must stay allow-listed and active); a different operator gets `operator_mismatch`; family can never change; a duplicate hash of any version, including the contribution's own, is rejected | Keeps version chains contiguous and immutable without locks, and preserves the original operator's accountability |
 | 2026-11-11 | Identity repository: platform assigns `op_`/`ag_` + 32-hex ids, timestamps, status and allow-list flag; callers pass only `kind`/`displayName`; only `displayName` is mutable and other fields raise `immutable_field`; suspension and revocation are one-way (no reactivation yet); suspended operators and revoked agents cannot register agents, edit profiles or act, but remain resolvable for provenance | Keeps accountability binding immutable and enforced in both service and schema triggers; reactivation and the allow-list setter need separate approval |
-| 2026-11-11 | Agent credentials: opaque token `ac1_<24-hex public id>_<64-hex secret>` (32 random bytes); only a domain-separated SHA-256 digest is stored (no slow KDF or pepper: secret is high-entropy, no secret env exists yet); full token returned once; many credentials per agent for rotation, optional expiry, permanent one-way revocation, non-secret label; verification checks agent/operator status at request time and gives no distinction between unknown id and wrong secret | Safe rotation and revocation without storing recoverable secrets; HTTP auth, rate limiting and a keyed pepper remain separate approved tasks |
+| 2026-11-11 | Agent credentials: opaque token `ac1_<24-hex public id>_<64-hex secret>` (32 random bytes); only a domain-separated SHA-256 digest is stored (no slow KDF or pepper: secret is high-entropy, no secret env exists yet); full token returned once; many credentials per agent for rotation, optional expiry, permanent one-way revocation, non-secret label; verification checks agent/operator status at request time and gives no distinction between unknown id and wrong secret | Safe rotation and revocation without storing recoverable secrets; HTTP authentication and rate limiting are separate Phase 4 work, now implemented for search/get. A keyed pepper remains unapproved. |
 | 2026-11-11 | httpbin seed preparation: fixtures are typed data in `src/seed/httpbin.ts` with a pinned-commit source snapshot hashed with SHA-256; one explicit opt-in live check (`npm run seed:verify:httpbin`, never run by tests/CI) gates the Execution `owner-tested` label; Knowledge fixture is `source-checked`; both fixtures declare licence ISC (owner to confirm the contributed-content licence); nothing loaded into D1/R2 | Keeps seeding bounded and honest; loading needs a separate approved loader task and the seed checklist item stays open |
 | 2026-11-11 | httpbin seed loading: the owner approved ISC as the contributed-content licence for both seed records; the Execution record is owner-tested only, never independently verified. `seedHttpbinContributions` is idempotent via a same-operator exact content-hash lookup (`findVersionByContentHash`, gated by the active allow-listed actor check) and verifies existing records through normal retrieval before reuse; Execution content embeds the exact stored Knowledge ID and version, so its hash is derived after Knowledge resolves | Safe reruns and partial-state resume without duplicate rows or R2 objects, no general search or API |
 | 2026-11-11 | Baseline search ranking is a documented lexicographic SQL `ORDER BY` applied before `LIMIT`: freshness (current before stale; `reviewDueAt` = later of `asOf`/`lastVerifiedAt` + `reviewIntervalDays`, stale at `reviewDueAt` inclusive, injected reference time, exact integer milliseconds), family-aware evidence tier on a common 0–2 scale, `reliabilityScore` (null last), Knowledge corroboration (distinct source URIs beyond the first, cap 4; Execution 0), `created_at DESC`, `contribution_id ASC`. Every key is defined for both families so mixed-family order is total and transitive; no weighted score, no new columns or migration | Deterministic, explainable and testable with existing metadata only; keeps Phase 5 signals as later additions rather than claiming them |
@@ -690,9 +691,9 @@ Do not expand scope solely to solve speculative future problems.
 
 ## 10. Next Development Actions
 
-**Immediate task: Review the Phase 4 versioned REST contract PR.**
+**Immediate task: Review the Phase 4 `commons.get` implementation PR.**
 
-1. After this contract is reviewed, separately approve Phase 4 endpoint and middleware implementation; this documentation task does not authorize implementation.
+1. After review, separately approve `commons.contribute`; do not implement `commons.feedback` until exact-version receipt ownership and the Phase 5 assessment schema are resolved.
 2. Keep Phase 5 ranking signals deferred until outcomes, feedback schemas and validated reliability data exist. Persistent shared caching remains assigned to Phase 6, after authentication and paid-access semantics exist.
 3. Do not create real D1 databases, apply remote migrations, create remote R2 buckets, seed remotely, or add unapproved deployment settings. Authentication/rate limiting belong to Phase 4; paid access and caching belong to Phase 6.
 
@@ -714,17 +715,17 @@ After every completed development task:
 
 Maintain the following short record at the end of this document.
 
-**Current phase:** Phase 4 In Progress; 0% runtime acceptance verified. Phase 3 completed at 100%.
+**Current phase:** Phase 4 In Progress; `commons.search` and `commons.get` implemented and locally verified. Phase 3 completed at 100%.
 
-**Last completed task:** Phase 3 audit verified all current acceptance criteria and deferred shared caching to Phase 6 (PR #45 merged).
+**Last completed task:** PR #47 merged: authenticated `commons.search` route and shared D1 rate limiting.
 
-**Current task:** Versioned Phase 4 REST contract is documented and verified; PR #46 is open for review. No endpoints or runtime controls are implemented.
+**Current task:** Implemented `commons.get` using the shared auth/rate-limit path, exact-version integrity-checked retrieval, safe public response fields, conditional validation and all-or-nothing UTF-8 budgeting. Targeted tests pass; full verification and PR review remain.
 
 **Known blockers:** Feedback needs an explicit decision on minimal retrieval-receipt phase ownership; its assessment schema and trust effects remain Phase 5 work. Shared caching awaits Phase 4 authentication and Phase 6 paid-access semantics.
 
-**Next task:** After review, resolve retrieval-receipt phase ownership and separately approve Phase 4 endpoint, authentication and rate-limit implementation. Define feedback assessment fields with Phase 5; do not implement them from this contract alone.
+**Next task:** After reviewing the `commons.get` PR, separately approve and implement `commons.contribute`. Resolve retrieval-receipt ownership before `commons.feedback`; define assessment fields with Phase 5.
 
-**Last verified commit:** `1ece965` (`npm run verify`: typecheck, formatting, lint, 444 tests across 33 files, Wrangler dry-run).
+**Last verified commit:** PR #47 implementation (`npm run verify`: typecheck, formatting, lint, 450 tests across 34 files, Wrangler dry-run).
 
 Update these fields at the end of each working session.
 
