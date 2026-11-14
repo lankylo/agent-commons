@@ -1,8 +1,9 @@
 import { serveStdio } from "@modelcontextprotocol/server/stdio";
-import { getPlatformProxy, type PlatformProxy } from "wrangler";
 import process from "node:process";
+import type { PlatformProxy } from "wrangler";
 import type { RegistryEnv } from "../registry/creation";
 import { createCommonsMcpServer } from "./server";
+import { openLocalMcpPlatform } from "./bootstrap-local";
 
 const credential = process.env.AGENT_COMMONS_CREDENTIAL;
 if (!credential) {
@@ -11,10 +12,7 @@ if (!credential) {
 } else {
   let platform: PlatformProxy<RegistryEnv> | undefined;
   try {
-    platform = await getPlatformProxy<RegistryEnv>({
-      configPath: "wrangler.registry-local.jsonc",
-      persist: { path: ".wrangler/mcp-local" },
-    });
+    platform = await openLocalMcpPlatform();
     const activePlatform = platform;
     const workerEnv = {
       ...activePlatform.env,

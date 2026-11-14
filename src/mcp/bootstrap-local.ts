@@ -1,5 +1,6 @@
 import { execFileSync } from "node:child_process";
-import { getPlatformProxy } from "wrangler";
+import { join } from "node:path";
+import { getPlatformProxy, type PlatformProxy } from "wrangler";
 import { CredentialService } from "../identity/credentials";
 import { IdentityError, IdentityRepository } from "../identity/repository";
 import type { Agent, AgentId, Operator, OperatorId } from "../identity/types";
@@ -39,17 +40,26 @@ const defaultAdapters: LocalMcpBootstrapAdapters = {
   applyMigrations: (args) => {
     execFileSync("npx", ["wrangler", ...args], { stdio: "inherit" });
   },
-  openDatabase: async (configPath, persistDirectory) => {
-    const platform = await getPlatformProxy<RegistryEnv>({
-      configPath,
-      persist: { path: persistDirectory },
-    });
-    return { DB: platform.env.DB, dispose: () => platform.dispose() };
-  },
+  openDatabase: (_configPath, persistDirectory) => openLocalMcpDatabase(persistDirectory),
   writeStdout: (message) => {
     process.stdout.write(message);
   },
 };
+
+export function openLocalMcpPlatform(
+  persistDirectory: string = LOCAL_MCP_PERSIST_DIRECTORY,
+): Promise<PlatformProxy<RegistryEnv>> {
+  return getPlatformProxy<RegistryEnv>({
+    configPath: LOCAL_MCP_CONFIG_PATH,
+    remoteBindings: false,
+    persist: { path: join(persistDirectory, "v3") },
+  });
+}
+
+export async function openLocalMcpDatabase(persistDirectory: string): Promise<LocalDatabase> {
+  const platform = await openLocalMcpPlatform(persistDirectory);
+  return { DB: platform.env.DB, dispose: () => platform.dispose() };
+}
 
 function assertOperatorFixture(operator: Operator): void {
   if (
