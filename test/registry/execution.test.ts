@@ -199,17 +199,40 @@ describe("validateExecutionContribution: rejections", () => {
     ).toContain("compatibility.targetVersions[0].domain: must be a declared target domain");
   });
 
+  it("allows declared hosts and subdomains after hostname canonicalization", () => {
+    expect(
+      errorsFor((v) => {
+        v.targetDomains = ["Example.COM."];
+        step(v).domain = "API.example.com";
+        (v.compatibility as Rec).targetVersions = [{ domain: "EXAMPLE.com.", version: "v1" }];
+      }),
+    ).toEqual([]);
+  });
+
+  it("requires a hostname boundary when matching declared target suffixes", () => {
+    for (const domain of ["notexample.com", "api.example.com.evil"]) {
+      expect(errorsFor((v) => (step(v).domain = domain))).toContain(
+        "steps[0].domain: must be one of the declared targetDomains",
+      );
+    }
+  });
+
   it("rejects malformed or missing target domains", () => {
     for (const d of [
       "https://api.example.com",
       "*.example.com",
       "api.example.com/path",
-      "API.example.com",
+      "api..example.com",
+      "api.example.com..",
       "localhost",
       "10.0.0.1",
+      "[::1]",
       "a.com:8080",
     ]) {
       expect(errorsFor((v) => (v.targetDomains = [d])).join()).toContain("targetDomains[0]");
+      expect(errorsFor((v) => (step(v).domain = d))).toContain(
+        "steps[0].domain: must be one of the declared targetDomains",
+      );
     }
     expect(errorsFor((v) => (v.targetDomains = []))).toContain(
       "targetDomains: requires at least 1 item(s)",
@@ -217,6 +240,30 @@ describe("validateExecutionContribution: rejections", () => {
     expect(errorsFor((v) => (v.targetDomains = ["a.com", "a.com"]))).toContain(
       "targetDomains[1]: duplicate domain",
     );
+    expect(errorsFor((v) => (v.targetDomains = ["api.example.com", "API.EXAMPLE.COM."]))).toContain(
+      "targetDomains[1]: duplicate domain",
+    );
+  });
+
+  it("rejects localhost, local, private, and reserved address targets", () => {
+    for (const domain of [
+      "api.localhost",
+      "api.local",
+      "router.home.arpa",
+      "127.0.0.1",
+      "10.0.0.1",
+      "172.16.0.1",
+      "192.168.1.1",
+      "169.254.1.1",
+      "0.0.0.0",
+      "[::1]",
+      "[fc00::1]",
+    ]) {
+      expect(errorsFor((v) => (v.targetDomains = [domain])).join()).toContain("targetDomains[0]");
+      expect(errorsFor((v) => (step(v).domain = domain))).toContain(
+        "steps[0].domain: must be one of the declared targetDomains",
+      );
+    }
   });
 
   it("rejects bad paths and undeclared inputs or variables", () => {
