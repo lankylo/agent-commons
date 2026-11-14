@@ -12,7 +12,13 @@
 import { PLATFORM_ONLY_FIELDS, type ContributionEnvelopeInput } from "./envelope";
 import { checkReviewInterval } from "./review-intervals";
 import { checkContributionRefs } from "./references";
-import { Checker, isObj, type Obj } from "./check";
+import { Checker, ISO_UTC, isObj, type Obj } from "./check";
+import type { Schema } from "@cfworker/json-schema";
+import {
+  COMMON_CONTRIBUTION_REQUIRED,
+  COMMON_CONTRIBUTION_SCHEMA_PROPERTIES,
+  createJsonSchemaValidator,
+} from "./schema-validation";
 
 export const EXECUTION_LIMITS = {
   titleMaxChars: 160,
@@ -196,6 +202,288 @@ const POINTER = /^(?:\/[A-Za-z0-9_-]{1,64}){1,10}$/;
 /** Literal strings are data tokens: no whitespace, so no sentences or commands. */
 const LITERAL = /^[A-Za-z0-9._~:@/+=,-]*$/;
 
+const literalSchema: Schema = {
+  oneOf: [
+    { type: "string", maxLength: EXECUTION_LIMITS.literalMaxChars, pattern: LITERAL.source },
+    { type: "number" },
+    { type: "boolean" },
+  ],
+};
+
+const valueRefSchema: Schema = {
+  oneOf: [
+    {
+      type: "object",
+      required: ["literal"],
+      properties: { literal: literalSchema },
+      additionalProperties: false,
+    },
+    {
+      type: "object",
+      required: ["input"],
+      properties: { input: { type: "string", pattern: NAME.source } },
+      additionalProperties: false,
+    },
+    {
+      type: "object",
+      required: ["variable"],
+      properties: { variable: { type: "string", pattern: NAME.source } },
+      additionalProperties: false,
+    },
+  ],
+};
+
+const valueMapSchema: Schema = {
+  type: "object",
+  maxProperties: EXECUTION_LIMITS.maxParams,
+  propertyNames: { type: "string", pattern: NAME.source },
+  additionalProperties: valueRefSchema,
+};
+
+export const EXECUTION_CONTRIBUTION_JSON_SCHEMA: Schema = {
+  $schema: "http://json-schema.org/draft-07/schema#",
+  type: "object",
+  required: [
+    ...COMMON_CONTRIBUTION_REQUIRED,
+    "objective",
+    "inputs",
+    "outputs",
+    "targetDomains",
+    "compatibility",
+    "steps",
+    "successChecks",
+    "safety",
+    "verification",
+    "asOf",
+  ],
+  properties: {
+    ...COMMON_CONTRIBUTION_SCHEMA_PROPERTIES,
+    family: { const: "execution" },
+    related: COMMON_CONTRIBUTION_SCHEMA_PROPERTIES.related,
+    objective: {
+      type: "string",
+      minLength: 1,
+      maxLength: EXECUTION_LIMITS.objectiveMaxChars,
+    },
+    inputs: {
+      type: "array",
+      maxItems: EXECUTION_LIMITS.maxInputs,
+      items: {
+        type: "object",
+        required: ["name", "type", "required"],
+        properties: {
+          name: { type: "string", pattern: NAME.source },
+          type: { enum: [...INPUT_TYPES] },
+          required: { type: "boolean" },
+          allowedValues: {
+            type: "array",
+            minItems: 1,
+            maxItems: EXECUTION_LIMITS.maxAllowedValues,
+            items: literalSchema,
+          },
+        },
+        additionalProperties: false,
+      },
+    },
+    outputs: {
+      type: "array",
+      maxItems: EXECUTION_LIMITS.maxOutputs,
+      items: {
+        type: "object",
+        required: ["name", "type", "variable"],
+        properties: {
+          name: { type: "string", pattern: NAME.source },
+          type: { enum: [...INPUT_TYPES] },
+          variable: { type: "string", pattern: NAME.source },
+        },
+        additionalProperties: false,
+      },
+    },
+    targetDomains: {
+      type: "array",
+      minItems: 1,
+      maxItems: EXECUTION_LIMITS.maxTargetDomains,
+      items: { type: "string", pattern: HOSTNAME.source },
+    },
+    compatibility: {
+      type: "object",
+      required: ["requiredCapabilities"],
+      properties: {
+        requiredCapabilities: {
+          type: "array",
+          minItems: 1,
+          maxItems: EXECUTION_LIMITS.maxCapabilities,
+          items: { type: "string", pattern: SLUG.source },
+        },
+        targetVersions: {
+          type: "array",
+          maxItems: EXECUTION_LIMITS.maxTargetVersions,
+          items: {
+            type: "object",
+            required: ["domain", "version"],
+            properties: {
+              domain: { type: "string", pattern: HOSTNAME.source },
+              version: { type: "string", pattern: SLUG.source },
+            },
+            additionalProperties: false,
+          },
+        },
+      },
+      additionalProperties: false,
+    },
+    steps: {
+      type: "array",
+      minItems: 1,
+      maxItems: EXECUTION_LIMITS.maxSteps,
+      items: {
+        oneOf: [
+          {
+            type: "object",
+            required: ["id", "type", "method", "domain", "path"],
+            properties: {
+              id: { type: "string", pattern: STEP_ID.source },
+              type: { const: "http_request" },
+              method: { enum: [...HTTP_METHODS] },
+              domain: { type: "string", pattern: HOSTNAME.source },
+              path: {
+                type: "string",
+                maxLength: EXECUTION_LIMITS.pathMaxChars,
+                pattern: PATH.source,
+              },
+              query: valueMapSchema,
+              body: valueMapSchema,
+              expectStatus: {
+                type: "array",
+                minItems: 1,
+                maxItems: EXECUTION_LIMITS.maxExpectStatuses,
+                items: { type: "integer", minimum: 100, maximum: 599 },
+              },
+              saveAs: { type: "string", pattern: NAME.source },
+            },
+            additionalProperties: false,
+          },
+          {
+            type: "object",
+            required: ["id", "type", "from", "pointer", "saveAs"],
+            properties: {
+              id: { type: "string", pattern: STEP_ID.source },
+              type: { const: "extract_field" },
+              from: { type: "string", pattern: NAME.source },
+              pointer: { type: "string", pattern: POINTER.source },
+              saveAs: { type: "string", pattern: NAME.source },
+            },
+            additionalProperties: false,
+          },
+          {
+            type: "object",
+            required: ["id", "type", "source", "operator"],
+            properties: {
+              id: { type: "string", pattern: STEP_ID.source },
+              type: { const: "assert" },
+              source: valueRefSchema,
+              operator: { enum: [...ASSERT_OPERATORS] },
+              expected: literalSchema,
+            },
+            allOf: [
+              {
+                if: {
+                  properties: { operator: { const: "exists" } },
+                  required: ["operator"],
+                },
+                then: { not: { required: ["expected"] } },
+              },
+              {
+                if: {
+                  properties: {
+                    operator: { enum: ["equals", "not_equals", "contains", "gte", "lte"] },
+                  },
+                  required: ["operator"],
+                },
+                then: { required: ["expected"] },
+              },
+              {
+                if: {
+                  properties: { operator: { enum: ["gte", "lte"] } },
+                  required: ["operator"],
+                },
+                then: { properties: { expected: { type: "number" } } },
+              },
+            ],
+            additionalProperties: false,
+          },
+          {
+            type: "object",
+            required: ["id", "type", "seconds"],
+            properties: {
+              id: { type: "string", pattern: STEP_ID.source },
+              type: { const: "wait" },
+              seconds: { type: "integer", minimum: 1, maximum: EXECUTION_LIMITS.maxWaitSeconds },
+            },
+            additionalProperties: false,
+          },
+        ],
+      },
+    },
+    successChecks: {
+      type: "array",
+      minItems: 1,
+      maxItems: EXECUTION_LIMITS.maxSteps,
+      items: { type: "string", pattern: STEP_ID.source },
+    },
+    safety: {
+      type: "object",
+      required: [
+        "sideEffect",
+        "requiresHumanApproval",
+        "maxRequests",
+        "timeoutSeconds",
+        "onFailure",
+      ],
+      properties: {
+        sideEffect: { enum: [...SIDE_EFFECTS] },
+        requiresHumanApproval: { type: "boolean" },
+        maxRequests: {
+          type: "integer",
+          minimum: 1,
+          maximum: EXECUTION_LIMITS.maxRequestsCeiling,
+        },
+        timeoutSeconds: {
+          type: "integer",
+          minimum: 1,
+          maximum: EXECUTION_LIMITS.maxTimeoutSecondsCeiling,
+        },
+        onFailure: { enum: [...ON_FAILURE] },
+      },
+      additionalProperties: false,
+    },
+    verification: {
+      type: "object",
+      required: ["method"],
+      properties: {
+        method: { enum: [...EXECUTION_VERIFICATION_METHODS] },
+        testedAt: { type: "string", pattern: ISO_UTC.source },
+        declaredConfidence: { type: "number", minimum: 0, maximum: 1 },
+      },
+      allOf: [
+        {
+          if: {
+            properties: { method: { enum: ["owner-tested", "simulated"] } },
+            required: ["method"],
+          },
+          then: { required: ["testedAt"] },
+        },
+      ],
+      additionalProperties: false,
+    },
+    asOf: { type: "string", pattern: ISO_UTC.source },
+  },
+  additionalProperties: false,
+};
+
+export const validateExecutionContributionJsonSchema = createJsonSchemaValidator(
+  EXECUTION_CONTRIBUTION_JSON_SCHEMA,
+);
+
 const hasOwn = (o: object, k: string): boolean => Object.prototype.hasOwnProperty.call(o, k);
 const oneOf = (list: readonly unknown[], v: unknown): boolean => list.includes(v);
 
@@ -267,6 +555,7 @@ function int(v: unknown, min: number, max: number): v is number {
 
 /** Validate untrusted input as an Execution contribution. Never throws. */
 export function validateExecutionContribution(input: unknown): ExecutionValidation {
+  const schemaErrors = validateExecutionContributionJsonSchema(input);
   const c = new ExecutionChecker();
   if (!isObj(input)) return { ok: false, errors: ["input: must be an object"] };
   const L = EXECUTION_LIMITS;
@@ -517,5 +806,6 @@ export function validateExecutionContribution(input: unknown): ExecutionValidati
   c.date(input.asOf, "asOf");
 
   if (c.errors.length > 0) return { ok: false, errors: c.errors };
+  if (schemaErrors.length > 0) return { ok: false, errors: schemaErrors };
   return { ok: true, value: input as unknown as ExecutionContributionInput };
 }

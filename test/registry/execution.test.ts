@@ -4,6 +4,7 @@ import {
   EXECUTION_LIMITS,
   STEP_TYPES,
   validateExecutionContribution,
+  validateExecutionContributionJsonSchema,
 } from "../../src/registry/execution";
 import { validateKnowledgeContribution } from "../../src/registry/knowledge";
 
@@ -118,6 +119,27 @@ describe("validateExecutionContribution: valid", () => {
         };
       }),
     ).toEqual([]);
+  });
+});
+
+describe("Execution contribution JSON Schema", () => {
+  it("accepts a complete family input with typed query values", () => {
+    expect(validateExecutionContributionJsonSchema(valid())).toEqual([]);
+  });
+
+  it("rejects missing required fields, another family, and unsupported fields", () => {
+    const missingSteps = valid();
+    delete missingSteps.steps;
+    expect(validateExecutionContributionJsonSchema(missingSteps)).not.toEqual([]);
+
+    expect(
+      validateExecutionContributionJsonSchema({ ...valid(), family: "knowledge" }),
+    ).not.toEqual([]);
+    expect(validateExecutionContributionJsonSchema({ ...valid(), facts: [] })).not.toEqual([]);
+
+    const extraStepField = valid();
+    step(extraStepField).extra = true;
+    expect(validateExecutionContributionJsonSchema(extraStepField)).not.toEqual([]);
   });
 });
 
