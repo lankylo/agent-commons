@@ -433,17 +433,17 @@ The audit also covers the operator/credential path (`test/identity/credentials.t
 
 ### Phase 4 — Agent Interfaces
 
-**Status:** Not Started
+**Status:** In Progress
 
 - [ ] Implement REST endpoints.
-- [ ] Implement MCP server.
+- [x] Implement local stdio MCP server for search/get/allow-listed contribute. (Official MCP TypeScript SDK v2; calls the existing Worker handlers and shares their validation, authentication, rate limiting, budgets and safe errors. Local D1/R2 only; credentials come from process configuration. Four in-memory MCP client integration tests and a stdio process smoke test pass.)
 - [x] Expose `commons.search`. (Authenticated `POST /v1/commons/search`, shared D1 rate limiting and discovery budgeting; PR #47 merged.)
 - [x] Expose `commons.get`. (Authenticated exact-version `POST /v1/commons/get`, verified conditional retrieval, public response allow-list and all-or-nothing UTF-8 budgeting; PR #48 merged.)
 - [x] Expose `commons.contribute` (allow-listed operators only). (Authenticated `POST /v1/commons/contribute` supports new Knowledge/Execution contributions and exact-next versioning through `ContributionRegistry`; focused local Worker tests pass. Phase 5 trust checks remain outstanding.)
 - [ ] Expose `commons.feedback` (agents that retrieved the content only).
 - [x] Define structured error handling. (Versioned REST error envelope in `docs/api.md`; search/get/contribute use the shared safe HTTP error mapper.)
-- [x] Document integration examples for Knowledge lookup and Execution recipe retrieval. (Headless REST flows in `docs/api.md`; search/get/contribute are implemented, while external-agent testing remains open.)
-- [ ] Test end-to-end interaction with an external agent for each family.
+- [x] Document integration examples for Knowledge lookup and Execution recipe retrieval. (Headless REST and local MCP setup/usage in `docs/api.md`; external-agent testing remains open.)
+- [ ] Test end-to-end interaction with an external agent for each family. (Local MCP client coverage is complete; external-agent acceptance testing remains open.)
 
 **Acceptance criteria:**
 - An external agent can discover and invoke Commons functionality.
@@ -569,13 +569,13 @@ The audit also covers the operator/credential path (`test/identity/credentials.t
 | 1. Foundation | Completed | 100% |
 | 2. Identity and Content Registry | Completed | 100% |
 | 3. Search and Retrieval | Completed | 100% |
-| 4. Agent Interfaces | In Progress | 25% |
+| 4. Agent Interfaces | In Progress | 50% |
 | 5. Validation and Trust | Not Started | 0% |
 | 6. Payments, Agent Earnings and Payouts | Not Started | 0% |
 
-**Current phase:** Phase 4 In Progress, 25% acceptance verified. Authenticated REST `commons.search`, exact-version `commons.get` and allow-list-enforced `commons.contribute` use shared credential verification, D1 rate limiting and safe error mapping, with local Worker coverage. The complete four-operation interface, `commons.feedback`, MCP and external-agent acceptance testing remain incomplete. Phase 5 trust controls are outstanding; declared contribution verification metadata is not platform verification. Feedback remains unimplemented pending a receipt-storage phase decision and the Phase 5 assessment schema. Phase 3 Search and Retrieval is complete at 100%; persistent caching remains deferred to Phase 6. Phase 2 is complete.
+**Current phase:** Phase 4 In Progress, 50% acceptance verified. Authenticated REST `commons.search`, exact-version `commons.get`, allow-list-enforced `commons.contribute`, and local stdio MCP tools for those operations use shared Worker validation, credential verification, D1 rate limiting, byte budgets and safe errors. The MCP server uses local D1/R2 only; its credential is supplied through process configuration. `commons.feedback`, complete four-operation support and external-agent acceptance testing remain incomplete. Phase 5 trust controls are outstanding; declared contribution verification metadata is not platform verification. Feedback remains unimplemented pending a receipt-storage phase decision and the Phase 5 assessment schema. Phase 3 Search and Retrieval is complete at 100%; persistent caching remains deferred to Phase 6. Phase 2 is complete.
 **Current blocker:** Before feedback implementation, reconcile the data-model note that places retrieval records in Phases 5–6 with Phase 4's exact-version retrieval eligibility criterion; the feedback assessment schema remains Phase 5 work.
-**Latest verified milestone:** PR #49 adds the authenticated, allow-list-enforced `commons.contribute` route. `npm run verify` passes with 462 tests across 36 files and Wrangler dry-run.
+**Latest verified milestone:** PR #50 adds the local stdio MCP server over the existing Worker handlers. `npm run verify` passes with 466 tests across 37 files, typecheck, formatting, lint and Wrangler dry-run; the MCP integration tests (4/4) and real stdio process smoke test pass.
 
 Completion percentages must reflect verified acceptance criteria, not merely generated code.
 
@@ -586,6 +586,7 @@ Completion percentages must reflect verified acceptance criteria, not merely gen
 | Date | Decision | Reason |
 |---|---|---|
 | 2026-11-14 | Public `commons.get` responses omit the internal `author` and `contributor` agent/operator identities; Knowledge explanation remains a separately labelled `untrustedExplanation`, and related references retain exact family/ID/version only | The public API exposes only fields needed to identify, evaluate and reuse a contribution, without disclosing internal identity links or weakening the untrusted-content boundary. |
+| 2026-11-14 | Expose search/get/allow-listed contribute through an official-SDK local stdio MCP adapter that invokes the existing Worker handlers; read the agent credential only from process configuration | One implementation of request validation, authentication, shared D1 limits, response budgets, allow-listing and safe errors avoids REST/MCP drift. Stdio keeps the adapter local-only without a Worker route or remote MCP service. |
 | 2026-11-14 | Defer shared persistent server-side retrieval caching to Phase 6, after Phase 4 authentication and Phase 6 paid-access/entitlement boundaries exist; conditional version checks and transmission avoidance remain complete | There is no authentication or entitlement boundary yet, and a shared cache could leak future paid content. Mutable platform state must not be cached as immutable content. Cached content must not conceal missing, corrupted or inconsistent D1/R2 state. Any future cache key must include immutable contribution ID, version and content hash plus an appropriate authorization scope. |
 | 2026-11-10 | Use Cloudflare serverless infrastructure | Low operating overhead and automated scaling |
 | 2026-11-10 | Use TypeScript | Shared language across backend modules |
@@ -691,11 +692,12 @@ Do not expand scope solely to solve speculative future problems.
 
 ## 10. Next Development Actions
 
-**Immediate task: Review PR #49 for the Phase 4 `commons.contribute` implementation.**
+**Immediate task: Conduct external-agent acceptance testing of the implemented search, get and allow-listed contribute flows for Knowledge and Execution.**
 
-1. Do not implement `commons.feedback` until exact-version receipt ownership and the Phase 5 assessment schema are resolved.
-2. Keep Phase 5 ranking signals deferred until outcomes, feedback schemas and validated reliability data exist. Persistent shared caching remains assigned to Phase 6, after authentication and paid-access semantics exist.
-3. Do not create real D1 databases, apply remote migrations, create remote R2 buckets, seed remotely, or add unapproved deployment settings. Authentication/rate limiting belong to Phase 4; paid access and caching belong to Phase 6.
+1. Keep external-agent acceptance testing open until a real agent host discovers and exercises both families through REST or local MCP.
+2. Do not implement `commons.feedback` until exact-version receipt ownership and the Phase 5 assessment schema are resolved.
+3. Keep Phase 5 ranking signals deferred until outcomes, feedback schemas and validated reliability data exist. Persistent shared caching remains assigned to Phase 6, after authentication and paid-access semantics exist.
+4. Do not create real D1 databases, apply remote migrations, create remote R2 buckets, seed remotely, or add unapproved deployment settings. Authentication/rate limiting belong to Phase 4; paid access and caching belong to Phase 6.
 
 ---
 
@@ -715,17 +717,17 @@ After every completed development task:
 
 Maintain the following short record at the end of this document.
 
-**Current phase:** Phase 4 In Progress; `commons.search`, `commons.get` and `commons.contribute` implemented with local Worker coverage. Phase 3 completed at 100%.
+**Current phase:** Phase 4 In Progress; authenticated `commons.search`, `commons.get` and `commons.contribute` have local Worker coverage and are exposed by the local stdio MCP server. External-agent acceptance testing and feedback remain open. Phase 3 completed at 100%.
 
-**Last completed task:** PR #48 merged: authenticated exact-version `commons.get` route with integrity-checked conditional retrieval and safe public response fields.
+**Last completed task:** PR #49 merged: authenticated, allow-list-enforced `commons.contribute` route for new Knowledge/Execution contributions and exact-next versions.
 
-**Current task:** Implemented authenticated `commons.contribute` for new Knowledge/Execution contributions and exact-next versions. It uses shared authentication and rate limiting, enforces the registry allow-list and returns only documented metadata. PR #49 is open; `npm run verify` passes with 462 tests across 36 files. Phase 5 trust controls remain unimplemented.
+**Current task:** Implemented local-only stdio MCP tools for search, exact-version get and allow-listed contribute using the official TypeScript SDK and existing Worker handlers. PR #50 is open; `npm run verify` passes with 466 tests across 37 files. No feedback tool or external MCP service was added.
 
-**Known blockers:** Feedback needs an explicit decision on minimal retrieval-receipt phase ownership; its assessment schema and trust effects remain Phase 5 work. Shared caching awaits Phase 4 authentication and Phase 6 paid-access semantics.
+**Known blockers:** Feedback needs an explicit decision on minimal retrieval-receipt phase ownership; its assessment schema and trust effects remain Phase 5 work. External-agent acceptance testing remains open. Shared caching awaits Phase 4 authentication and Phase 6 paid-access semantics.
 
-**Next task:** Review the `commons.contribute` PR. Resolve retrieval-receipt ownership before `commons.feedback`; define assessment fields and trust controls with Phase 5.
+**Next task:** Perform external-agent acceptance testing for both families through the implemented interfaces. Resolve retrieval-receipt ownership before `commons.feedback`; define assessment fields and trust controls with Phase 5.
 
-**Last verified commit:** `0036f55` (`npm run verify`: typecheck, formatting, lint, 462 tests across 36 files, Wrangler dry-run).
+**Last verified commit:** `291a25e` (`npm run verify`: typecheck, formatting, lint, 466 tests across 37 files, Wrangler dry-run).
 
 Update these fields at the end of each working session.
 

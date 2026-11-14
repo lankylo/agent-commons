@@ -5,6 +5,8 @@
   "type": "module",
   "scripts": {
     "dev": "wrangler dev",
+    "mcp": "node --import tsx src/mcp/stdio.ts",
+    "mcp:local:migrate": "wrangler d1 migrations apply DB --local --config wrangler.registry-local.jsonc --persist-to .wrangler/mcp-local",
     "format": "prettier --write \"src/**/*.ts\" \"test/**/*.ts\" \"*.{json,jsonc,mjs}\" \".github/workflows/*.yml\"",
     "format:check": "prettier --check \"src/**/*.ts\" \"test/**/*.ts\" \"*.{json,jsonc,mjs}\" \".github/workflows/*.yml\"",
     "lint": "eslint src test --max-warnings=0",
@@ -18,12 +20,18 @@
   "devDependencies": {
     "@cloudflare/workers-types": "^5.20261110.1",
     "@eslint/js": "^10.0.1",
+    "@modelcontextprotocol/client": "^2.4.0",
     "@types/node": "^24.19.2",
     "eslint": "^10.14.0",
     "prettier": "^3.9.10",
+    "tsx": "^4.23.15",
     "typescript": "^5.6.0",
     "typescript-eslint": "^8.72.2",
     "vitest": "^2.1.0",
     "wrangler": "^4.159.0"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/server": "^2.4.0",
+    "zod": "^4.6.7"
   }
 }
