@@ -17,6 +17,7 @@ import {
 } from "./registry/needs";
 import { handleReview, REVIEW_PATH_PREFIX, type ReviewEnv } from "./review/routes";
 import { ENROLL_PATH_PREFIX, handleEnrollment, type EnrollmentEnv } from "./enrollment/routes";
+import { handleEnrollmentPage } from "./enrollment/page";
 
 interface WorkerEnv extends ReviewEnv, EnrollmentEnv {
   readonly DB?: D1Database;
@@ -942,6 +943,8 @@ export default {
     if (pathname === "/health") {
       return Response.json({ status: "ok", service: "agent-commons" });
     }
+    const enrollmentPage = handleEnrollmentPage(request, workerEnv);
+    if (enrollmentPage) return enrollmentPage;
     // Operator-only review: separate prefix, reviewer token only, never agent credentials.
     if (pathname.startsWith(REVIEW_PATH_PREFIX)) {
       return handleReview(request, workerEnv);
