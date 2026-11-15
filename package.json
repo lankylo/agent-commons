@@ -19,7 +19,8 @@
     "test": "vitest run",
     "r2:verify:local": "vitest run test/storage",
     "db:migrate:local": "wrangler d1 migrations apply DB --local --config wrangler.d1-local.jsonc --persist-to .wrangler/d1-verify",
-    "seed:verify:httpbin": "node scripts/verify-httpbin-seed.ts"
+    "seed:verify:httpbin": "node scripts/verify-httpbin-seed.ts",
+    "pilot:preflight": "node --import tsx scripts/pilot-preflight.ts"
   },
   "devDependencies": {
     "@cloudflare/workers-types": "^5.20261110.1",

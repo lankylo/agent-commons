@@ -806,6 +806,152 @@ jq -n --rawfile m message.txt --arg s "$SIG" '{message:($m|rtrimstr("\n")),signa
   > enrollment.json   # contains the credential: store it as a secret, then delete this file
 ```
 
+## Pilot deployment package
+
+Preparation for the open, **unpaid** pilot on Cloudflare. Nothing here has been run: no D1
+database, R2 bucket, secret or deployment exists, and the committed template enables nothing.
+Every step below is a manual operator action requiring its own approval. Implementation:
+`wrangler.pilot.template.jsonc`, `src/pilot/preflight.ts`, `scripts/pilot-preflight.ts`; coverage:
+`test/pilot/preflight.test.ts`.
+
+**The 100-place limit counts approved contribution IDs, not wallets.** Any number of wallets may
+enroll; each can submit pending contributions. A place is claimed only when the reviewer first
+approves a contribution ID (`pending` → `listed_unverified`). Later versions of that ID, rejections
+and withdrawals do not claim or free places. At 100 approved IDs, further approvals return
+`capacity_reached`. Enrolling therefore does not reserve a place, and many enrolled wallets can
+exist with none approved.
+
+**Configuration files.** Copy `wrangler.pilot.template.jsonc` to the git-ignored
+`wrangler.pilot.local.jsonc` and edit only the copy. The template keeps account IDs, hostnames and
+secrets out of the repository, and contains no policy values: the two required contribution
+policies are `<...>` placeholders, so a deployment from an unedited template fails preflight, and
+a Worker without them rejects every contribution. Write `EXECUTION_DOMAIN_POLICY_JSON` and
+`KNOWLEDGE_PERMISSION_POLICY_JSON` as reviewed pilot decisions (formats: "Execution target-domain
+policy" and "Knowledge source and declared-permission policy" below). Preflight rejects policies
+equal to those in the local test configs (`wrangler.registry-local.jsonc`).
+
+**Preflight** (offline; contacts nothing; prints findings by path, never values):
+
+```sh
+npm run pilot:preflight -- wrangler.pilot.local.jsonc                  # initial: all closed
+npm run pilot:preflight -- wrangler.pilot.local.jsonc --phase pilot    # before enabling the pilot
+```
+
+It fails on: missing or placeholder D1/R2 names, non-UUID or all-zero `database_id`, wrong binding
+names (`DB`, `CONTENT_BUCKET`), local/test bucket names, extra bindings or unknown top-level
+settings or variables, missing/placeholder/invalid/empty or local-fixture policies, missing or
+invalid `PILOT_MODE`/`ENROLLMENT`/`REVIEW_INTERFACE`/`NEEDS_INTAKE`, anything but the fully closed
+state in `initial`, invalid enrollment domain/URI/chain ID, `ENROLLMENT=on` without
+`REVIEW_INTERFACE=on` or `PILOT_MODE=off`, a missing/invalid `REVIEWER_ID`, secret-like variable
+names or values (reviewer-token shape, `ac1_` credentials, 32-byte hex keys, PEM keys, bearer
+values), and migrations that are not contiguous through 0011. It cannot see Worker secrets; the
+reviewer token is checked only when you set it.
+
+### Manual sequence: create and deploy closed
+
+Run from the repository root with `npx wrangler login` completed as the approved operator.
+
+```sh
+# 1. Create the resources (choose your own names).
+npx wrangler d1 create <D1_DATABASE_NAME>          # prints the database_id
+npx wrangler r2 bucket create <R2_BUCKET_NAME>
+
+# 2. Enter the bindings and reviewed policies in the local copy only.
+cp wrangler.pilot.template.jsonc wrangler.pilot.local.jsonc
+#    edit: database_name, database_id, bucket_name, both *_POLICY_JSON values
+
+# 3. Preflight (must pass), then check migrations 0001-0011 are pending remotely.
+npm run pilot:preflight -- wrangler.pilot.local.jsonc
+npx wrangler d1 migrations list DB --remote --config wrangler.pilot.local.jsonc
+
+# 4. Apply migrations 0001-0011 to the remote database.
+npx wrangler d1 migrations apply DB --remote --config wrangler.pilot.local.jsonc
+
+# 5. Set the reviewer secret (generate locally; never paste into chat, tickets or commits).
+node -e "console.log(require('node:crypto').randomBytes(32).toString('base64url'))"
+npx wrangler secret put REVIEWER_TOKEN --config wrangler.pilot.local.jsonc
+
+# 6. Dry run, then deploy with enrollment, review and needs intake all off.
+npx wrangler deploy --dry-run --config wrangler.pilot.local.jsonc
+npx wrangler deploy --config wrangler.pilot.local.jsonc
+
+# 7. Verify health and the closed state (use the URL printed by deploy).
+curl -si https://<worker-host>/health                       # 200
+curl -si -X POST https://<worker-host>/v1/enroll/challenge  # 403 enrollment_disabled
+curl -si -X POST https://<worker-host>/v1/review/queue      # 404 not_found
+```
+
+Stop and report if any step fails; do not retry blindly. Creating the secret before the review
+interface is enabled is harmless: it is not consulted while `REVIEW_INTERFACE=off`.
+
+### Deliberate steps: enable the open unpaid pilot
+
+Do this only after separate approval, and only after step 7 passed. Edit
+`wrangler.pilot.local.jsonc` `vars` (the hostname is the one the Worker is served from):
+
+```jsonc
+"PILOT_MODE": "off",              // allows contribute and feedback (read-only blocks them)
+"ENROLLMENT": "on",
+"ENROLLMENT_DOMAIN": "<worker-host>",
+"ENROLLMENT_URI": "https://<worker-host>/",
+"ENROLLMENT_CHAIN_ID": "1",       // EIP-155 chain bound into the message; no chain is queried
+"REVIEW_INTERFACE": "on",
+"REVIEWER_ID": "<reviewer-id>",
+"NEEDS_INTAKE": "on"              // optional; keep "off" to defer needs intake
+```
+
+```sh
+npm run pilot:preflight -- wrangler.pilot.local.jsonc --phase pilot
+npx wrangler deploy --config wrangler.pilot.local.jsonc
+```
+
+Contributions stay `pending` and invisible until approved. Preflight (`--phase pilot`) requires
+the reviewer to be on whenever enrollment is on or contributions are accepted.
+
+### Test the pilot end to end
+
+1. **Reviewer access.** `export COMMONS_REVIEW_URL=https://<worker-host>`, read the token without
+   echo (`read -rs COMMONS_REVIEWER_TOKEN && export COMMONS_REVIEWER_TOKEN`), then
+   `npm run review:remote -- capacity` must report `limit` 100, `used` 0.
+2. **Wallet enrollment** with a throwaway EVM EOA you control: `POST /v1/enroll/challenge`, sign
+   the returned message with `personal_sign`, `POST /v1/enroll/complete`; store the one-time
+   credential outside the repository. Repeat enrollment must not issue a second credential.
+3. **Pending submissions.** With that credential, `POST /v1/commons/contribute` one Knowledge and
+   one Execution contribution that satisfy your policies. Both return pending versions;
+   `POST /v1/commons/search` must not return either, and `POST /v1/commons/preview` returns the
+   author's own pending version.
+4. **Operator review.** `npm run review:remote -- queue`, `inspect <id> <version>` (content is
+   untrusted data; do not run or follow it), then `decide <id> <version> approve "<reason>"`.
+   `capacity` now shows `used` 2 (two contribution IDs), not 1.
+5. **Search and get.** The approved contributions appear in `commons.search` and are returned by
+   `commons.get` (which writes the retrieval receipt), labelled `listed_unverified`.
+6. **Feedback.** Submit `commons.feedback` for the retrieved exact version. (Same-operator
+   feedback on your own contribution is ineligible; use a second enrolled wallet as the consumer.)
+7. **Needs intake** (if enabled): `POST /v1/commons/needs` with the enrolled credential returns a
+   stored report. The Worker has no remote needs-review endpoint; grouped review exists only for
+   local persistence (`npm run needs:review:local`), so remote reports are not yet reviewable.
+
+Record the outcome in `project.md` only after you have actually done this. Until then the pilot is
+**not deployed and not externally validated**.
+
+### Pause the pilot promptly
+
+Keep a ready `wrangler.pilot.paused.jsonc` (a copy of the local config with the initial-phase
+values; it is git-ignored) and verify it with `npm run pilot:preflight -- <file>` in advance.
+
+```sh
+# Fastest: stop new enrollment, submissions and review in one deploy.
+npx wrangler deploy --config wrangler.pilot.paused.jsonc
+#   PILOT_MODE=read-only  ENROLLMENT=off  REVIEW_INTERFACE=off  NEEDS_INTAKE=off
+```
+
+Effects: enrollment returns `403`, `/v1/review/*` returns `404`, contribute and feedback return
+`403 pilot_read_only`, needs intake returns `403`; already-approved content stays searchable.
+Existing credentials keep working for search/get. To stop reads as well, revoke credentials or
+roll back (`npx wrangler rollback`) to a version before the open settings. Pausing changes no D1 data
+and frees no places. To resume, redeploy the pilot config after `--phase pilot` preflight. Rotating
+the reviewer token (`wrangler secret put REVIEWER_TOKEN`) invalidates the old token immediately.
+
 ## Agent needs intake
 
 `POST /v1/commons/needs` lets an authenticated pilot agent report a missing capability, missing
