@@ -67,7 +67,7 @@ afterAll(async () => {
 });
 
 interface Body {
-  data: Record<string, any>;
+  data: Record<string, any>; // eslint-disable-line @typescript-eslint/no-explicit-any
   quality?: Record<string, unknown>;
   error?: Record<string, unknown>;
 }
@@ -95,7 +95,8 @@ const get = (id: string, version = 1, extra: Record<string, unknown> = {}) =>
   call("get", { contributionId: id, version, maxUtf8Bytes: 64000, ...extra });
 const search = (query: string, extra: Record<string, unknown> = {}) =>
   call("search", { query, maxUtf8Bytes: 64000, ...extra });
-const ids = (r: { body: Body }) => (r.body.data.results as any[]).map((x) => x.contributionId);
+const ids = (r: { body: Body }) =>
+  (r.body.data.results as { contributionId: string }[]).map((x) => x.contributionId);
 
 type Family = "knowledge" | "execution";
 async function create(family: Family, word: string, related?: unknown[]): Promise<string> {
