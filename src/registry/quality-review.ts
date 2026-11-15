@@ -23,6 +23,14 @@ export const ALLOWED_TRANSITIONS: Readonly<Record<string, readonly QualityState[
 );
 
 export const MAX_REASON_LENGTH = 500;
+/** Free-pilot cap on distinct approved contribution IDs; mirrored by migration 0010 triggers. */
+export const PILOT_CAPACITY_LIMIT = 100;
+
+export interface PilotCapacity {
+  readonly limit: number;
+  readonly used: number;
+  readonly remaining: number;
+}
 // eslint-disable-next-line no-control-regex
 const CONTROL_CHARS = /[\u0000-\u001f\u007f]/;
 const REVIEWER_ID = /^[A-Za-z0-9][A-Za-z0-9._:@-]{0,63}$/;
@@ -45,6 +53,7 @@ export type ReviewErrorCode =
   | "version_not_found"
   | "invalid_transition"
   | "state_conflict"
+  | "capacity_reached"
   | "content_unavailable"
   | "storage_error";
 
@@ -67,6 +76,8 @@ export type InspectResult =
 export type DecideResult =
   | { readonly ok: true; readonly decision: QualityDecision }
   | { readonly ok: false; readonly error: ReviewError };
+
+const CAPACITY_MESSAGE = "free pilot capacity reached; no state change recorded";
 
 const err = (code: ReviewErrorCode, message: string) => ({
   ok: false as const,
@@ -136,6 +147,39 @@ export class QualityReviewer {
     return rows.results.map(toDecision);
   }
 
+  private async safeAtCapacity(contributionId: string): Promise<boolean> {
+    try {
+      return await this.atCapacityFor(contributionId);
+    } catch {
+      return false;
+    }
+  }
+
+  /** Private view of pilot places used and remaining (never exposed through a public endpoint). */
+  async capacity(): Promise<PilotCapacity> {
+    const row = await this.db
+      .prepare("SELECT count(*) AS used FROM pilot_capacity_places")
+      .first<{ used: number }>();
+    const used = row?.used ?? 0;
+    return {
+      limit: PILOT_CAPACITY_LIMIT,
+      used,
+      remaining: Math.max(0, PILOT_CAPACITY_LIMIT - used),
+    };
+  }
+
+  /** True when approving this ID would need a new place and none is left. */
+  private async atCapacityFor(contributionId: string): Promise<boolean> {
+    const row = await this.db
+      .prepare(
+        `SELECT (SELECT count(*) FROM pilot_capacity_places) AS used,
+                EXISTS (SELECT 1 FROM pilot_capacity_places WHERE contribution_id = ?) AS held`,
+      )
+      .bind(contributionId)
+      .first<{ used: number; held: number }>();
+    return !!row && row.held === 0 && row.used >= PILOT_CAPACITY_LIMIT;
+  }
+
   /** Integrity-checked retrieval (same D1/R2 path as `commons.get`) plus state and history. */
   async inspect(contributionId: string, version: number): Promise<InspectResult> {
     if (!validTarget(contributionId, version)) {
@@ -191,6 +235,10 @@ export class QualityReviewer {
     if (!ALLOWED_TRANSITIONS[current.state]?.includes(toState)) {
       return err("invalid_transition", "transition not allowed from the current state");
     }
+    // Fast path only; the D1 trigger in migration 0010 is the atomic authority.
+    if (toState === "listed_unverified" && (await this.safeAtCapacity(contributionId))) {
+      return err("capacity_reached", CAPACITY_MESSAGE);
+    }
     // Only an approval or rejection of unreviewed content needs the content; withdrawal of an
     // already-listed version must stay possible if its content later becomes unavailable.
     if (current.state === "pending") {
@@ -235,6 +283,9 @@ export class QualityReviewer {
       };
     } catch {
       // The batch rolled back. Distinguish a lost race from a storage failure.
+      if (toState === "listed_unverified" && (await this.safeAtCapacity(contributionId))) {
+        return err("capacity_reached", CAPACITY_MESSAGE);
+      }
       try {
         const now = await this.states.get(contributionId, version);
         if (now && now.state !== from) {

@@ -131,6 +131,7 @@ describe("clean migration", () => {
         "knowledge_versions",
         "needs_reports",
         "operators",
+        "pilot_capacity_places",
         "rate_limit_windows",
         "retrieval_receipts",
         "version_platform_state",
@@ -551,5 +552,95 @@ describe("version_quality_states", () => {
         TS,
       ),
     ).toThrow(/UNIQUE|PRIMARY/);
+  });
+});
+
+describe("pilot capacity migration 0010", () => {
+  const upTo = (limit: string) => {
+    const old = new DatabaseSync(":memory:");
+    old.exec("PRAGMA foreign_keys = ON");
+    for (const f of readdirSync(MIGRATIONS_DIR)
+      .filter((x) => x.endsWith(".sql") && x < limit)
+      .sort())
+      old.exec(readFileSync(new URL(f, MIGRATIONS_DIR), "utf8"));
+    return old;
+  };
+
+  it("counts approvals that predate it once per contribution ID, including withdrawn ones", () => {
+    const old = upTo("0010");
+    const prior = db;
+    db = old;
+    addOperator(OP);
+    addAgent(AG, OP);
+    for (const id of ["cc-listed-01", "cc-both-0001", "cc-rejected-1", "cc-pending-01"]) {
+      addContribution(id, "knowledge", AG, OP);
+      addVersion(id, 1, "knowledge", AG, OP);
+    }
+    addVersion("cc-both-0001", 2, "knowledge", AG, OP);
+    const decide = (id: string, v: number, from: string, to: string) => {
+      run(
+        "INSERT INTO version_quality_decisions (contribution_id, version, from_state, to_state, reviewer_id, reason, decided_at) VALUES (?, ?, ?, ?, 'r', 'x', ?)",
+        id,
+        v,
+        from,
+        to,
+        TS,
+      );
+      run(
+        "UPDATE version_quality_states SET state = ?, updated_at = ? WHERE contribution_id = ? AND version = ?",
+        to,
+        TS,
+        id,
+        v,
+      );
+    };
+    decide("cc-listed-01", 1, "pending", "listed_unverified");
+    decide("cc-both-0001", 1, "pending", "listed_unverified");
+    decide("cc-both-0001", 1, "listed_unverified", "withdrawn");
+    decide("cc-both-0001", 2, "pending", "listed_unverified");
+    decide("cc-rejected-1", 1, "pending", "rejected");
+    old.exec(readFileSync(new URL("0010_pilot_capacity.sql", MIGRATIONS_DIR), "utf8"));
+    expect(
+      old
+        .prepare(
+          "SELECT contribution_id AS id, first_version AS v FROM pilot_capacity_places ORDER BY 1",
+        )
+        .all(),
+    ).toEqual([
+      { id: "cc-both-0001", v: 1 },
+      { id: "cc-listed-01", v: 1 },
+    ]);
+    db = prior;
+  });
+
+  it("enforces the cap of 100 in the database", () => {
+    for (let i = 0; i < 100; i++) {
+      run(
+        "INSERT INTO pilot_capacity_places (contribution_id, first_version, claimed_at) VALUES (?, 1, ?)",
+        `f-${i}`,
+        TS,
+      );
+    }
+    expect(() =>
+      run(
+        "INSERT INTO pilot_capacity_places (contribution_id, first_version, claimed_at) VALUES ('f-x', 1, ?)",
+        TS,
+      ),
+    ).toThrow(/capacity_reached/);
+    expect(() =>
+      run(
+        "INSERT INTO version_quality_decisions (contribution_id, version, from_state, to_state, reviewer_id, reason, decided_at) VALUES (?, 1, 'pending', 'listed_unverified', 'r', 'x', ?)",
+        K,
+        TS,
+      ),
+    ).toThrow(/capacity_reached/);
+    expect(count("SELECT count(*) AS c FROM version_quality_decisions")).toBe(0);
+    // Rejection is unaffected.
+    run(
+      "INSERT INTO version_quality_decisions (contribution_id, version, from_state, to_state, reviewer_id, reason, decided_at) VALUES (?, 1, 'pending', 'rejected', 'r', 'x', ?)",
+      K,
+      TS,
+    );
+    expect(count("SELECT count(*) AS c FROM pilot_capacity_places")).toBe(100);
   });
 });
