@@ -15,8 +15,9 @@ import {
   NeedsIntake,
   validateNeedsReport,
 } from "./registry/needs";
+import { handleReview, REVIEW_PATH_PREFIX, type ReviewEnv } from "./review/routes";
 
-interface WorkerEnv {
+interface WorkerEnv extends ReviewEnv {
   readonly DB?: D1Database;
   readonly CONTENT_BUCKET?: R2Bucket;
   readonly EXECUTION_DOMAIN_POLICY_JSON?: string;
@@ -939,6 +940,10 @@ export default {
     const { pathname } = new URL(request.url);
     if (pathname === "/health") {
       return Response.json({ status: "ok", service: "agent-commons" });
+    }
+    // Operator-only review: separate prefix, reviewer token only, never agent credentials.
+    if (pathname.startsWith(REVIEW_PATH_PREFIX)) {
+      return handleReview(request, workerEnv);
     }
     if (pathname.startsWith("/v1/commons/")) {
       const mode = resolvePilotMode(workerEnv.PILOT_MODE);
