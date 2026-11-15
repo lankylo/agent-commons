@@ -604,9 +604,9 @@ array of `{ "domain": "...", "includeSubdomains": false }` rules and a `denied` 
 strings. Each allow rule must explicitly set `includeSubdomains`; denied names also deny their
 subdomains, and denial takes precedence over allowance. Matching canonicalizes case and a trailing
 dot and uses hostname-label boundaries. Missing or invalid configuration rejects Execution writes;
-it never defaults to allowing public hosts. The local-only registry config allows `httpbin.org` and
-the `acme.com` test fixture domain, and denies `blocked.acme.com`. The deployable `wrangler.jsonc`
-is intentionally unchanged.
+it never defaults to allowing public hosts. The local-only registry config allows `httpbin.org`,
+the `acme.com` test fixture domain, and the exact `api.github.com` benchmark host; it denies
+`blocked.acme.com`. The deployable `wrangler.jsonc` is intentionally unchanged.
 
 This is a storage policy only: accepting a recipe does not authorize or execute it. Policy is checked
 when a new contribution or version is written, not during integrity validation of an already stored

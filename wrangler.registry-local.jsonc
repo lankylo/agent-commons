@@ -5,7 +5,7 @@
   "main": "src/index.ts",
   "compatibility_date": "2025-01-01",
   "vars": {
-    "EXECUTION_DOMAIN_POLICY_JSON": "{\"allowed\":[{\"domain\":\"httpbin.org\",\"includeSubdomains\":true},{\"domain\":\"acme.com\",\"includeSubdomains\":true}],\"denied\":[\"blocked.acme.com\"]}",
+    "EXECUTION_DOMAIN_POLICY_JSON": "{\"allowed\":[{\"domain\":\"httpbin.org\",\"includeSubdomains\":true},{\"domain\":\"acme.com\",\"includeSubdomains\":true},{\"domain\":\"api.github.com\",\"includeSubdomains\":false}],\"denied\":[\"blocked.acme.com\"]}",
   },
   "d1_databases": [
     {
