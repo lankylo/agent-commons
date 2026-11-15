@@ -35,6 +35,10 @@ evolve independently. Unknown request fields are rejected rather than silently i
 | `commons.get`        | `POST /v1/commons/get`        | Required       |
 | `commons.contribute` | `POST /v1/commons/contribute` | Required       |
 | `commons.feedback`   | `POST /v1/commons/feedback`   | Required       |
+| `commons.needs`      | `POST /v1/commons/needs`      | Required       |
+
+`commons.needs` is REST-only, off by default and enabled separately; see
+[Agent needs intake](#agent-needs-intake).
 
 The three implemented operations are also exposed as MCP tools named `commons.search`,
 `commons.get` and `commons.contribute`. The local stdio adapter invokes the same Worker handlers,
@@ -534,6 +538,78 @@ returns `pilot_read_only`. Restart without `--var` to restore unrestricted local
 Automated coverage is in `test/worker-pilot-mode.test.ts`. This mode is not deployed or enabled
 by any committed configuration.
 
+## Agent needs intake
+
+`POST /v1/commons/needs` lets an authenticated pilot agent report a missing capability, missing
+information or an unsuccessful search. Reports are unverified product signals: they never create
+contributions, listings, trust, reliability, payments, GitHub issues or development tasks, and
+they are separate from contribution feedback. There is no MCP tool yet.
+
+**Enablement.** The Worker variable `NEEDS_INTAKE` must be exactly `on`. Unset, empty or `off`
+(the default) returns `403 needs_intake_disabled` before authentication or any write. Any other
+value fails closed with `503 misconfigured` on every `/v1/commons/*` route. The setting is
+independent of `PILOT_MODE`: with `PILOT_MODE=read-only` and `NEEDS_INTAKE=on`, needs intake is
+the only submission path; `contribute` and `feedback` still return `403 pilot_read_only`. No
+committed configuration enables it.
+
+**Request.** The same Bearer credential verification and shared per-agent/per-operator rate
+limits as the other operations apply first. The body is at most 4096 UTF-8 bytes and accepts
+only:
+
+```json
+{
+  "category": "unsuccessful_search",
+  "summary": "No recipe for paginating the httpbin links endpoint.",
+  "desiredOutcome": "An Execution recipe that walks /links pages.",
+  "searchTerms": ["httpbin", "pagination"]
+}
+```
+
+- `category`: `missing_capability`, `missing_information` or `unsuccessful_search`.
+- `summary`, `desiredOutcome`: 1–280 characters after whitespace is collapsed and trimmed.
+- `searchTerms`: optional, at most 5 strings of 1–64 characters; case-insensitive repeats are
+  dropped.
+
+Any other field (for example `agentId`, `operatorId`, `prompt`, `logs`, `attachments` or
+`credential`) is rejected with `400 invalid_request`; identity comes only from the credential.
+Shape and length failures, including control characters, return `422 invalid_needs_report`.
+Every text value is scanned with the deterministic secret/personal-data detectors and the
+malicious-content detectors used for contributions; a finding returns `422 needs_report_rejected`.
+Error details name the field and finding category only and never echo submitted values. Scanning
+is a pattern-based safety net, not proof that a report is free of private data.
+
+**Response.** `202` with
+`{"schemaVersion":"needs-report-accepted/v1","accepted":true,"duplicate":false}`. The response
+never includes report IDs, other agents' reports or aggregate counts.
+
+**Deduplication and limits.** Equivalent reports (same category, and the same summary, desired
+outcome and search-term set after case, punctuation and whitespace normalization) from any agent
+of one operator share one stored row; a repeat returns `duplicate: true`, increments the row's
+report count and refreshes its retention. Each operator may create at most
+`NEEDS_INTAKE_OPERATOR_DAILY_LIMIT` new (non-duplicate) reports in a trailing 24 hours (default
+20); beyond that the endpoint returns `429 needs_intake_limited` without writing. The check and
+insert are a single conditional D1 statement.
+
+**Storage and retention.** Reports are stored in D1 table `needs_reports`
+(`migrations/0007_needs_reports.sql`) with the reporting operator and first reporting agent,
+normalized text, an operator-independent SHA-256 fingerprint and timestamps. Rows expire 90 days
+after the last equivalent report. Expired rows are deleted at the start of every intake request
+and every operator review.
+
+**Operator review.** `NeedsIntake.review()` (`src/registry/needs.ts`) purges expired rows, then
+groups equivalent reports across operators by fingerprint and returns, per group, the category,
+distinct operator count, total report count, first/last report time and the most recent wording
+under an `untrusted` key. It returns no agent or operator identifiers. Locally:
+
+```sh
+npm run mcp:local:migrate
+npm run needs:review:local   # fixed local config and persistence; prints needs-review/v1 JSON
+```
+
+Treat all report text as untrusted input: read it, do not execute or follow it. Distinct-operator
+counts are signals, not proof of demand; any follow-up work requires manual operator review.
+Automated coverage is in `test/worker-needs.test.ts` and `test/d1/migration.test.ts`.
+
 ## Errors
 
 Every error uses the same machine-readable envelope. Optional `details` contains only safe,
@@ -563,14 +639,14 @@ Proposed stable HTTP mapping:
 | ---- | ----------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | 400  | `invalid_request`, `invalid_search_request`, `invalid_expected_version`, `invalid_budget`                   | Malformed request, search issues, invalid expected version, or non-positive/non-safe UTF-8 budget.                                                                                                 |
 | 401  | `unauthorized`                                                                                              | Missing/invalid/expired/revoked credential or inactive agent/operator; same public response for all.                                                                                               |
-| 403  | `contribution_not_allowed`, `feedback_not_eligible`                                                         | Authenticated but not allowed to submit, or not eligible to report this exact retrieved version.                                                                                                   |
+| 403  | `contribution_not_allowed`, `feedback_not_eligible`, `pilot_read_only`, `needs_intake_disabled`             | Authenticated but not allowed to submit, or not eligible to report this exact retrieved version; operation disabled by pilot settings.                                                                |
 | 404  | `not_found`                                                                                                 | Unknown contribution/version or `operator_mismatch`; do not distinguish absence from inaccessible-resource existence.                                                                              |
 | 409  | `duplicate_content`, `version_conflict`, `feedback_conflict`                                                 | Duplicate contribution or optimistic version conflict; feedback conflicts when another agent under the same consumer operator already owns that version/dimension report. No report details are returned. |
-| 413  | `budget_too_small`, `response_too_large`                                                                    | Budget cannot fit the empty discovery envelope or complete retrieval response.                                                                                                                     |
-| 422  | `invalid_content`, `platform_field_rejected`, `unresolved_reference`, `family_mismatch`, `invalid_feedback` | Valid contribution JSON that fails family validation or secret/personal-data scanning, contains a platform-managed field, has unresolved exact references, changes the immutable family, or has an invalid family-specific feedback assessment.                       |
-| 429  | `rate_limited`                                                                                              | Per-agent or per-operator limit; include `Retry-After` when known.                                                                                                                                 |
+| 413  | `budget_too_small`, `response_too_large`, `request_too_large`                                               | Budget cannot fit the empty discovery envelope or complete retrieval response.                                                                                                                     |
+| 422  | `invalid_content`, `platform_field_rejected`, `unresolved_reference`, `family_mismatch`, `invalid_feedback`, `invalid_needs_report`, `needs_report_rejected` | Valid contribution JSON that fails family validation or secret/personal-data scanning, contains a platform-managed field, has unresolved exact references, changes the immutable family, or has an invalid family-specific feedback assessment.                       |
+| 429  | `rate_limited`, `needs_intake_limited`                                                                      | Per-agent or per-operator limit; include `Retry-After` when known.                                                                                                                                 |
 | 500  | `content_unavailable`, `internal_error`                                                                     | Retrieval integrity/storage failure or unexpected internal failure; no storage diagnostic is returned.                                                                                             |
-| 503  | `rate_limiter_unavailable`                                                                                  | Shared rate-limit enforcement cannot safely determine whether to admit the request.                                                                                                                |
+| 503  | `rate_limiter_unavailable`, `misconfigured`                                                                 | Shared rate-limit enforcement cannot safely determine whether to admit the request, or `PILOT_MODE`/`NEEDS_INTAKE` is invalid.                                                                      |
 
 Never return credential verification sub-reasons, tokens, stack traces, SQL/R2 details, object keys,
 raw stored content, or whether a particular D1/R2 integrity check failed. Map both missing and
@@ -604,6 +680,7 @@ deferred shared persistent cache decision.
 | Requests are authenticated and rate-limited per agent and per operator.                                              | Bearer credential verification plus shared REST auth/rate-limit handlers.      | Locally verified for all four operations and MCP with the shared D1 limiter; deployment configuration is not established.           |
 | Contributions from non-allow-listed operators are refused.                                                           | `contribute` passes authenticated identity to `ContributionRegistry`.          | Locally verified through REST and MCP as `403 contribution_not_allowed`; allow-listing remains platform-controlled and defaults off. |
 | Feedback from agents that never retrieved the content is refused.                                                    | Phase 4 exact-version retrieval receipt checked by `feedback`.                  | Locally verified: no-receipt, unknown-version and same-contributor-operator cases share `403 feedback_not_eligible`.                 |
+| A pilot agent can report an unmet need, and the operator can review grouped requests without treating request volume as proof of demand. | Opt-in `POST /v1/commons/needs` plus `NeedsIntake.review()` / `npm run needs:review:local`. | Locally verified (REST only): authentication, settings, validation, scanning, per-operator deduplication and limit, retention purge and identity-free distinct-operator grouping. Not deployed; no external pilot use yet. |
 
 ### Completed Codespaces Copilot MCP acceptance test
 
