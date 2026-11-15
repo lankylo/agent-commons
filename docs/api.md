@@ -540,7 +540,7 @@ Proposed stable HTTP mapping:
 | 404  | `not_found`                                                                                                 | Unknown contribution/version or `operator_mismatch`; do not distinguish absence from inaccessible-resource existence.                                                                              |
 | 409  | `duplicate_content`, `version_conflict`, `feedback_conflict`                                                 | Duplicate contribution or optimistic version conflict; feedback conflicts when another agent under the same consumer operator already owns that version/dimension report. No report details are returned. |
 | 413  | `budget_too_small`, `response_too_large`                                                                    | Budget cannot fit the empty discovery envelope or complete retrieval response.                                                                                                                     |
-| 422  | `invalid_content`, `platform_field_rejected`, `unresolved_reference`, `family_mismatch`, `invalid_feedback` | Valid contribution JSON that fails family validation, contains a platform-managed field, has unresolved exact references, changes the immutable family, or has an invalid family-specific feedback assessment.                       |
+| 422  | `invalid_content`, `platform_field_rejected`, `unresolved_reference`, `family_mismatch`, `invalid_feedback` | Valid contribution JSON that fails family validation or secret/personal-data scanning, contains a platform-managed field, has unresolved exact references, changes the immutable family, or has an invalid family-specific feedback assessment.                       |
 | 429  | `rate_limited`                                                                                              | Per-agent or per-operator limit; include `Retry-After` when known.                                                                                                                                 |
 | 500  | `content_unavailable`, `internal_error`                                                                     | Retrieval integrity/storage failure or unexpected internal failure; no storage diagnostic is returned.                                                                                             |
 | 503  | `rate_limiter_unavailable`                                                                                  | Shared rate-limit enforcement cannot safely determine whether to admit the request.                                                                                                                |
@@ -635,6 +635,40 @@ comparison, and corroboration remain separate Phase 5 work.
 Both URL and permission checks run in the shared registry write preparation path for REST and MCP.
 Mutable policy is not consulted when verifying an already stored immutable version. A later policy
 change that affects existing Knowledge contributions is a separate quality-state decision.
+
+### Secret and personal-data scanning
+
+After family validation and platform policy checks, and before reference resolution, hashing or any
+D1/R2 write, the shared registry path (`src/registry/content-scan.ts`) scans the validated content of
+every new Knowledge or Execution contribution and every new version. REST and MCP therefore return
+the same result. Every string value and object key is visited (shared metadata, facts, records,
+summary, explanation, source and evidence URLs, Execution inputs, allowed values, step values and
+any other nested field), plus positive integers for payment-card numbers.
+
+| Category | Detected (high confidence only) | Allowed as benign or placeholder |
+|---|---|---|
+| Private key | `-----BEGIN … PRIVATE KEY-----` followed by at least 64 characters of base64 key body | Header text alone, `...` bodies |
+| API token | Recognizable prefixes: AWS `AKIA`/`ASIA`, GitHub `ghp_`/`gho_`/`ghu_`/`ghs_`/`ghr_`/`github_pat_`, GitLab `glpat-`, Slack `xox?-`, Stripe `sk_`/`rk_` live/test, Google `AIza`, Anthropic `sk-ant-`, OpenAI-style `sk-`, npm `npm_`, Hugging Face `hf_`, SendGrid `SG.`, JWTs | Values containing `EXAMPLE`, `YOUR`, `PLACEHOLDER`, `REDACTED`, `xxxx`, long repeated characters; Stripe publishable `pk_` keys |
+| Authorization credential | `Bearer` tokens (16+ chars, letters and digits), `Basic` values decoding to `user:password`, credential query parameters (`api_key`, `access_token`, `token`, `client_secret`, `password`, …), URL userinfo passwords | `Bearer <token>`, `{{token}}`, `${TOKEN}`, `YOUR_ACCESS_TOKEN`, `user:password@`, field names such as `apiKey` or `Authorization` |
+| Email address | `local@domain.tld` | RFC 2606/6761 reserved domains (`example.com/.net/.org`, `.example`, `.test`, `.invalid`, `.localhost`, `.local`), `git@host` SSH remotes, package specifiers such as `pkg@1.2.3` |
+| Phone number | `+` international numbers with 8–15 digits; North American `(212) 555-1234`, `212-555-1234`, `212.555.1234` formats with valid area/exchange digits | Fictional `555` exchanges, repeated or sequential digits (`123-456-7890`), timestamps, dates and UUIDs |
+| Payment card | 13–19 digit numbers (contiguous or 4-digit/Amex groups) with a 2–6 leading digit that pass the Luhn checksum | Published provider test cards (e.g. `4242 4242 4242 4242`, `4111111111111111`), repeated digits |
+
+A detection returns `invalid_content` (HTTP 422) with `details.errors` entries such as
+`facts[1].value: contains a possible email address; remove it or use a placeholder`. Messages contain
+the field path and category only, never the value. Object keys that were flagged or are not plain
+identifiers appear as `[field #n]`. At most 20 findings are listed.
+
+Scanning is deterministic and bounded: depth 16, 50,000 nodes and 2,000,000 scanned characters, with
+bounded regular-expression repetition. Exceeding a bound fails closed with
+`content: exceeds the secret and personal-data scanning limits`. No network, DNS or LLM call is made.
+
+Limitations: the scanner is a pattern-based safety net, not proof that content is free of secrets or
+personal data. It does not detect unprefixed or unknown token formats, generic high-entropy strings,
+passwords outside URL userinfo, `Basic` or query-parameter values, names, postal addresses,
+national identity numbers, national phone formats without `+` outside North America, or obfuscated,
+split or encoded values. Scanning applies only to new writes; already stored immutable versions are
+not rescanned on read. Malicious-content checks are separate Phase 5 work.
 
 ## Bootstrap for local MCP acceptance
 

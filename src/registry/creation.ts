@@ -39,6 +39,7 @@ import {
   parseKnowledgePermissionPolicy,
   type KnowledgePermissionPolicy,
 } from "./knowledge-policy";
+import { scanContributionContent } from "./content-scan";
 import { resolveContributionRefs } from "./references";
 import { ContributionRetriever, type RetrieveResult } from "./retrieval";
 
@@ -462,6 +463,16 @@ export class ContributionRegistry {
           errors: policyErrors,
         });
       }
+    }
+
+    // Secret and personal-data scanning of the validated value (both families, before any write).
+    const scan = scanContributionContent(content);
+    if (!scan.ok) {
+      return bad({
+        code: "invalid_content",
+        message: "content failed secret and personal-data scanning",
+        errors: scan.errors,
+      });
     }
 
     // Cross-family references must resolve to exact stored versions.

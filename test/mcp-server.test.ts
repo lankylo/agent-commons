@@ -474,6 +474,101 @@ describe("local stdio MCP server", () => {
     }
   });
 
+  it("rejects secret and personal data identically through REST and MCP without writes", async () => {
+    // Synthetic values assembled at runtime; none is a working credential or real person.
+    const secretToken = `ghp_${"aB3dE5gH7jK9".repeat(3)}`;
+    const phone = ["(212)", "867-5309"].join(" ");
+    const connection = await connectMcp();
+    try {
+      const k1 = field(
+        structured(
+          await callTool(connection.client, "commons.contribute", {
+            contribution: { ...HTTPBIN_KNOWLEDGE_SEED, title: "MCP scan Knowledge v1" },
+          }),
+        ),
+        "contribution",
+      );
+      const e1 = field(
+        structured(
+          await callTool(connection.client, "commons.contribute", {
+            contribution: { ...HTTPBIN_EXECUTION_SEED, title: "MCP scan Execution v1" },
+          }),
+        ),
+        "contribution",
+      );
+      const knowledge = {
+        ...HTTPBIN_KNOWLEDGE_SEED,
+        title: "MCP scan Knowledge v2",
+        records: [{ endpoint: "/get", support: phone }],
+      };
+      const execution = {
+        ...HTTPBIN_EXECUTION_SEED,
+        title: "MCP scan Execution v2",
+        steps: HTTPBIN_EXECUTION_SEED.steps.map((step) =>
+          step.type === "http_request"
+            ? { ...step, query: { agent_commons: { literal: secretToken } } }
+            : step,
+        ),
+      };
+      const cases: [Record<string, unknown>, string][] = [
+        [{ contribution: knowledge }, "records[0].support: contains a possible phone number"],
+        [
+          {
+            contributionId: k1.contributionId,
+            expectedPreviousVersion: 1,
+            contribution: knowledge,
+          },
+          "records[0].support: contains a possible phone number",
+        ],
+        [
+          { contribution: execution },
+          "steps[0].query.agent_commons.literal: contains a possible API token",
+        ],
+        [
+          {
+            contributionId: e1.contributionId,
+            expectedPreviousVersion: 1,
+            contribution: execution,
+          },
+          "steps[0].query.agent_commons.literal: contains a possible API token",
+        ],
+      ];
+      const count = async () =>
+        (await db
+          .prepare(
+            "SELECT (SELECT COUNT(*) FROM contributions) + (SELECT COUNT(*) FROM contribution_versions) AS c",
+          )
+          .first<{ c: number }>())!.c;
+      const before = await count();
+      const objects = (await proxy.env.CONTENT_BUCKET.list()).objects.length;
+      for (const [args, message] of cases) {
+        const mcp = await callTool(connection.client, "commons.contribute", args);
+        expect(mcp.isError).toBe(true);
+        const rest = await worker.fetch(
+          new Request("https://example.com/v1/commons/contribute", {
+            method: "POST",
+            headers: { Authorization: `Bearer ${token}` },
+            body: JSON.stringify(args),
+          }),
+          env() as never,
+        );
+        expect(rest.status).toBe(422);
+        const restBody = (await rest.json()) as ToolPayload;
+        expect(structured(mcp)).toEqual(restBody);
+        const error = field(restBody, "error");
+        expect(error.code).toBe("invalid_content");
+        expect(field(error, "details").errors).toEqual([
+          `${message}; remove it or use a placeholder`,
+        ]);
+        expect(JSON.stringify([mcp, restBody])).not.toMatch(/aB3dE5gH7jK9|867-5309/);
+      }
+      expect(await count()).toBe(before);
+      expect((await proxy.env.CONTENT_BUCKET.list()).objects.length).toBe(objects);
+    } finally {
+      await connection.close();
+    }
+  });
+
   it("fails closed when the Knowledge permission policy is missing through MCP", async () => {
     const connection = await connectMcp(
       token,

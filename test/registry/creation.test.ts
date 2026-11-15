@@ -431,6 +431,68 @@ describe("valid Execution creation", () => {
   });
 });
 
+describe("secret and personal-data scanning", () => {
+  // Synthetic values assembled at runtime; none is a working credential or real person.
+  const token = `ghp_${"aB3dE5gH7jK9".repeat(3)}`;
+  const email = ["jordan.lee", "acme-corp.io"].join("@");
+  const objectCount = async () => (await bucket.list()).objects.length;
+
+  it("rejects both families on creation and versioning before any D1 or R2 write", async () => {
+    const k1 = must(await registry.createContribution(agent, knowledge()));
+    const e1 = must(await registry.createContribution(agent, execution()));
+    const before = await snapshot();
+    const objects = await objectCount();
+
+    const k = knowledge();
+    (k.records as Record<string, unknown>[])[0]!.owner = email;
+    const e = execution();
+    (e.inputs as Record<string, unknown>[])[0]!.allowedValues = [token];
+
+    for (const result of [
+      await registry.createContribution(agent, k),
+      await registry.createContribution(agent, e),
+      await registry.createContributionVersion(agent, k1.id, 1, k),
+      await registry.createContributionVersion(agent, e1.id, 1, e),
+    ]) {
+      expect(result.ok).toBe(false);
+      if (result.ok) continue;
+      expect(result.error.code).toBe("invalid_content");
+      expect(result.error.message).toBe("content failed secret and personal-data scanning");
+      expect(JSON.stringify(result)).not.toContain("acme-corp");
+      expect(JSON.stringify(result)).not.toContain("aB3dE5gH7jK9");
+    }
+    const [kc, ec, kv, ev] = [
+      await registry.createContribution(agent, k),
+      await registry.createContribution(agent, e),
+      await registry.createContributionVersion(agent, k1.id, 1, k),
+      await registry.createContributionVersion(agent, e1.id, 1, e),
+    ];
+    for (const r of [kc, kv]) {
+      expect(!r.ok && r.error.errors).toEqual([
+        "records[0].owner: contains a possible email address; remove it or use a placeholder",
+      ]);
+    }
+    for (const r of [ec, ev]) {
+      expect(!r.ok && r.error.errors).toEqual([
+        "inputs[0].allowedValues[0]: contains a possible API token; remove it or use a placeholder",
+      ]);
+    }
+    expect(await snapshot()).toEqual(before);
+    expect(await objectCount()).toBe(objects);
+  });
+
+  it("accepts benign documentation terms and placeholders in both families", async () => {
+    const k = knowledge();
+    k.explanation =
+      "Send Authorization: Bearer <token>; docs use user@example.com, +1-555-0100 and test card 4242 4242 4242 4242.";
+    (k.records as Record<string, unknown>[])[0]!.apiKey = "YOUR_API_KEY";
+    must(await registry.createContribution(agent, k));
+    const e = execution();
+    (e.inputs as Record<string, unknown>[])[0]!.allowedValues = ["password", "accessToken"];
+    must(await registry.createContribution(agent, e));
+  });
+});
+
 describe("rejections", () => {
   it("rejects duplicate content without writing anything", async () => {
     const input = knowledge();
