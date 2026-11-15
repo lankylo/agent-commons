@@ -85,7 +85,7 @@ const knowledge = (): Record<string, unknown> => ({
   title: `Example API rate limits ${++n}`,
   purpose: "Record documented rate limits",
   contentType: "api-reference",
-  evidence: [{ kind: "documentation", uri: `https://example.com/docs/limits/${n}` }],
+  evidence: [{ kind: "documentation", uri: `https://httpbin.org/docs/limits/${n}` }],
   licensing: { license: "CC-BY-4.0", dataPermission: "redistribution-allowed" },
   reviewIntervalDays: 30,
   facts: [
@@ -94,7 +94,7 @@ const knowledge = (): Record<string, unknown> => ({
   summary: "Documented limits for the Example API.",
   sources: [
     {
-      uri: "https://example.com/docs/limits",
+      uri: "https://httpbin.org/docs/limits",
       accessedAt: "2026-11-10T10:00:00Z",
       hash: { algorithm: "sha256", digest: "a".repeat(64) },
     },
@@ -189,6 +189,43 @@ const versionRow = (id: string, v: number) =>
     .first<Record<string, unknown>>();
 
 describe("Knowledge version 2", () => {
+  it("checks current permission policy for new versions, not immutable reads", async () => {
+    const v1 = must(await registry.createContribution(agent, knowledge()));
+    const restrictivePolicy = new ContributionRegistry(
+      {
+        ...proxy.env,
+        KNOWLEDGE_PERMISSION_POLICY_JSON: JSON.stringify({
+          permittedCombinations: [
+            {
+              sourceLicense: "CC-BY-4.0",
+              permittedUse: "summary",
+              dataPermission: "reference-only",
+            },
+          ],
+        }),
+      },
+      { now: () => clock },
+    );
+    const before = await snapshot();
+    const rejected = await restrictivePolicy.createContributionVersion(
+      agent,
+      v1.id,
+      1,
+      knowledge(),
+    );
+    expect(codeOf(rejected)).toBe("invalid_content");
+    expect(!rejected.ok && rejected.error.errors).toContain(
+      "licensing.dataPermission: declaration combination is not permitted by platform policy",
+    );
+    expect((await restrictivePolicy.getContributionVersion(v1.id, 1)).ok).toBe(true);
+
+    const missingPolicy = new ContributionRegistry({ DB: db, CONTENT_BUCKET: bucket });
+    expect(
+      codeOf(await missingPolicy.createContributionVersion(agent, v1.id, 1, knowledge())),
+    ).toBe("knowledge_permission_policy_unavailable");
+    expect(await snapshot()).toEqual(before);
+  });
+
   it("assigns platform fields, keeps id/family, and stores all rows", async () => {
     clock = T1;
     const v1 = must(await registry.createContribution(agent, knowledge()));
@@ -418,7 +455,11 @@ describe("rejections", () => {
       },
     });
     const racing = new ContributionRegistry(
-      { DB: racingDb, CONTENT_BUCKET: bucket },
+      {
+        ...proxy.env,
+        DB: racingDb,
+        CONTENT_BUCKET: bucket,
+      },
       { now: () => clock },
     );
     const mine = await racing.createContributionVersion(agent, v1.id, 1, knowledge());
@@ -607,7 +648,11 @@ describe("failure behavior (R2 first, then one atomic D1 batch)", () => {
       },
     });
     const broken = new ContributionRegistry(
-      { DB: db, CONTENT_BUCKET: brokenBucket },
+      {
+        ...proxy.env,
+        DB: db,
+        CONTENT_BUCKET: brokenBucket,
+      },
       { now: () => clock },
     );
     const before = await snapshot();

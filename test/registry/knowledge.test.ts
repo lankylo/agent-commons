@@ -5,13 +5,14 @@ import {
   validateKnowledgeContribution,
   validateKnowledgeContributionJsonSchema,
 } from "../../src/registry/knowledge";
+import { IANA_SPECIAL_USE_DOMAINS } from "../../src/registry/hostname";
 
 const valid = () => ({
   family: "knowledge",
   title: "Example API rate limits",
   purpose: "Record documented rate limits",
   contentType: "api-reference",
-  evidence: [{ kind: "documentation", uri: "https://example.com/docs/limits" }],
+  evidence: [{ kind: "documentation", uri: "https://httpbin.org/docs/limits" }],
   licensing: { license: "CC-BY-4.0", dataPermission: "redistribution-allowed" },
   reviewIntervalDays: 30,
   facts: [{ subject: "example-api", predicate: "rateLimitPerMinute", value: 60, unit: "req/min" }],
@@ -20,7 +21,7 @@ const valid = () => ({
   explanation: "Limits apply per API key.",
   sources: [
     {
-      uri: "https://example.com/docs/limits",
+      uri: "https://httpbin.org/docs/limits",
       accessedAt: "2026-11-10T10:00:00Z",
       sourceDate: "2026-10-01T00:00:00Z",
       hash: { algorithm: "sha256", digest: "a".repeat(64) },
@@ -130,11 +131,65 @@ describe("validateKnowledgeContribution", () => {
     expect(withSource({ uri: "javascript:alert(1)" })).not.toEqual([]);
   });
 
+  it("accepts absolute HTTPS references to public DNS hosts", () => {
+    const contribution = valid() as Record<string, unknown>;
+    contribution.evidence = [{ kind: "documentation", uri: "https://notexample.com/docs" }];
+    contribution.sources = [
+      { ...(valid().sources[0] as object), uri: "https://github.com/postmanlabs/httpbin" },
+    ];
+    expect(validateKnowledgeContribution(contribution)).toMatchObject({ ok: true });
+  });
+
+  it.each([
+    ["relative", "/docs"],
+    ["non-HTTPS", "http://httpbin.org/docs"],
+    ["credentials", "https://user:secret@httpbin.org/docs"],
+    ["IPv4 literal", "https://127.0.0.1/docs"],
+    ["IPv6 literal", "https://[::1]/docs"],
+    ["malformed hostname", "https://bad..httpbin.org/docs"],
+    ["invalid label", "https://-bad.org/docs"],
+    ["lookalike malformed host", "https://example.com..org/docs"],
+    ...IANA_SPECIAL_USE_DOMAINS.map((domain) => [
+      `IANA special-use ${domain}`,
+      `https://${domain}/docs`,
+    ]),
+    ...IANA_SPECIAL_USE_DOMAINS.map((domain) => [
+      `IANA special-use subdomain ${domain}`,
+      `https://source.${domain}/docs`,
+    ]),
+  ])("rejects %s in both source and evidence URLs", (_name, uri) => {
+    const evidence = errorsFor((v) => (v.evidence = [{ kind: "documentation", uri }]));
+    const source = errorsFor((v) => {
+      v.sources = [{ ...(valid().sources[0] as object), uri }];
+    });
+    expect(evidence.some((error) => error.startsWith("evidence[0].uri:"))).toBe(true);
+    expect(source.some((error) => error.startsWith("sources[0].uri:"))).toBe(true);
+  });
+
   it("validates rights, verification and freshness", () => {
     expect(errorsFor((v) => delete v.rights)).not.toEqual([]);
     expect(
       errorsFor((v) => (v.rights = { sourceLicense: "MIT", permittedUse: "anything" })),
     ).not.toEqual([]);
+    expect(
+      errorsFor(
+        (v) =>
+          (v.rights = { sourceLicense: "CC-BY-4.0", rightsHolder: "Example Inc" } as Record<
+            string,
+            unknown
+          >),
+      ).some((error) => error.startsWith("rights.permittedUse:")),
+    ).toBe(true);
+    expect(
+      errorsFor((v) => (v.rights = { permittedUse: "summary" } as Record<string, unknown>)).some(
+        (error) => error.startsWith("rights.sourceLicense:"),
+      ),
+    ).toBe(true);
+    expect(
+      errorsFor((v) => (v.licensing = { license: "CC-BY-4.0" } as Record<string, unknown>)).some(
+        (error) => error.startsWith("licensing.dataPermission:"),
+      ),
+    ).toBe(true);
     expect(errorsFor((v) => (v.verification = { method: "trust-me" }))).not.toEqual([]);
     expect(
       errorsFor((v) => (v.verification = { method: "owner-tested", declaredConfidence: 1.5 })),

@@ -8,6 +8,7 @@ import { PLATFORM_ONLY_FIELDS, type ContributionEnvelopeInput } from "./envelope
 import { checkReviewInterval } from "./review-intervals";
 import { checkContributionRefs } from "./references";
 import { Checker, ISO_UTC, SHA256_HEX, isObj } from "./check";
+import { HOSTNAME, isIanaSpecialUseHostname } from "./hostname";
 import type { Schema } from "@cfworker/json-schema";
 import {
   COMMON_CONTRIBUTION_REQUIRED,
@@ -238,6 +239,45 @@ const ALLOWED_KEYS = new Set([
   "asOf",
 ]);
 
+function publicHttpsUrl(c: Checker, value: unknown, path: string): void {
+  const raw = c.str(value, path, KNOWLEDGE_LIMITS.uriMaxChars);
+  if (raw === undefined) return;
+  if (raw !== raw.trim() || !/^https:\/\//i.test(raw)) {
+    c.err(path, "must be an absolute HTTPS URL without surrounding whitespace");
+    return;
+  }
+
+  let url: URL;
+  try {
+    url = new URL(raw);
+  } catch {
+    c.err(path, "must be a valid absolute HTTPS URL");
+    return;
+  }
+  if (url.protocol !== "https:") {
+    c.err(path, "must use HTTPS");
+    return;
+  }
+  const authority = raw.slice(raw.indexOf("//") + 2).split(/[/?#]/, 1)[0] ?? "";
+  if (authority.includes("@") || url.username !== "" || url.password !== "") {
+    c.err(path, "must not contain embedded credentials");
+    return;
+  }
+
+  const hostname = url.hostname.toLowerCase().replace(/\.$/, "");
+  if (hostname.startsWith("[") || /^\d+(?:\.\d+){0,3}$/.test(hostname)) {
+    c.err(path, "must not use an IP literal");
+    return;
+  }
+  if (isIanaSpecialUseHostname(hostname)) {
+    c.err(path, "must not use an IANA Special-Use Domain Name or its subdomains");
+    return;
+  }
+  if (!HOSTNAME.test(url.hostname)) {
+    c.err(path, "must use a valid public DNS hostname");
+  }
+}
+
 /** Validate untrusted input as a Knowledge contribution. Never throws. */
 export function validateKnowledgeContribution(input: unknown): KnowledgeValidation {
   const schemaErrors = validateKnowledgeContributionJsonSchema(input);
@@ -268,7 +308,7 @@ export function validateKnowledgeContribution(input: unknown): KnowledgeValidati
     const o = c.obj(e, `evidence[${i}]`, ["kind", "uri"]);
     if (!o) return;
     c.str(o.kind, `evidence[${i}].kind`, KNOWLEDGE_LIMITS.shortStringMaxChars);
-    c.uri(o.uri, `evidence[${i}].uri`);
+    publicHttpsUrl(c, o.uri, `evidence[${i}].uri`);
   });
 
   const lic = c.obj(input.licensing, "licensing", ["license", "dataPermission"]);
@@ -323,7 +363,7 @@ export function validateKnowledgeContribution(input: unknown): KnowledgeValidati
     const p = `sources[${i}]`;
     const o = c.obj(s, p, ["uri", "accessedAt", "sourceDate", "hash", "snapshotRef"]);
     if (!o) return;
-    c.uri(o.uri, `${p}.uri`);
+    publicHttpsUrl(c, o.uri, `${p}.uri`);
     c.date(o.accessedAt, `${p}.accessedAt`);
     c.date(o.sourceDate, `${p}.sourceDate`, { optional: true });
     const h = c.obj(o.hash, `${p}.hash`, ["algorithm", "digest"]);

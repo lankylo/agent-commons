@@ -14,7 +14,7 @@ const validKnowledge = () => ({
   title: "Example API rate limits",
   purpose: "Record documented rate limits",
   contentType: "api-reference",
-  evidence: [{ kind: "documentation", uri: "https://example.com/docs/limits" }],
+  evidence: [{ kind: "documentation", uri: "https://httpbin.org/docs/limits" }],
   licensing: { license: "CC-BY-4.0", dataPermission: "redistribution-allowed" },
   reviewIntervalDays: 30,
   facts: [{ subject: "example-api", predicate: "rateLimitPerMinute", value: 60, unit: "req/min" }],
@@ -23,7 +23,7 @@ const validKnowledge = () => ({
   explanation: "Limits apply per API key.",
   sources: [
     {
-      uri: "https://example.com/docs/limits",
+      uri: "https://httpbin.org/docs/limits",
       accessedAt: "2026-11-10T10:00:00Z",
       sourceDate: "2026-10-01T00:00:00Z",
       hash: { algorithm: "sha256", digest: "a".repeat(64) },

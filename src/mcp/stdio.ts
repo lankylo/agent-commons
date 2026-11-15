@@ -21,6 +21,9 @@ if (!credential) {
       RATE_LIMIT_WINDOW_SECONDS: process.env.RATE_LIMIT_WINDOW_SECONDS,
       EXECUTION_DOMAIN_POLICY_JSON:
         process.env.EXECUTION_DOMAIN_POLICY_JSON ?? activePlatform.env.EXECUTION_DOMAIN_POLICY_JSON,
+      KNOWLEDGE_PERMISSION_POLICY_JSON:
+        process.env.KNOWLEDGE_PERMISSION_POLICY_JSON ??
+        activePlatform.env.KNOWLEDGE_PERMISSION_POLICY_JSON,
     };
     const handle = serveStdio(() => createCommonsMcpServer(workerEnv, credential));
     let closing: Promise<void> | undefined;

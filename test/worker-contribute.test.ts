@@ -72,6 +72,7 @@ function env(overrides: Record<string, unknown> = {}) {
     DB: db,
     CONTENT_BUCKET: proxy.env.CONTENT_BUCKET,
     EXECUTION_DOMAIN_POLICY_JSON: proxy.env.EXECUTION_DOMAIN_POLICY_JSON,
+    KNOWLEDGE_PERMISSION_POLICY_JSON: proxy.env.KNOWLEDGE_PERMISSION_POLICY_JSON,
     RATE_LIMIT_AGENT_LIMIT: 1000,
     RATE_LIMIT_OPERATOR_LIMIT: 1000,
     RATE_LIMIT_WINDOW_SECONDS: 60,
@@ -106,7 +107,7 @@ async function payload(response: Response): Promise<ApiPayload> {
 }
 
 function knowledge(title = `Worker Knowledge ${++n}`) {
-  return { ...HTTPBIN_KNOWLEDGE_SEED, title };
+  return structuredClone({ ...HTTPBIN_KNOWLEDGE_SEED, title });
 }
 
 function execution(title = `Worker Execution ${++n}`, related?: unknown) {
@@ -243,6 +244,75 @@ describe("worker contribute endpoint", () => {
     expect((await payload(override)).error?.code).toBe("platform_field_rejected");
   });
 
+  it("enforces Knowledge URL and permission policy on REST creation and versioning", async () => {
+    const invalidUrlBase = knowledge("Invalid Knowledge URL");
+    const invalidUrl = {
+      ...invalidUrlBase,
+      sources: [{ ...invalidUrlBase.sources[0], uri: "https://example.com/docs" }],
+    };
+    const rejectedUrl = await payload(await callContribute({ contribution: invalidUrl }));
+    expect(rejectedUrl.error?.code).toBe("invalid_content");
+    expect(rejectedUrl.error?.details?.errors).toContain(
+      "sources[0].uri: must not use an IANA Special-Use Domain Name or its subdomains",
+    );
+
+    const invalidPermissionsBase = knowledge("Invalid Knowledge permissions");
+    const invalidPermissions = {
+      ...invalidPermissionsBase,
+      licensing: { ...invalidPermissionsBase.licensing, dataPermission: "not-authorized" },
+    };
+    const rejectedPermissions = await payload(
+      await callContribute({ contribution: invalidPermissions }),
+    );
+    expect(rejectedPermissions.error?.code).toBe("invalid_content");
+    expect(rejectedPermissions.error?.details?.errors).toContain(
+      "licensing.dataPermission: declaration combination is not permitted by platform policy",
+    );
+
+    const created = await payload(
+      await callContribute({ contribution: knowledge("Knowledge policy version 1") }),
+    );
+    const contributionId = created.contribution?.contributionId as string;
+    const deniedVersionBase = knowledge("Knowledge policy version 2");
+    const deniedVersion = {
+      ...deniedVersionBase,
+      licensing: { ...deniedVersionBase.licensing, dataPermission: "not-authorized" },
+    };
+    const rejectedVersion = await payload(
+      await callContribute({
+        contributionId,
+        expectedPreviousVersion: 1,
+        contribution: deniedVersion,
+      }),
+    );
+    expect(rejectedVersion.error?.code).toBe("invalid_content");
+    expect(rejectedVersion.error?.details?.errors).toContain(
+      "licensing.dataPermission: declaration combination is not permitted by platform policy",
+    );
+
+    const missingPolicy = await payload(
+      await callContribute(
+        { contribution: knowledge("Missing Knowledge permission policy") },
+        token,
+        { KNOWLEDGE_PERMISSION_POLICY_JSON: undefined },
+      ),
+    );
+    expect(missingPolicy.error?.code).toBe("knowledge_permission_policy_unavailable");
+
+    const override = await payload(
+      await callContribute({
+        contribution: {
+          ...knowledge("Knowledge policy override"),
+          knowledgePermissionPolicy: { permittedCombinations: [] },
+        },
+      }),
+    );
+    expect(override.error?.code).toBe("platform_field_rejected");
+    expect(override.error?.details?.errors).toContain(
+      "knowledgePermissionPolicy: platform-managed field cannot be set",
+    );
+  });
+
   it("requires the original operator for versioning and keeps allow-list defaults off", async () => {
     const initial = await payload(await callContribute({ contribution: knowledge() }));
     const contributionId = initial.contribution?.contributionId as string;
@@ -328,6 +398,7 @@ describe("worker contribute endpoint", () => {
       "consumerCount",
       "platformState",
       "executionDomainPolicy",
+      "knowledgePermissionPolicy",
     ];
     for (const field of platformFields) {
       const response = await callContribute({

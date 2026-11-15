@@ -97,7 +97,7 @@ async function create(input: Record<string, unknown>): Promise<string> {
 }
 
 const base = {
-  evidence: [{ kind: "documentation", uri: "https://example.com/docs" }],
+  evidence: [{ kind: "documentation", uri: "https://httpbin.org/docs" }],
   licensing: { license: "CC-BY-4.0", dataPermission: "redistribution-allowed" },
   reviewIntervalDays: 30,
   asOf: "2026-11-10T10:00:00Z",
@@ -113,7 +113,7 @@ function knowledge(title: string, related: unknown[] = []): Record<string, unkno
     facts: [{ subject: "quokka-gateway", predicate: "burstQuota", value: title }],
     sources: [
       {
-        uri: "https://example.com/src",
+        uri: "https://httpbin.org/src",
         accessedAt: "2026-11-10T10:00:00Z",
         hash: { algorithm: "sha256", digest: "b".repeat(64) },
       },

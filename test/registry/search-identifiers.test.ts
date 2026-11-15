@@ -119,13 +119,13 @@ describe("indexed identifier search", () => {
       summary: "Reply contract.",
       facts: [{ subject: "quokka", predicate: "successStatus", value: 200 }],
       records: [{ responseFields: "id" }],
-      evidence: [{ kind: "documentation", uri: "https://example.com/docs" }],
+      evidence: [{ kind: "documentation", uri: "https://httpbin.org/docs" }],
       licensing: { license: "CC-BY-4.0", dataPermission: "redistribution-allowed" },
       reviewIntervalDays: 30,
       asOf: "2026-11-10T10:00:00Z",
       sources: [
         {
-          uri: "https://example.com/src",
+          uri: "https://httpbin.org/src",
           accessedAt: "2026-11-10T10:00:00Z",
           hash: { algorithm: "sha256", digest: "b".repeat(64) },
         },

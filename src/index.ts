@@ -5,11 +5,7 @@ import { budgetDiscoveryResponse } from "./registry/discovery-budget";
 import { ContributionRetriever } from "./registry/retrieval";
 import type { ConditionalRetrievalResponse } from "./registry/retrieval-conditional";
 import type { RetrievalResponse } from "./registry/retrieval-response";
-import {
-  ContributionRegistry,
-  type CreationErrorCode,
-  type VersionErrorCode,
-} from "./registry/creation";
+import { ContributionRegistry, type CreationError, type VersionError } from "./registry/creation";
 import { FeedbackRegistry } from "./registry/feedback";
 import { RateLimitService, DEFAULT_RATE_LIMITS } from "./rate-limit";
 
@@ -17,6 +13,7 @@ interface WorkerEnv {
   readonly DB?: D1Database;
   readonly CONTENT_BUCKET?: R2Bucket;
   readonly EXECUTION_DOMAIN_POLICY_JSON?: string;
+  readonly KNOWLEDGE_PERMISSION_POLICY_JSON?: string;
   readonly NOW?: () => Date;
   readonly RATE_LIMIT_AGENT_LIMIT?: number | string;
   readonly RATE_LIMIT_OPERATOR_LIMIT?: number | string;
@@ -434,14 +431,16 @@ const CONTRIBUTION_PLATFORM_FIELDS = new Set([
   "updatedAt",
   "timestamp",
   "executionDomainPolicy",
+  "knowledgePermissionPolicy",
 ]);
 
-function hasReservedContributionFields(record: Record<string, unknown>): boolean {
-  return Object.keys(record).some((field) => CONTRIBUTION_PLATFORM_FIELDS.has(field));
+function reservedContributionFields(record: Record<string, unknown>): string[] {
+  return Object.keys(record).filter((field) => CONTRIBUTION_PLATFORM_FIELDS.has(field));
 }
 
-function mapContributionError(code: CreationErrorCode | VersionErrorCode): Response {
-  switch (code) {
+function mapContributionError(error: CreationError | VersionError): Response {
+  const details = error.errors === undefined ? undefined : { errors: error.errors };
+  switch (error.code) {
     case "operator_not_allow_listed":
       return httpError(
         403,
@@ -453,6 +452,14 @@ function mapContributionError(code: CreationErrorCode | VersionErrorCode): Respo
         503,
         "execution_domain_policy_unavailable",
         "Execution target policy is unavailable.",
+        details,
+      );
+    case "knowledge_permission_policy_unavailable":
+      return httpError(
+        503,
+        "knowledge_permission_policy_unavailable",
+        "Knowledge permission policy is unavailable.",
+        details,
       );
     case "actor_not_found":
     case "actor_inactive":
@@ -475,18 +482,20 @@ function mapContributionError(code: CreationErrorCode | VersionErrorCode): Respo
     case "duplicate_content":
       return httpError(409, "duplicate_content", "Identical contribution content already exists.");
     case "invalid_content":
-      return httpError(422, "invalid_content", "Contribution content failed validation.");
+      return httpError(422, "invalid_content", "Contribution content failed validation.", details);
     case "platform_field_rejected":
       return httpError(
         422,
         "platform_field_rejected",
         "Platform-managed fields cannot be submitted.",
+        details,
       );
     case "unresolved_reference":
       return httpError(
         422,
         "unresolved_reference",
         "One or more exact contribution references do not resolve.",
+        details,
       );
     case "family_mismatch":
       return httpError(422, "family_mismatch", "A contribution version cannot change family.");
@@ -512,7 +521,7 @@ async function handleContribute(request: Request, env: WorkerEnv): Promise<Respo
     }
 
     const record = body as Record<string, unknown>;
-    if (hasReservedContributionFields(record)) {
+    if (reservedContributionFields(record).length > 0) {
       return httpError(
         400,
         "invalid_request",
@@ -552,11 +561,15 @@ async function handleContribute(request: Request, env: WorkerEnv): Promise<Respo
       return httpError(400, "invalid_request", "contribution must be an object.");
     }
     const input = contribution as Record<string, unknown>;
-    if (hasReservedContributionFields(input)) {
+    const reservedFields = reservedContributionFields(input);
+    if (reservedFields.length > 0) {
       return httpError(
         422,
         "platform_field_rejected",
         "Platform-managed fields cannot be submitted.",
+        {
+          errors: reservedFields.map((field) => `${field}: platform-managed field cannot be set`),
+        },
       );
     }
 
@@ -564,6 +577,7 @@ async function handleContribute(request: Request, env: WorkerEnv): Promise<Respo
       DB: env.DB,
       CONTENT_BUCKET: env.CONTENT_BUCKET,
       EXECUTION_DOMAIN_POLICY_JSON: env.EXECUTION_DOMAIN_POLICY_JSON,
+      KNOWLEDGE_PERMISSION_POLICY_JSON: env.KNOWLEDGE_PERMISSION_POLICY_JSON,
     });
     const result = isVersion
       ? await registry.createContributionVersion(
@@ -573,7 +587,7 @@ async function handleContribute(request: Request, env: WorkerEnv): Promise<Respo
           input,
         )
       : await registry.createContribution(authorization.actor.agentId, input);
-    if (!result.ok) return mapContributionError(result.error.code);
+    if (!result.ok) return mapContributionError(result.error);
 
     const created = result.contribution;
     return Response.json({

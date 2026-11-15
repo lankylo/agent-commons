@@ -13,6 +13,7 @@ import { PLATFORM_ONLY_FIELDS, type ContributionEnvelopeInput } from "./envelope
 import { checkReviewInterval } from "./review-intervals";
 import { checkContributionRefs } from "./references";
 import { Checker, ISO_UTC, isObj, type Obj } from "./check";
+import { canonicalPublicHostname as canonicalHostname, HOSTNAME } from "./hostname";
 import type { Schema } from "@cfworker/json-schema";
 import {
   COMMON_CONTRIBUTION_REQUIRED,
@@ -205,8 +206,6 @@ const STEP_KEYS: Record<StepType, readonly string[]> = {
 const NAME = /^[a-zA-Z][a-zA-Z0-9_]{0,63}$/;
 const STEP_ID = /^[a-z][a-z0-9_]{0,31}$/;
 const SLUG = /^[a-z0-9][a-z0-9._-]{0,63}$/;
-const HOSTNAME =
-  /^(?=.{1,254}$)(?:[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?\.)+[A-Za-z](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?\.?$/;
 /** Absolute path; no empty segments ("//") and no dot segments. */
 const PATH = /^(?!.*\/\/)(?!.*\/\.\.?(?:\/|$))\/[A-Za-z0-9._~\-/]*$/;
 const POINTER = /^(?:\/[A-Za-z0-9_-]{1,64}){1,10}$/;
@@ -562,67 +561,6 @@ class ExecutionChecker extends Checker {
 
 function int(v: unknown, min: number, max: number): v is number {
   return typeof v === "number" && Number.isInteger(v) && v >= min && v <= max;
-}
-
-// Static snapshot of the IANA registry, last updated 2026-05-22. The registry
-// applies special use to each listed name and its subdomains; no DNS lookups
-// are performed. Source: https://www.iana.org/assignments/special-use-domain-names/
-const IANA_SPECIAL_USE_DOMAINS = [
-  "alt",
-  "6tisch.arpa",
-  "eap.arpa",
-  "eap-noob.arpa",
-  "home.arpa",
-  "10.in-addr.arpa",
-  "254.169.in-addr.arpa",
-  "16.172.in-addr.arpa",
-  "17.172.in-addr.arpa",
-  "18.172.in-addr.arpa",
-  "19.172.in-addr.arpa",
-  "20.172.in-addr.arpa",
-  "21.172.in-addr.arpa",
-  "22.172.in-addr.arpa",
-  "23.172.in-addr.arpa",
-  "24.172.in-addr.arpa",
-  "25.172.in-addr.arpa",
-  "26.172.in-addr.arpa",
-  "27.172.in-addr.arpa",
-  "28.172.in-addr.arpa",
-  "29.172.in-addr.arpa",
-  "30.172.in-addr.arpa",
-  "31.172.in-addr.arpa",
-  "170.0.0.192.in-addr.arpa",
-  "171.0.0.192.in-addr.arpa",
-  "168.192.in-addr.arpa",
-  "8.e.f.ip6.arpa",
-  "9.e.f.ip6.arpa",
-  "a.e.f.ip6.arpa",
-  "b.e.f.ip6.arpa",
-  "ipv4only.arpa",
-  "resolver.arpa",
-  "service.arpa",
-  "example",
-  "example.com",
-  "example.net",
-  "example.org",
-  "invalid",
-  "local",
-  "localhost",
-  "onion",
-  "test",
-] as const;
-
-function canonicalHostname(value: unknown): string | undefined {
-  if (typeof value !== "string" || !HOSTNAME.test(value)) return undefined;
-  const hostname = value.toLowerCase().replace(/\.$/, "");
-  if (
-    IANA_SPECIAL_USE_DOMAINS.some(
-      (domain) => hostname === domain || hostname.endsWith(`.${domain}`),
-    )
-  ) {
-    return undefined;
-  }
-  return hostname;
 }
 
 export type ExecutionDomainPolicyParseResult =
