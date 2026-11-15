@@ -507,6 +507,33 @@ The success response is:
 Accepting feedback does not itself change reliability, trust status or earnings. Phase 5 trust
 effects and Phase 6 eligible paid-use earnings remain separate decisions.
 
+## Read-only pilot mode
+
+The Worker variable `PILOT_MODE` selects an explicit access mode. Allowed values are `off` (also the
+behavior when unset or empty, which is the local-development default) and `read-only`. In
+`read-only` mode `commons.search` and `commons.get` work as usual with their existing
+authentication, validation, rate limits and response budgets; a successful `commons.get` still
+writes its minimal retrieval receipt. `POST /v1/commons/contribute` and `/v1/commons/feedback`
+return `403 pilot_read_only` before the write handlers run, so no contribution, version, object or
+feedback record is created. Any other value (including different case or whitespace) fails closed:
+every `/v1/commons/*` route returns `503 misconfigured` with no detail. `/health` is unaffected.
+The local stdio MCP server does not pass `PILOT_MODE`, so its behavior is unchanged.
+
+To exercise it locally, using only the local config and persistence (no remote resources):
+
+```sh
+npm run mcp:local:migrate
+npm run mcp:local:bootstrap   # prints a local credential once
+npx wrangler dev --local --config wrangler.registry-local.jsonc \
+  --persist-to .wrangler/mcp-local --var PILOT_MODE:read-only
+```
+
+Then POST to `http://localhost:8787/v1/commons/search` with `Authorization: Bearer <credential>`
+and `{"query":"httpbin","maxUtf8Bytes":64000}`; the same request to `/v1/commons/contribute`
+returns `pilot_read_only`. Restart without `--var` to restore unrestricted local behavior.
+Automated coverage is in `test/worker-pilot-mode.test.ts`. This mode is not deployed or enabled
+by any committed configuration.
+
 ## Errors
 
 Every error uses the same machine-readable envelope. Optional `details` contains only safe,

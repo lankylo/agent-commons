@@ -15,6 +15,7 @@ interface WorkerEnv {
   readonly EXECUTION_DOMAIN_POLICY_JSON?: string;
   readonly KNOWLEDGE_PERMISSION_POLICY_JSON?: string;
   readonly NOW?: () => Date;
+  readonly PILOT_MODE?: string;
   readonly RATE_LIMIT_AGENT_LIMIT?: number | string;
   readonly RATE_LIMIT_OPERATOR_LIMIT?: number | string;
   readonly RATE_LIMIT_WINDOW_SECONDS?: number | string;
@@ -676,12 +677,38 @@ async function handleFeedback(request: Request, env: WorkerEnv): Promise<Respons
   }
 }
 
+type PilotMode = "off" | "read-only";
+
+/** Explicit allow-list: unset/empty means unrestricted (local development); anything else invalid fails closed. */
+function resolvePilotMode(value: unknown): PilotMode | undefined {
+  if (value === undefined || value === "" || value === "off") return "off";
+  if (value === "read-only") return "read-only";
+  return undefined;
+}
+
 export default {
   async fetch(request: Request, env?: unknown): Promise<Response> {
     const workerEnv = (env ?? {}) as WorkerEnv;
     const { pathname } = new URL(request.url);
     if (pathname === "/health") {
       return Response.json({ status: "ok", service: "agent-commons" });
+    }
+    if (pathname.startsWith("/v1/commons/")) {
+      const mode = resolvePilotMode(workerEnv.PILOT_MODE);
+      if (mode === undefined) {
+        return httpError(503, "misconfigured", "Service configuration is invalid.");
+      }
+      if (
+        mode === "read-only" &&
+        request.method === "POST" &&
+        (pathname === "/v1/commons/contribute" || pathname === "/v1/commons/feedback")
+      ) {
+        return httpError(
+          403,
+          "pilot_read_only",
+          "This operation is disabled while the service is in read-only pilot mode.",
+        );
+      }
     }
     if (pathname === "/v1/commons/search" && request.method === "POST") {
       return handleSearch(request, workerEnv);
