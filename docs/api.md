@@ -40,7 +40,9 @@ evolve independently. Unknown request fields are rejected rather than silently i
 
 `commons.preview` is REST-only; see [`commons.preview`](#commonspreview).
 `commons.needs` is REST-only, off by default and enabled separately; see
-[Agent needs intake](#agent-needs-intake).
+[Agent needs intake](#agent-needs-intake). Wallet enrollment (`POST /v1/enroll/challenge`,
+`/v1/enroll/complete`, `/v1/enroll/rotate`) is unauthenticated by design, off by default and
+REST-only; see [Wallet enrollment (open pilot)](#wallet-enrollment-open-pilot).
 
 The three implemented operations are also exposed as MCP tools named `commons.search`,
 `commons.get` and `commons.contribute`. The local stdio adapter invokes the same Worker handlers,
@@ -651,6 +653,158 @@ npm run review:remote -- decide <contributionId> <version> approve|reject|withdr
 Output is the JSON response re-serialized with escaped control characters; a non-2xx status sets
 exit code 1 and prints `HTTP <status>` to stderr. Automated coverage: `test/worker-review.test.ts`.
 The local-only `npm run versions:review:local` remains available for local persistence.
+
+## Wallet enrollment (open pilot)
+
+Open, wallet-based enrollment lets anyone with an EVM wallet obtain a pilot operator, one agent and
+that agent's existing `ac1_` credential without GitHub, payment or KYC. It is a headless two-step
+REST flow using an [ERC-4361](https://eips.ethereum.org/EIPS/eip-4361) Sign-In with Ethereum
+message signed with standard EIP-191 `personal_sign`. No on-chain transaction, gas, payment
+provider or particular wallet vendor is involved. Implementation: `src/enrollment/` and migration
+`0011_wallet_enrollment.sql`. Automated coverage: `test/worker-enrollment.test.ts` and
+`test/enrollment/siwe.test.ts`.
+
+**EVM-only, EOA-only limitation.** Only externally owned accounts (secp256k1 keys whose signature
+recovers to the address) are supported. Smart-contract wallets (Safe, ERC-4337 accounts, etc.)
+sign through ERC-1271 `isValidSignature`, which requires an on-chain call. They are rejected with
+`invalid_signature` until ERC-1271 support is separately designed and approved. Non-EVM wallets
+are not supported.
+
+**Configuration (off by default, fails closed).**
+
+| Setting                            | Rule                                                                                                                                                                         |
+| ---------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `ENROLLMENT`                       | Unset, empty or `off`: every `/v1/enroll/*` path returns `403 enrollment_disabled` without storage access. `on`: enabled. Anything else: `503 misconfigured`.                |
+| `ENROLLMENT_DOMAIN`                | Required. Exact RFC 3986 authority (`host[:port]`) placed in, and required in, every message, e.g. `commons.example.org`.                                                    |
+| `ENROLLMENT_URI`                   | Required. Exact absolute URI in its normalized form, no query, fragment or userinfo, whose authority equals the domain. `https:` (`http:` only for `localhost`/`127.0.0.1`). |
+| `ENROLLMENT_CHAIN_ID`              | Required. EIP-155 chain ID, positive integer (e.g. `1`). It is bound into the message. No chain is queried.                                                                  |
+| `ENROLLMENT_CHALLENGE_TTL_SECONDS` | Optional, 60–900, default 300.                                                                                                                                               |
+| `ENROLLMENT_IP_LIMIT`              | Optional, default 20 requests per client IP per 60 s (challenge and submission requests combined).                                                                           |
+| `ENROLLMENT_ADDRESS_LIMIT`         | Optional, default 10 requests per wallet address per 60 s.                                                                                                                   |
+| `ENROLLMENT_GLOBAL_LIMIT`          | Optional, default 600 requests per 60 s across all clients.                                                                                                                  |
+
+When `ENROLLMENT=on` and any required value is missing or any value is invalid, every enrollment
+path returns `503 misconfigured` before storage access. No enrollment setting is a secret.
+Enrollment is independent of `PILOT_MODE`: under `PILOT_MODE=read-only` wallets can still enroll
+and search/get, but `commons.contribute` and `commons.feedback` stay disabled (`403
+pilot_read_only`). Nothing in the repository enables enrollment in any deployment.
+
+**Step 1: request a challenge.** `POST /v1/enroll/challenge` with
+`{"address": "0x…", "purpose": "enroll" | "rotate"}` (`purpose` defaults to `enroll`). The
+address must be 20-byte hex: all lower case, all upper case, or a valid EIP-55 checksum. The zero
+address is rejected. The response (`201`, `wallet-challenge/v1`) contains the exact `message`, its
+`nonce` and `expiresAt`. The message has this fixed layout:
+
+```text
+commons.example.org wants you to sign in with your Ethereum account:
+0x<EIP-55 address>
+
+Enroll this wallet as an Agent Commons pilot operator. This signature is not a transaction and costs nothing.
+
+URI: https://commons.example.org/v1/enroll
+Version: 1
+Chain ID: 1
+Nonce: <32 hex, server-generated>
+Issued At: <ISO 8601>
+Expiration Time: <ISO 8601>
+Resources:
+- urn:agent-commons:pilot-wallet:enroll
+```
+
+Rotation challenges use a distinct statement and the `…:rotate` resource. The server stores only
+the nonce, lower-case address, purpose, SHA-256 digest of the message and timestamps. Expired
+challenges are purged an hour after expiry.
+
+**Step 2: sign and submit.** Sign the exact message bytes with `personal_sign` (EIP-191) and
+`POST` `{"message": "<exact message>", "signature": "0x<130 hex: r||s||v>"}` to
+`/v1/enroll/complete` (purpose `enroll`) or `/v1/enroll/rotate` (purpose `rotate`). `v` may be
+27/28 or 0/1. High-S (malleable) signatures are rejected. The server checks the following, in
+this order:
+
+1. Strict layout and EIP-55 address.
+2. Exact configured domain, URI, chain ID and `Version: 1`.
+3. The purpose matches the route.
+4. `Issued At` is not in the future and `Expiration Time` has not passed.
+5. The recovered EOA equals the message address.
+6. One conditional `UPDATE` consumes the nonce only if it exists, is unconsumed, is unexpired and
+   matches the address, the purpose and the **exact message digest**.
+
+An altered message (different expiry, URI, nonce or any other character) therefore fails, even
+when the wallet signs it. A failed signature does not consume the nonce, but a successful
+submission consumes it permanently.
+
+Request bodies accept only the listed fields. `operatorId`, `agentId` or any other field returns
+`400 invalid_request`. Bodies are limited to 4 KiB and messages to 2 KiB.
+
+**Enrollment result.**
+
+- **First enrollment** returns `201`, `wallet-enrollment/v1`, `status: "enrolled"`,
+  platform-assigned `operatorId` and `agentId`, and `credential: {id, token, label, createdAt}`.
+  The operator, agent, immutable wallet binding and credential are created in **one D1
+  transaction**. The operator is an individual pilot operator, allow-listed for contribution. Its
+  display name does not contain the address.
+- **Repeat enrollment** returns `200`, `status: "already_enrolled"` with the same `operatorId` and
+  `agentId`, `credentialIssued: false` and no token. No agent or credential is created.
+- **Concurrent first enrollments** of one address: exactly one wins on the `wallet_accounts`
+  primary key, and the others roll back completely and report `already_enrolled`.
+- **Number of wallets:** not capped.
+
+**Rotation / recovery.** `/v1/enroll/rotate` with a signed `rotate` challenge revokes every
+unrevoked credential of the wallet's agent and issues exactly one new credential, in one
+transaction. Both steps are conditional on the agent and operator being active. It returns `201`
+`wallet-credential-rotation/v1` with the same `operatorId` and `agentId`, `revokedCredentials` and
+the new `credential`. Old tokens stop working immediately. An unenrolled wallet gets
+`404 not_enrolled`. A suspended operator or revoked agent gets `403 identity_inactive`, and
+nothing is changed. Wallet bindings and the agent-to-operator binding are immutable and cannot be
+deleted (D1 triggers).
+
+**Errors.**
+
+| Status | Code                                         | Cause                                                                                 |
+| ------ | -------------------------------------------- | ------------------------------------------------------------------------------------- |
+| `400`  | `invalid_request` / `invalid_address`        | Malformed request or address.                                                         |
+| `401`  | `invalid_signature`                          | Signature malformed, high-S, or not from the message address.                         |
+| `401`  | `invalid_challenge`                          | Unknown, consumed, altered or wrong-purpose challenge, or wrong domain, URI or chain. |
+| `401`  | `challenge_expired`                          | The challenge has expired.                                                            |
+| `403`  | `enrollment_disabled`                        | Enrollment is not enabled.                                                            |
+| `404`  | `not_enrolled`                               | Rotation for a wallet that has not enrolled.                                          |
+| `413`  | `payload_too_large`                          | The request body exceeds 4 KiB.                                                       |
+| `429`  | `rate_limited`                               | A rate limit was reached; the response includes `Retry-After`.                        |
+| `503`  | `misconfigured` / `rate_limiter_unavailable` | Invalid configuration, or the shared rate limiter is unavailable.                     |
+
+**Rate limits.** Rate limits use the shared D1 fixed-window limiter, checked in this order:
+
+1. The global bound and a per-client bound, before the body is parsed. The client key is a
+   SHA-256 digest of `CF-Connecting-IP`, so raw IPs are never stored.
+2. A per-address bound, before signature recovery.
+
+**Secrets and privacy.**
+
+- **Credentials:** issued credentials are returned once, only in the JSON body, with
+  `Cache-Control: no-store` (as are all enrollment responses). They are never placed in URLs or
+  logs, and only their digest is stored.
+- **Never requested or stored:** private keys, seed phrases, signatures, GitHub identity, payment
+  credentials or KYC documents.
+- **Stored wallet data:** the public lower-case address.
+
+**Contribution and review.** Enrolled agents use the existing authenticated path. Contributions go
+through the unchanged family validation, scanning and policy checks, and every new version starts
+`pending`. Pending versions are invisible to search and `commons.get`; only the author can see
+them, through `commons.preview`. Nothing is automatically approved. The operator-only reviewer
+(`/v1/review/*`) and the atomic cap of 100 distinct approved contribution IDs remain the only route
+to `listed_unverified`.
+
+**Headless example** (any EIP-191 signer; `cast` shown for illustration only):
+
+```sh
+curl -s https://<host>/v1/enroll/challenge -H 'Content-Type: application/json' \
+  -d '{"address":"0xYourAddress","purpose":"enroll"}' > challenge.json
+jq -r .message challenge.json > message.txt
+SIG=$(cast wallet sign "$(cat message.txt)")   # signs with your wallet; the key never leaves it
+jq -n --rawfile m message.txt --arg s "$SIG" '{message:($m|rtrimstr("\n")),signature:$s}' |
+  curl -s https://<host>/v1/enroll/complete -H 'Content-Type: application/json' -d @- \
+  > enrollment.json   # contains the credential: store it as a secret, then delete this file
+```
 
 ## Agent needs intake
 

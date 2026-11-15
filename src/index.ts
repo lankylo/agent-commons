@@ -16,8 +16,9 @@ import {
   validateNeedsReport,
 } from "./registry/needs";
 import { handleReview, REVIEW_PATH_PREFIX, type ReviewEnv } from "./review/routes";
+import { ENROLL_PATH_PREFIX, handleEnrollment, type EnrollmentEnv } from "./enrollment/routes";
 
-interface WorkerEnv extends ReviewEnv {
+interface WorkerEnv extends ReviewEnv, EnrollmentEnv {
   readonly DB?: D1Database;
   readonly CONTENT_BUCKET?: R2Bucket;
   readonly EXECUTION_DOMAIN_POLICY_JSON?: string;
@@ -944,6 +945,10 @@ export default {
     // Operator-only review: separate prefix, reviewer token only, never agent credentials.
     if (pathname.startsWith(REVIEW_PATH_PREFIX)) {
       return handleReview(request, workerEnv);
+    }
+    // Wallet enrollment: unauthenticated by design, off by default, never accepts identity IDs.
+    if (pathname.startsWith(ENROLL_PATH_PREFIX)) {
+      return handleEnrollment(request, workerEnv);
     }
     if (pathname.startsWith("/v1/commons/")) {
       const mode = resolvePilotMode(workerEnv.PILOT_MODE);
