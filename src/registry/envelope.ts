@@ -75,6 +75,7 @@ export const PLATFORM_ONLY_FIELDS = [
   "reliabilityScore",
   "consumerCount",
   "executionDomainPolicy",
+  "knowledgePermissionPolicy",
 ] as const;
 
 /** Returns platform-only keys present in untrusted submitted data. */

@@ -6,6 +6,7 @@
   "compatibility_date": "2025-01-01",
   "vars": {
     "EXECUTION_DOMAIN_POLICY_JSON": "{\"allowed\":[{\"domain\":\"httpbin.org\",\"includeSubdomains\":true},{\"domain\":\"acme.com\",\"includeSubdomains\":true},{\"domain\":\"api.github.com\",\"includeSubdomains\":false}],\"denied\":[\"blocked.acme.com\"]}",
+    "KNOWLEDGE_PERMISSION_POLICY_JSON": "{\"permittedCombinations\":[{\"sourceLicense\":\"ISC\",\"permittedUse\":\"redistribute\",\"dataPermission\":\"redistribution-allowed\"},{\"sourceLicense\":\"CC-BY-4.0\",\"permittedUse\":\"reference-only\",\"dataPermission\":\"redistribution-allowed\"},{\"sourceLicense\":\"CC-BY-4.0\",\"permittedUse\":\"summary\",\"dataPermission\":\"redistribution-allowed\"},{\"sourceLicense\":\"CC-BY-4.0\",\"permittedUse\":\"redistribute\",\"dataPermission\":\"redistribution-allowed\"}]}",
   },
   "d1_databases": [
     {

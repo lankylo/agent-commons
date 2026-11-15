@@ -5,7 +5,7 @@ import worker from "../index";
 const contributionInput = z
   .record(z.string(), z.unknown())
   .describe(
-    "A Knowledge contribution uses the existing family='knowledge' schema (facts/records/summary, sources, rights, verification and asOf). An Execution contribution uses family='execution' with objective, inputs, outputs, targetDomains, compatibility, declarative steps, safety, verification and asOf. Each is validated by its existing family-specific registry validator; Execution steps are never run here.",
+    "A Knowledge contribution uses family='knowledge' fields (facts/records/summary, sources, rights, verification and asOf); source and evidence URLs and declared permission combinations are checked against platform policy. These checks accept declarations as submitted and do not verify ownership or truth. An Execution contribution uses family='execution' with objective, inputs, outputs, targetDomains, compatibility, declarative steps, safety, verification and asOf. Execution steps are never run here.",
   );
 
 const searchInputSchema = z

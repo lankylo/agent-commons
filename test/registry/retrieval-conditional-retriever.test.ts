@@ -88,7 +88,7 @@ const knowledge = (): Record<string, unknown> => ({
   title: `${TITLE} knowledge ${++n}`,
   purpose: "Record documented rate limits",
   contentType: "api-reference",
-  evidence: [{ kind: "documentation", uri: `https://example.com/docs/limits/${n}` }],
+  evidence: [{ kind: "documentation", uri: `https://httpbin.org/docs/limits/${n}` }],
   licensing: { license: "CC-BY-4.0", dataPermission: "redistribution-allowed" },
   reviewIntervalDays: 30,
   facts: [
@@ -98,7 +98,7 @@ const knowledge = (): Record<string, unknown> => ({
   explanation: EXPLANATION,
   sources: [
     {
-      uri: "https://example.com/docs/limits",
+      uri: "https://httpbin.org/docs/limits",
       accessedAt: "2026-11-10T10:00:00Z",
       hash: { algorithm: "sha256", digest: "a".repeat(64) },
     },

@@ -78,7 +78,7 @@ const knowledge = (): Record<string, unknown> => ({
   title: `Example API rate limits ${++n}`,
   purpose: "Record documented rate limits",
   contentType: "api-reference",
-  evidence: [{ kind: "documentation", uri: "https://example.com/docs/limits" }],
+  evidence: [{ kind: "documentation", uri: "https://httpbin.org/docs/limits" }],
   licensing: { license: "CC-BY-4.0", dataPermission: "redistribution-allowed" },
   reviewIntervalDays: 30,
   facts: [
@@ -90,7 +90,7 @@ const knowledge = (): Record<string, unknown> => ({
   explanation: "Limits apply per API key.",
   sources: [
     {
-      uri: "https://example.com/docs/limits",
+      uri: "https://httpbin.org/docs/limits",
       accessedAt: "2026-11-10T10:00:00Z",
       sourceDate: "2026-10-01T00:00:00Z",
       hash: { algorithm: "sha256", digest: "a".repeat(64) },
@@ -198,6 +198,39 @@ const snapshot = async () =>
   Object.fromEntries(await Promise.all(TABLES.map(async (t) => [t, await count(t)])));
 
 describe("valid Knowledge creation", () => {
+  it("fails closed on missing policy and rejects unpermitted or contradictory declarations", async () => {
+    const before = await snapshot();
+    const missingPolicy = new ContributionRegistry({ DB: db, CONTENT_BUCKET: bucket });
+    const missing = await missingPolicy.createContribution(agent, knowledge());
+    expect(codeOf(missing)).toBe("knowledge_permission_policy_unavailable");
+
+    const invalidPolicy = new ContributionRegistry(
+      { ...proxy.env, KNOWLEDGE_PERMISSION_POLICY_JSON: "{" },
+      { now: () => FIXED },
+    );
+    const invalid = await invalidPolicy.createContribution(agent, knowledge());
+    expect(codeOf(invalid)).toBe("knowledge_permission_policy_unavailable");
+
+    const unsupported = knowledge();
+    (unsupported.licensing as Record<string, unknown>).dataPermission = "not-authorized";
+    const denied = await registry.createContribution(agent, unsupported);
+    expect(codeOf(denied)).toBe("invalid_content");
+    expect(!denied.ok && denied.error.errors).toEqual(
+      expect.arrayContaining([
+        "licensing.dataPermission: declaration combination is not permitted by platform policy",
+      ]),
+    );
+
+    const contradictory = knowledge();
+    (contradictory.licensing as Record<string, unknown>).license = "ISC";
+    const conflict = await registry.createContribution(agent, contradictory);
+    expect(codeOf(conflict)).toBe("invalid_content");
+    expect(!conflict.ok && conflict.error.errors).toContain(
+      "rights.sourceLicense: must match licensing.license",
+    );
+    expect(await snapshot()).toEqual(before);
+  });
+
   it("assigns platform fields and stores normalized rows", async () => {
     const input = knowledge();
     const c = must(await registry.createContribution(agent, input));
@@ -261,7 +294,7 @@ describe("valid Knowledge creation", () => {
       .all();
     expect(src.results).toEqual([
       {
-        uri: "https://example.com/docs/limits",
+        uri: "https://httpbin.org/docs/limits",
         hash_digest: "a".repeat(64),
         snapshot_ref: "snapshot-001",
       },
@@ -479,6 +512,11 @@ describe("rejections", () => {
         allowed: [{ domain: "blocked.acme.com", includeSubdomains: true }],
         denied: [],
       },
+      knowledgePermissionPolicy: {
+        permittedCombinations: [
+          { sourceLicense: "ISC", permittedUse: "redistribute", dataPermission: "allowed" },
+        ],
+      },
     };
     for (const [k, v] of Object.entries(fields)) {
       for (const base of [knowledge(), execution()]) {
@@ -545,7 +583,11 @@ describe("failure atomicity and R2-before-D1 ordering", () => {
       },
     });
     const broken = new ContributionRegistry(
-      { DB: failingDb, CONTENT_BUCKET: bucket },
+      {
+        ...proxy.env,
+        DB: failingDb,
+        CONTENT_BUCKET: bucket,
+      },
       { now: () => FIXED },
     );
     const input = knowledge();
@@ -575,7 +617,11 @@ describe("failure atomicity and R2-before-D1 ordering", () => {
       },
     });
     const broken = new ContributionRegistry(
-      { DB: db, CONTENT_BUCKET: brokenBucket },
+      {
+        ...proxy.env,
+        DB: db,
+        CONTENT_BUCKET: brokenBucket,
+      },
       { now: () => FIXED },
     );
     const before = await snapshot();

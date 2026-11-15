@@ -613,6 +613,29 @@ when a new contribution or version is written, not during integrity validation o
 immutable version. A later policy change therefore does not make an existing version corrupt or
 unreadable; any reclassification under a changed policy is a separate quality-state decision.
 
+### Knowledge source and declared-permission policy
+
+Knowledge creation and versioning require the platform-owned `KNOWLEDGE_PERMISSION_POLICY_JSON`
+configuration. It is not accepted from contribution payloads. The JSON object contains a non-empty
+`permittedCombinations` array; each entry explicitly names `sourceLicense`, `permittedUse`, and
+`dataPermission`. Each contributor declaration must match one complete combination exactly, and
+`rights.sourceLicense` must match `licensing.license`. Missing or invalid configuration fails closed.
+The local-only registry config includes CC-BY-4.0 test combinations and the owner-approved httpbin
+fixture combination (`ISC`, `redistribute`, `redistribution-allowed`); deployable `wrangler.jsonc`
+is intentionally unchanged.
+
+Every Knowledge `sources[].uri` and `evidence[].uri` must be an absolute HTTPS URL with a valid
+public DNS hostname. Embedded credentials, IP literals, malformed hostnames, and all names in the
+static IANA Special-Use Domain Names registry snapshot (including their subdomains) are rejected.
+These checks parse URL strings only; they do not perform DNS lookups, fetch sources, compare
+snapshots, or corroborate claims. The permission policy accepts declarations as stated and does not
+establish source ownership or independently verify those claims; source resolution, snapshot
+comparison, and corroboration remain separate Phase 5 work.
+
+Both URL and permission checks run in the shared registry write preparation path for REST and MCP.
+Mutable policy is not consulted when verifying an already stored immutable version. A later policy
+change that affects existing Knowledge contributions is a separate quality-state decision.
+
 ## Bootstrap for local MCP acceptance
 
 From the repository root, run:

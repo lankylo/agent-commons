@@ -95,6 +95,7 @@ function env(overrides: Record<string, unknown> = {}) {
     DB: db,
     CONTENT_BUCKET: proxy.env.CONTENT_BUCKET,
     EXECUTION_DOMAIN_POLICY_JSON: proxy.env.EXECUTION_DOMAIN_POLICY_JSON,
+    KNOWLEDGE_PERMISSION_POLICY_JSON: proxy.env.KNOWLEDGE_PERMISSION_POLICY_JSON,
     RATE_LIMIT_AGENT_LIMIT: 1000,
     RATE_LIMIT_OPERATOR_LIMIT: 1000,
     RATE_LIMIT_WINDOW_SECONDS: 60,
@@ -193,6 +194,36 @@ describe("local stdio MCP server", () => {
       expect(knowledgeMeta.version).toBe(1);
 
       const knowledgeId = knowledgeMeta.contributionId as string;
+      const deniedKnowledgeVersion = {
+        ...knowledge,
+        title: "MCP disallowed Knowledge permission combination",
+        licensing: { ...knowledge.licensing, dataPermission: "not-authorized" },
+      };
+      const deniedKnowledge = await callTool(connection.client, "commons.contribute", {
+        contributionId: knowledgeId,
+        expectedPreviousVersion: 1,
+        contribution: deniedKnowledgeVersion,
+      });
+      expect(deniedKnowledge.isError).toBe(true);
+      expect(errorCode(deniedKnowledge)).toBe("invalid_content");
+      expect(field(field(structured(deniedKnowledge), "error"), "details").errors).toContain(
+        "licensing.dataPermission: declaration combination is not permitted by platform policy",
+      );
+      const deniedKnowledgeUrl = await callTool(connection.client, "commons.contribute", {
+        contributionId: knowledgeId,
+        expectedPreviousVersion: 1,
+        contribution: {
+          ...knowledge,
+          title: "MCP special-use Knowledge source",
+          sources: [{ ...knowledge.sources[0], uri: "https://source.example.com/docs" }],
+        },
+      });
+      expect(deniedKnowledgeUrl.isError).toBe(true);
+      expect(errorCode(deniedKnowledgeUrl)).toBe("invalid_content");
+      expect(field(field(structured(deniedKnowledgeUrl), "error"), "details").errors).toContain(
+        "sources[0].uri: must not use an IANA Special-Use Domain Name or its subdomains",
+      );
+
       const execution = {
         ...HTTPBIN_EXECUTION_SEED,
         title: "MCP Execution httpbin response check",
@@ -404,6 +435,7 @@ describe("local stdio MCP server", () => {
         filters: { sideEffect: "execute-shell" },
         maxUtf8Bytes: 16_000,
       });
+
       expect(invalidSearch.isError).toBe(true);
       expect(errorCode(invalidSearch)).toBe("invalid_search_request");
 
@@ -437,6 +469,25 @@ describe("local stdio MCP server", () => {
         { invalidSearch, missingContribution, spoofedIdentity, invalidBudget, tooSmallBudget },
         token,
       );
+    } finally {
+      await connection.close();
+    }
+  });
+
+  it("fails closed when the Knowledge permission policy is missing through MCP", async () => {
+    const connection = await connectMcp(
+      token,
+      env({ KNOWLEDGE_PERMISSION_POLICY_JSON: undefined }),
+    );
+    try {
+      const rejected = await callTool(connection.client, "commons.contribute", {
+        contribution: {
+          ...HTTPBIN_KNOWLEDGE_SEED,
+          title: "MCP missing Knowledge policy",
+        },
+      });
+      expect(rejected.isError).toBe(true);
+      expect(errorCode(rejected)).toBe("knowledge_permission_policy_unavailable");
     } finally {
       await connection.close();
     }

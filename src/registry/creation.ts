@@ -34,6 +34,11 @@ import {
   type ExecutionDomainPolicy,
 } from "./execution";
 import { validateKnowledgeContribution, type KnowledgeContributionInput } from "./knowledge";
+import {
+  checkKnowledgePermissionPolicy,
+  parseKnowledgePermissionPolicy,
+  type KnowledgePermissionPolicy,
+} from "./knowledge-policy";
 import { resolveContributionRefs } from "./references";
 import { ContributionRetriever, type RetrieveResult } from "./retrieval";
 
@@ -42,6 +47,7 @@ export type CreationErrorCode =
   | "actor_inactive"
   | "operator_not_allow_listed"
   | "execution_domain_policy_unavailable"
+  | "knowledge_permission_policy_unavailable"
   | "platform_field_rejected"
   | "invalid_content"
   | "unresolved_reference"
@@ -106,6 +112,7 @@ export interface RegistryEnv {
   DB: D1Database;
   CONTENT_BUCKET: R2Bucket;
   EXECUTION_DOMAIN_POLICY_JSON?: string;
+  KNOWLEDGE_PERMISSION_POLICY_JSON?: string;
 }
 
 /** Platform-supplied sources, injectable for tests only. */
@@ -134,11 +141,13 @@ export class ContributionRegistry {
   private readonly bucket: R2Bucket;
   private readonly platform: RegistryPlatform;
   private readonly executionDomainPolicyJson: string | undefined;
+  private readonly knowledgePermissionPolicyJson: string | undefined;
 
   constructor(env: RegistryEnv, platform: Partial<RegistryPlatform> = {}) {
     this.db = env.DB;
     this.bucket = env.CONTENT_BUCKET;
     this.executionDomainPolicyJson = env.EXECUTION_DOMAIN_POLICY_JSON;
+    this.knowledgePermissionPolicyJson = env.KNOWLEDGE_PERMISSION_POLICY_JSON;
     this.platform = { ...defaultPlatform, ...platform };
   }
 
@@ -383,6 +392,7 @@ export class ContributionRegistry {
       });
     }
     let executionDomainPolicy: ExecutionDomainPolicy | undefined;
+    let knowledgePermissionPolicy: KnowledgePermissionPolicy | undefined;
     if (family === "execution") {
       const policy = parseExecutionDomainPolicy(this.executionDomainPolicyJson);
       if (!policy.ok) {
@@ -393,6 +403,17 @@ export class ContributionRegistry {
         });
       }
       executionDomainPolicy = policy.policy;
+    }
+    if (family === "knowledge") {
+      const policy = parseKnowledgePermissionPolicy(this.knowledgePermissionPolicyJson);
+      if (!policy.ok) {
+        return bad({
+          code: "knowledge_permission_policy_unavailable",
+          message: "Knowledge permission policy is missing or invalid.",
+          errors: policy.errors,
+        });
+      }
+      knowledgePermissionPolicy = policy.policy;
     }
 
     const validated =
@@ -422,6 +443,22 @@ export class ContributionRegistry {
         return bad({
           code: "invalid_content",
           message: "content failed platform Execution domain policy",
+          errors: policyErrors,
+        });
+      }
+    }
+    if (content.family === "knowledge") {
+      if (knowledgePermissionPolicy === undefined) {
+        return bad({
+          code: "knowledge_permission_policy_unavailable",
+          message: "Knowledge permission policy is missing or invalid.",
+        });
+      }
+      const policyErrors = checkKnowledgePermissionPolicy(content, knowledgePermissionPolicy);
+      if (policyErrors.length > 0) {
+        return bad({
+          code: "invalid_content",
+          message: "content failed platform Knowledge permission policy",
           errors: policyErrors,
         });
       }

@@ -64,13 +64,13 @@ afterAll(async () => {
 });
 
 const base = {
-  evidence: [{ kind: "documentation", uri: "https://example.com/docs" }],
+  evidence: [{ kind: "documentation", uri: "https://httpbin.org/docs" }],
   licensing: { license: "CC-BY-4.0", dataPermission: "redistribution-allowed" },
   reviewIntervalDays: 30,
   asOf: "2026-11-10T10:00:00Z",
 };
 const source = (n: number) => ({
-  uri: `https://example.com/src/${n}`,
+  uri: `https://httpbin.org/src/${n}`,
   accessedAt: "2026-11-10T10:00:00Z",
   hash: { algorithm: "sha256", digest: String(n % 10).repeat(64) },
 });
