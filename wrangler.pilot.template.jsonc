@@ -1,0 +1,35 @@
+{
+  // Template for the open unpaid pilot. NOT deployable as committed: every <...> value must be
+  // replaced in a git-ignored local copy (wrangler.pilot.local.jsonc). See docs/api.md,
+  // "Pilot deployment package". Do not put account IDs, hostnames or secrets in this file.
+  // The reviewer token is a Worker secret (`wrangler secret put REVIEWER_TOKEN`), never a var.
+  "name": "agent-commons-pilot",
+  "main": "src/index.ts",
+  "compatibility_date": "2025-01-01",
+  "preview_urls": false,
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "<D1_DATABASE_NAME>",
+      "database_id": "<D1_DATABASE_ID>",
+      "migrations_dir": "migrations",
+    },
+  ],
+  "r2_buckets": [
+    {
+      "binding": "CONTENT_BUCKET",
+      "bucket_name": "<R2_BUCKET_NAME>",
+    },
+  ],
+  "vars": {
+    // Initial deployment: contributions and feedback closed; enrollment, review, needs closed.
+    "PILOT_MODE": "read-only",
+    "ENROLLMENT": "off",
+    "REVIEW_INTERFACE": "off",
+    "NEEDS_INTAKE": "off",
+    // Required contribution policies. Deliberately unset: the Worker rejects every contribution
+    // without them. Fill with reviewed pilot decisions (JSON text); do not copy local test values.
+    "EXECUTION_DOMAIN_POLICY_JSON": "<REVIEWED_EXECUTION_DOMAIN_POLICY_JSON>",
+    "KNOWLEDGE_PERMISSION_POLICY_JSON": "<REVIEWED_KNOWLEDGE_PERMISSION_POLICY_JSON>",
+  },
+}

@@ -5,6 +5,7 @@
     "scripts/bootstrap-mcp-local.ts",
     "scripts/review-needs-local.ts",
     "scripts/review-versions-local.ts",
-    "scripts/review-remote.ts"
+    "scripts/review-remote.ts",
+    "scripts/pilot-preflight.ts"
   ]
 }
