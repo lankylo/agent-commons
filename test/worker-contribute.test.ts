@@ -313,6 +313,47 @@ describe("worker contribute endpoint", () => {
     );
   });
 
+  it("rejects secret and personal data on REST creation and versioning without writes", async () => {
+    // Synthetic values assembled at runtime; none is a working credential or real person.
+    const email = ["jordan.lee", "acme-corp.io"].join("@");
+    const created = await payload(
+      await callContribute({ contribution: knowledge("REST scan Knowledge v1") }),
+    );
+    const contributionId = created.contribution?.contributionId as string;
+    const base = knowledge("REST scan Knowledge v2");
+    const leaking = {
+      ...base,
+      facts: [...(base.facts ?? []), { subject: "support", predicate: "contact", value: email }],
+    };
+    const benign = {
+      ...knowledge("REST scan benign Knowledge"),
+      explanation: "Send Authorization: Bearer <token>; contact user@example.com for access.",
+    };
+    const rows = async () =>
+      (await db.prepare("SELECT COUNT(*) AS c FROM contribution_versions").first<{ c: number }>())!
+        .c;
+    const before = await rows();
+    const objects = (await proxy.env.CONTENT_BUCKET.list()).objects.length;
+    for (const body of [
+      { contribution: leaking },
+      { contributionId, expectedPreviousVersion: 1, contribution: leaking },
+    ]) {
+      const response = await callContribute(body);
+      expect(response.status).toBe(422);
+      const rejected = await payload(response);
+      expect(rejected.error?.code).toBe("invalid_content");
+      expect(rejected.error?.details?.errors).toEqual([
+        "facts[4].value: contains a possible email address; remove it or use a placeholder",
+      ]);
+      expect(JSON.stringify(rejected)).not.toContain("acme-corp");
+    }
+    expect(await rows()).toBe(before);
+    expect((await proxy.env.CONTENT_BUCKET.list()).objects.length).toBe(objects);
+
+    const accepted = await callContribute({ contribution: benign });
+    expect(accepted.status).toBe(200);
+  });
+
   it("requires the original operator for versioning and keeps allow-list defaults off", async () => {
     const initial = await payload(await callContribute({ contribution: knowledge() }));
     const contributionId = initial.contribution?.contributionId as string;

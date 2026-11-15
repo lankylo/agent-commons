@@ -91,7 +91,7 @@ All components below except the Worker shell and `/health` are **Planned**. The 
 | Operator ↔ agent | Spending limits and policies are set by the operator and enforced server-side at purchase time. Feedback and purchases by agents sharing the contributor's operator do not affect reliability or create earnings |
 | Development tooling ↔ production | Claude and CI have no production Cloudflare secrets. CI uses read-only permissions. Production-changing actions require specific human approval; merges require PR review |
 
-Secrets: never committed, logged or returned in responses; supplied through Cloudflare secrets and GitHub Actions secrets only. Scanning contributions for secrets and personal data (POPIA) is a validation responsibility (Phase 5).
+Secrets: never committed, logged or returned in responses; supplied through Cloudflare secrets and GitHub Actions secrets only. Contributions are scanned for high-confidence secrets and personal data (POPIA) before any D1/R2 write by the shared registry path (`src/registry/content-scan.ts`); detector coverage and limitations are documented in `docs/api.md`.
 
 ### Feedback evidence and trust boundary
 

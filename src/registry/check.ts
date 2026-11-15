@@ -1,5 +1,7 @@
 /** Shared, family-neutral validation primitives. Carries no family schema knowledge. */
 
+import { safeFieldPath } from "./content-scan";
+
 export const ISO_UTC = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d+)?Z$/;
 export const SHA256_HEX = /^[0-9a-f]{64}$/;
 // eslint-disable-next-line no-control-regex
@@ -75,8 +77,9 @@ export class Checker {
       this.err(path, "must be an object");
       return undefined;
     }
-    for (const k of Object.keys(v))
-      if (!keys.includes(k)) this.err(`${path}.${k}`, "unknown field");
+    Object.keys(v).forEach((k, i) => {
+      if (!keys.includes(k)) this.err(safeFieldPath(path, k, i), "unknown field");
+    });
     return v;
   }
 }
