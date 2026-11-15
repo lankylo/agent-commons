@@ -27,6 +27,9 @@
     "ENROLLMENT": "off",
     "REVIEW_INTERFACE": "off",
     "NEEDS_INTAKE": "off",
+    // Remote MCP at /mcp. Off. Enabling needs separate approval plus MCP_ALLOWED_HOSTNAMES
+    // (comma-separated public hostnames, set only in the git-ignored local copy).
+    "MCP_HTTP": "off",
     // Required contribution policies. Deliberately unset: the Worker rejects every contribution
     // without them. Fill with reviewed pilot decisions (JSON text); do not copy local test values.
     "EXECUTION_DOMAIN_POLICY_JSON": "<REVIEWED_EXECUTION_DOMAIN_POLICY_JSON>",

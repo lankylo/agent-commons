@@ -150,6 +150,7 @@ describe("pilot preflight", () => {
       { ENROLLMENT: "on" },
       { REVIEW_INTERFACE: "on" },
       { NEEDS_INTAKE: "on" },
+      { MCP_HTTP: "on", MCP_ALLOWED_HOSTNAMES: "commons.pilot-host.dev" },
     ]) {
       expect(run(config({ vars })).ok).toBe(false);
     }
@@ -163,6 +164,8 @@ describe("pilot preflight", () => {
       { ENROLLMENT: "true" },
       { REVIEW_INTERFACE: "ON" },
       { NEEDS_INTAKE: "" },
+      { MCP_HTTP: "" },
+      { MCP_HTTP: "ON" },
       { UNKNOWN_SETTING: "x" },
     ]) {
       expect(run(config({ vars })).ok, JSON.stringify(vars)).toBe(false);
@@ -183,6 +186,29 @@ describe("pilot preflight", () => {
     ];
     for (const v of bad) {
       expect(run(config({ vars: { ...OPEN, ...v } }), "pilot").ok, JSON.stringify(v)).toBe(false);
+    }
+  });
+
+  it("keeps remote MCP off in the template and validates its hostnames when enabled", () => {
+    expect(template).toMatch(/"MCP_HTTP": "off"/);
+    expect(template).not.toMatch(/MCP_ALLOWED_HOSTNAMES"\s*:/);
+    expect(run(config({ vars: { MCP_HTTP: undefined } })).ok).toBe(true);
+    expect(run(config({ vars: { MCP_HTTP: "off" } })).ok).toBe(true);
+    const mcp = { MCP_HTTP: "on", MCP_ALLOWED_HOSTNAMES: "commons.pilot-host.dev" };
+    expect(run(config({ vars: { ...OPEN, ...mcp } }), "pilot").ok).toBe(true);
+    for (const hosts of [
+      undefined,
+      "",
+      "https://commons.pilot-host.dev",
+      "commons.pilot-host.dev:443",
+      "*.pilot-host.dev",
+      "<MCP_HOSTNAME>",
+      "localhost",
+      "commons.example.com",
+      "commons.pilot-host.dev,commons.test",
+    ]) {
+      const vars = { ...OPEN, ...mcp, MCP_ALLOWED_HOSTNAMES: hosts };
+      expect(run(config({ vars }), "pilot").ok, String(hosts)).toBe(false);
     }
   });
 

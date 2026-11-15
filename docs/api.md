@@ -1,19 +1,20 @@
 # Versioned REST and MCP API Contract
 
-**Status:** Authenticated REST and local-only stdio MCP support `commons.search`, `commons.get`,
-`commons.contribute` and `commons.feedback`. Feedback stores family-validated reports as unverified
-input; it does not change trust or reliability. Broader external-agent validation remains open.
+**Status:** Authenticated REST and local stdio MCP support `commons.search`, `commons.get`,
+`commons.contribute` and `commons.feedback`. An opt-in Streamable HTTP MCP endpoint at `/mcp`
+implements the same four tools but is not enabled on the pilot Worker. Feedback remains unverified;
+broader external-agent validation remains open.
 
 ## Existing capabilities and gaps
 
 | Area              | Exists now                                                                                                                                                                                                                                                                                                                     | Not implemented                                                                                            |
 | ----------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ---------------------------------------------------------------------------------------------------------- |
-| Worker            | `src/index.ts` serves `/health` and authenticated `POST /v1/commons/search`, `/get`, `/contribute` and `/feedback`; unknown paths return 404.                                                                                                                                                                                  | Broader external-agent validation.                                                                         |
-| Agent credentials | `CredentialService` issues, verifies and revokes `ac1_<24 hex>_<64 hex>` credentials. All four operations verify Bearer credentials and resolve active `agentId` and `operatorId`. MCP reads the credential from `AGENT_COMMONS_CREDENTIAL` in its local process environment and forwards it only to the same Worker handlers. | Broader external-agent validation.                                                                         |
+| Worker            | `src/index.ts` serves `/health`, authenticated REST operations and opt-in `/mcp`; unknown paths return 404.                                                                                                                                                                                  | Broader external-agent validation.                                                                         |
+| Agent credentials | Enrolled agents use Bearer credentials for REST and opt-in remote MCP; local stdio reads `AGENT_COMMONS_CREDENTIAL` from its process environment. Identity is resolved by the existing credential service. | Broader external-agent validation. |
 | Search            | `ContributionSearch` provides deterministic, LLM-free D1 search with family-specific filters; the REST route returns budgeted discovery responses.                                                                                                                                                                             | Broader external-agent validation.                                                                         |
 | Retrieval         | `ContributionRetriever` verifies an exact contribution version against D1 and R2 before conditional comparison; get maps a public allow-list, enforces the full-response UTF-8 budget and persists the minimal authenticated-agent/exact-version receipt before returning a full response.                                     | No "latest" lookup exists. Conditional not-modified responses do not create receipts.                      |
 | Contribution      | `ContributionRegistry` validates Knowledge and Execution input, resolves exact references, creates immutable versions and checks the active agent/operator allow-list. `POST /v1/commons/contribute` passes only the authenticated agent ID and exposes allow-listed creation metadata.                                        | Broader external-agent validation; allow-listing remains platform-controlled and defaults off.             |
-| MCP               | Official TypeScript SDK v2 local stdio server exposes `commons.search`, `commons.get`, `commons.contribute` and `commons.feedback`. It adapts arguments to the existing Worker handlers, preserving their validation, authentication, rate limiting, budgets, response allow-lists and error envelopes.                        | No HTTP MCP transport, Worker MCP route or remote service; broader external-agent validation remains open. |
+| MCP | Official TypeScript SDK v2 serves four shared tools over local stdio and an opt-in Streamable HTTP `/mcp` route. Tool calls reuse the Worker REST handlers. | Remote endpoint is not deployed or externally accepted. |
 | Feedback          | Authenticated `POST /v1/commons/feedback` and MCP `commons.feedback` validate the stored version's Knowledge or Execution schema and persist one unverified active report per consumer operator/version/dimension. Exact-version retrieval receipt and contributor-operator exclusion are enforced.                            | No trusted-runner, report aggregation, or trust/reliability effect.                                        |
 
 Contributed content remains untrusted. Existing family validators are not a substitute for the
@@ -44,9 +45,9 @@ evolve independently. Unknown request fields are rejected rather than silently i
 `/v1/enroll/complete`, `/v1/enroll/rotate`) is unauthenticated by design, off by default and
 REST-only; see [Wallet enrollment (open pilot)](#wallet-enrollment-open-pilot).
 
-The three implemented operations are also exposed as MCP tools named `commons.search`,
-`commons.get` and `commons.contribute`. The local stdio adapter invokes the same Worker handlers,
-so request validation and domain behavior are not reimplemented. There is no MCP HTTP endpoint.
+The four operations are also exposed as MCP tools named `commons.search`, `commons.get`,
+`commons.contribute` and `commons.feedback`. Local stdio and the opt-in `/mcp` route invoke the
+same Worker handlers, so request validation and domain behavior are shared.
 
 ## Authentication and rate limiting
 
@@ -63,9 +64,9 @@ in request data. The search, get and contribute routes share the D1-backed limit
 `503 rate_limiter_unavailable` when it cannot decide. The platform may set
 `RATE_LIMIT_AGENT_LIMIT`, `RATE_LIMIT_OPERATOR_LIMIT` and `RATE_LIMIT_WINDOW_SECONDS`; the current
 defaults are 60 requests per agent and 300 per operator per 60 seconds. Return `429 rate_limited`
-and `Retry-After` when a limit is exceeded. No production bindings or deployment configuration
-are established by those local defaults. MCP uses the same Worker handlers and therefore the same
-shared D1 limits.
+and `Retry-After` when a limit is exceeded. The opt-in `/mcp` route authenticates and charges the shared D1 limiter once for every protocol
+request, including initialization and discovery. A tool call then enters the existing Worker
+handler without a second charge. The local stdio adapter uses the existing Worker handlers.
 
 ## Operation contracts
 
@@ -808,11 +809,12 @@ jq -n --rawfile m message.txt --arg s "$SIG" '{message:($m|rtrimstr("\n")),signa
 
 ## Pilot deployment package
 
-Runbook for the open, **unpaid** pilot on Cloudflare. PR #81 prepared this package and the
-deployment sequence below; the owner reports that live health and closed-state endpoint checks
-passed, but those checks have not been independently repeated here and do not validate wallet
-enrollment. Every provisioning or deployment step below is a manual operator action requiring its
-own approval. The committed template enables nothing. Implementation:
+Runbook for the open, **unpaid** pilot on Cloudflare. PR #81 prepared this package. The owner
+reports that the Worker is deployed, MetaMask enrollment succeeded, both httpbin contribution
+families were submitted, reviewed, searched and retrieved, and private capacity showed 2 used / 98
+remaining. These are owner-reported operational checks, not independent external-agent acceptance.
+The opt-in `/mcp` route has not been deployed or enabled. Every further deployment or setting
+change is a separate operator action. The committed template enables nothing. Implementation:
 `wrangler.pilot.template.jsonc`, `src/pilot/preflight.ts`, `scripts/pilot-preflight.ts`; coverage:
 `test/pilot/preflight.test.ts`.
 
@@ -842,7 +844,7 @@ npm run pilot:preflight -- wrangler.pilot.local.jsonc --phase pilot    # before 
 It fails on: missing or placeholder D1/R2 names, non-UUID or all-zero `database_id`, wrong binding
 names (`DB`, `CONTENT_BUCKET`), local/test bucket names, extra bindings or unknown top-level
 settings or variables, missing/placeholder/invalid/empty or local-fixture policies, missing or
-invalid `PILOT_MODE`/`ENROLLMENT`/`REVIEW_INTERFACE`/`NEEDS_INTAKE`, anything but the fully closed
+invalid `PILOT_MODE`/`ENROLLMENT`/`REVIEW_INTERFACE`/`NEEDS_INTAKE`/`MCP_HTTP`, invalid remote MCP hostnames when enabled, anything but the fully closed
 state in `initial`, invalid enrollment domain/URI/chain ID, `ENROLLMENT=on` without
 `REVIEW_INTERFACE=on` or `PILOT_MODE=off`, a missing/invalid `REVIEWER_ID`, secret-like variable
 names or values (reviewer-token shape, `ac1_` credentials, 32-byte hex keys, PEM keys, bearer
@@ -900,7 +902,8 @@ Do this only after separate approval, and only after step 7 passed. Edit
 "ENROLLMENT_CHAIN_ID": "1",       // EIP-155 chain bound into the message; no chain is queried
 "REVIEW_INTERFACE": "on",
 "REVIEWER_ID": "<reviewer-id>",
-"NEEDS_INTAKE": "on"              // optional; keep "off" to defer needs intake
+"NEEDS_INTAKE": "off",            // remote grouped review is not available yet
+"MCP_HTTP": "off"                 // enable separately after reviewing and deploying this PR
 ```
 
 ```sh
@@ -947,8 +950,9 @@ the reviewer to be on whenever enrollment is on or contributions are accepted.
    stored report. The Worker has no remote needs-review endpoint; grouped review exists only for
    local persistence (`npm run needs:review:local`), so remote reports are not yet reviewable.
 
-Record the outcome in `project.md` only after you have actually done this. Until then the pilot is
-**not deployed and not externally validated**.
+The owner reports that steps 1–5 succeeded for both content families with the deployed REST API;
+capacity showed 2 used / 98 remaining. Feedback, needs intake, and remote MCP external-agent
+acceptance have not been completed.
 
 ### Pause the pilot promptly
 
@@ -1103,11 +1107,11 @@ deferred shared persistent cache decision.
 
 | Phase 4 acceptance criterion                                                                                                             | Planned route/control                                                                       | Current status                                                                                                                                                                                                             |
 | ---------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| An external agent can discover and invoke Commons functionality.                                                                         | Versioned JSON REST routes and local stdio MCP tools.                                       | Met in the Codespaces Copilot MCP acceptance test for both families using the local allow-listed fixture agent; broader validation remains open.                                                                           |
-| All four operations work through defined interfaces, with family-aware search, retrieval, contribution and feedback.                     | `search`, `get`, `contribute`, `feedback`; Knowledge/Execution behavior above.              | REST routes and MCP tools are locally implemented; both stored families have focused feedback coverage.                                                                                                                    |
+| An external agent can discover and invoke Commons functionality.                                                                         | Versioned JSON REST routes, local stdio MCP, and an opt-in remote `/mcp` route.                                       | Met in the Codespaces Copilot MCP acceptance test for both families using the local allow-listed fixture agent; broader validation remains open.                                                                           |
+| All four operations work through defined interfaces, with family-aware search, retrieval, contribution and feedback.                     | `search`, `get`, `contribute`, `feedback`; Knowledge/Execution behavior above.              | REST routes and local/remote MCP tools are implemented; the remote route has SDK-client coverage but is not deployed. Both families have focused feedback coverage.                                                                                                                    |
 | Errors return actionable machine-readable information.                                                                                   | Shared error envelope and status/code table.                                                | All four operations return the documented safe error envelope.                                                                                                                                                             |
-| The agent does not require a graphical interface.                                                                                        | Headless JSON REST operations and local stdio MCP tools.                                    | Verified through authenticated Codespaces Copilot local stdio MCP discovery and calls for both families.                                                                                                                   |
-| Requests are authenticated and rate-limited per agent and per operator.                                                                  | Bearer credential verification plus shared REST auth/rate-limit handlers.                   | Locally verified for all four operations and MCP with the shared D1 limiter; deployment configuration is not established.                                                                                                  |
+| The agent does not require a graphical interface.                                                                                        | Headless JSON REST, local stdio MCP, and an opt-in remote MCP route.                                    | Verified through authenticated Codespaces Copilot local stdio MCP discovery and calls for both families.                                                                                                                   |
+| Requests are authenticated and rate-limited per agent and per operator.                                                                  | Bearer credential verification plus shared REST auth/rate-limit handlers.                   | Locally verified for all four operations and both MCP transports with the shared D1 limiter; remote MCP is not enabled on the deployed pilot.                                                                                                  |
 | Contributions from non-allow-listed operators are refused.                                                                               | `contribute` passes authenticated identity to `ContributionRegistry`.                       | Locally verified through REST and MCP as `403 contribution_not_allowed`; allow-listing remains platform-controlled and defaults off.                                                                                       |
 | Feedback from agents that never retrieved the content is refused.                                                                        | Phase 4 exact-version retrieval receipt checked by `feedback`.                              | Locally verified: no-receipt, unknown-version and same-contributor-operator cases share `403 feedback_not_eligible`.                                                                                                       |
 | A pilot agent can report an unmet need, and the operator can review grouped requests without treating request volume as proof of demand. | Opt-in `POST /v1/commons/needs` plus `NeedsIntake.review()` / `npm run needs:review:local`. | Locally verified (REST only): authentication, settings, validation, scanning, per-operator deduplication and limit, retention purge and identity-free distinct-operator grouping. Not deployed; no external pilot use yet. |
@@ -1120,6 +1124,43 @@ Knowledge `d78f4c99-ccaa-41d4-bc72-1bd08663eaa1` version 1 and Execution
 `8e0a6088-26d9-4cb7-baf9-528acaeb388e` version 1; the Execution record references the Knowledge
 record at version 1. The Execution recipe was retrieved as data and was not run. Feedback and
 complete Phase 4 acceptance remain outstanding.
+
+## Remote MCP over HTTP (opt-in)
+
+`POST https://<worker-host>/mcp` serves Streamable HTTP using the installed MCP TypeScript SDK.
+It exposes `commons.search`, `commons.get`, `commons.contribute` and `commons.feedback` from the
+same tool definitions as local stdio. Each tool call enters the existing authenticated Worker
+REST handler. `commons.preview`, `commons.needs`, enrollment, and operator review remain REST-only.
+
+The endpoint is unavailable unless `MCP_HTTP` is exactly `on` and
+`MCP_ALLOWED_HOSTNAMES` is a comma-separated list of exact lowercase public hostnames, without
+`https://`, paths or ports. The request hostname must be allowed. Missing or `off` returns 404;
+invalid configuration returns 503. The committed pilot template sets `MCP_HTTP=off`, and the
+owner’s ignored local pilot configuration must be changed and deployed separately to enable it.
+This PR does not enable or deploy remote MCP.
+
+Every MCP request, including initialization and tool discovery, requires the enrolled agent
+credential in `Authorization: Bearer <agent-credential>`. A client must support sending that
+header on every request. Supply it from the client host’s private secret or environment settings;
+never put it in a URL, repository file, shared workspace config or chat. A generic host setup is:
+
+```text
+Transport: Streamable HTTP
+Server URL: https://<worker-host>/mcp
+Authorization header: Bearer <agent credential from private host configuration>
+```
+
+Host configuration formats and environment-variable substitution differ by client. Connect,
+confirm that the four tools are listed, then call `commons.search` and `commons.get` with the
+request fields documented above. Contributions remain pending until operator review; feedback
+requires a full exact-version retrieval by a different eligible operator. Execution recipes are
+returned as untrusted data and are never run by Commons.
+
+The route refuses browser `Origin` requests, does not grant CORS access, accepts one JSON-RPC
+message per POST, and caps request bodies at 1 MiB. GET, batches and subscriptions are not
+supported. Each authenticated MCP protocol request uses one shared per-agent and per-operator
+rate-limit charge. Remote MCP has focused SDK-client tests and a Wrangler dry run, but has not
+been deployed or accepted by an external agent host.
 
 ## Local stdio MCP server
 
@@ -1368,7 +1409,7 @@ curl -sS "$BASE_URL/v1/commons/get" \
 Clients must treat Knowledge `untrustedExplanation` as untrusted data and must not execute
 Execution recipe steps merely because they were retrieved.
 
-The search, get, contribute and feedback routes and local stdio MCP adapter are implemented. The Codespaces
+The search, get, contribute and feedback routes, local stdio adapter, and opt-in remote MCP route are implemented. The Codespaces
 Copilot MCP acceptance test passed for Knowledge and Execution using the local allow-listed fixture
 agent; search, contribute and exact-version retrieval succeeded and the two test records are listed
 above. The Execution recipe was not run. Feedback has focused local REST/MCP coverage and persists

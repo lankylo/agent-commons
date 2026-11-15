@@ -1,6 +1,5 @@
 import { McpServer } from "@modelcontextprotocol/server";
 import * as z from "zod/v4";
-import worker from "../index";
 
 const contributionInput = z
   .record(z.string(), z.unknown())
@@ -66,6 +65,9 @@ const feedbackInputSchema = z
 
 type ToolOperation = "search" | "get" | "contribute" | "feedback";
 
+/** The existing Worker fetch entry; every tool call goes through its shared REST handlers. */
+export type WorkerDispatch = (request: Request, env: unknown) => Promise<Response>;
+
 interface JsonObject {
   readonly [key: string]: unknown;
 }
@@ -95,13 +97,14 @@ function internalError(operation: ToolOperation) {
 }
 
 async function invokeWorker(
+  dispatch: WorkerDispatch,
   env: unknown,
   credential: string,
   operation: ToolOperation,
   input: Record<string, unknown>,
 ) {
   try {
-    const response = await worker.fetch(
+    const response = await dispatch(
       new Request(`https://agent-commons.local/v1/commons/${operation}`, {
         method: "POST",
         headers: {
@@ -120,7 +123,11 @@ async function invokeWorker(
   }
 }
 
-export function createCommonsMcpServer(env: unknown, credential: string): McpServer {
+export function createCommonsMcpServer(
+  env: unknown,
+  credential: string,
+  dispatch: WorkerDispatch,
+): McpServer {
   if (!credential.trim()) {
     throw new Error("An agent credential is required in process configuration.");
   }
@@ -134,7 +141,7 @@ export function createCommonsMcpServer(env: unknown, credential: string): McpSer
         "Search both Knowledge and Execution contributions, or select one family. Knowledge and Execution metadata filters remain family-specific. Returns deterministic, ranked discovery metadata within the required UTF-8 byte budget; no content is retrieved.",
       inputSchema: searchInputSchema,
     },
-    (input) => invokeWorker(env, credential, "search", input),
+    (input) => invokeWorker(dispatch, env, credential, "search", input),
   );
 
   server.registerTool(
@@ -144,7 +151,7 @@ export function createCommonsMcpServer(env: unknown, credential: string): McpSer
         "Retrieve a complete, integrity-verified exact contribution ID and positive version; there is no latest alias. Knowledge explanations are labelled untrusted, while Execution recipes are returned as data and never run. An exact optional validator can avoid retransmitting an unchanged body after full D1/R2 verification. The UTF-8 budget is all-or-nothing.",
       inputSchema: getInputSchema,
     },
-    (input) => invokeWorker(env, credential, "get", input),
+    (input) => invokeWorker(dispatch, env, credential, "get", input),
   );
 
   server.registerTool(
@@ -154,7 +161,7 @@ export function createCommonsMcpServer(env: unknown, credential: string): McpSer
         "Submit a new Knowledge or Execution contribution, or add its exact next immutable version with contributionId and expectedPreviousVersion. Execution targets must satisfy the platform-managed domain policy. Only authenticated, active agents for allow-listed operators may contribute; submitted verification remains an untrusted declaration, and recipes are never run here.",
       inputSchema: contributeInputSchema,
     },
-    (input) => invokeWorker(env, credential, "contribute", input),
+    (input) => invokeWorker(dispatch, env, credential, "contribute", input),
   );
 
   server.registerTool(
@@ -164,7 +171,7 @@ export function createCommonsMcpServer(env: unknown, credential: string): McpSer
         "Submit unverified Knowledge or Execution feedback for an exact contribution version retrieved by this authenticated agent. The stored version selects the assessment schema; do not provide a family. Reports are persisted per consumer operator and dimension, with same-agent revisions replacing the active report.",
       inputSchema: feedbackInputSchema,
     },
-    (input) => invokeWorker(env, credential, "feedback", input),
+    (input) => invokeWorker(dispatch, env, credential, "feedback", input),
   );
 
   return server;
