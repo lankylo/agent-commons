@@ -120,14 +120,14 @@ const execution = (related?: unknown): Record<string, unknown> => ({
   objective: `Fetch an item by id and verify its status ${n}`,
   inputs: [{ name: "itemId", type: "string", required: true }],
   outputs: [{ name: "status", type: "string", variable: "itemStatus" }],
-  targetDomains: ["api.example.com"],
+  targetDomains: ["api.acme.com"],
   compatibility: { requiredCapabilities: ["http-client"] },
   steps: [
     {
       id: "fetch",
       type: "http_request",
       method: "GET",
-      domain: "api.example.com",
+      domain: "api.acme.com",
       path: "/v1/items",
       query: { id: { input: "itemId" } },
       expectStatus: [200],
@@ -245,7 +245,7 @@ describe("exact validator match", () => {
   it("returns only retrieval-not-modified/v1 for Execution", async () => {
     const { k, x } = await pair();
     const r = okCond(await retriever.getConditionalContributionVersion(x.id, 1, v(x)));
-    expectNotModifiedOnly(r, x, [TITLE, agent, operator, k.id, "api.example.com"]);
+    expectNotModifiedOnly(r, x, [TITLE, agent, operator, k.id, "api.acme.com"]);
   });
 
   it("leaves getContributionVersion unchanged", async () => {

@@ -553,13 +553,61 @@ function int(v: unknown, min: number, max: number): v is number {
   return typeof v === "number" && Number.isInteger(v) && v >= min && v <= max;
 }
 
+// Static snapshot of the IANA registry, last updated 2026-05-22. The registry
+// applies special use to each listed name and its subdomains; no DNS lookups
+// are performed. Source: https://www.iana.org/assignments/special-use-domain-names/
+const IANA_SPECIAL_USE_DOMAINS = [
+  "alt",
+  "6tisch.arpa",
+  "eap.arpa",
+  "eap-noob.arpa",
+  "home.arpa",
+  "10.in-addr.arpa",
+  "254.169.in-addr.arpa",
+  "16.172.in-addr.arpa",
+  "17.172.in-addr.arpa",
+  "18.172.in-addr.arpa",
+  "19.172.in-addr.arpa",
+  "20.172.in-addr.arpa",
+  "21.172.in-addr.arpa",
+  "22.172.in-addr.arpa",
+  "23.172.in-addr.arpa",
+  "24.172.in-addr.arpa",
+  "25.172.in-addr.arpa",
+  "26.172.in-addr.arpa",
+  "27.172.in-addr.arpa",
+  "28.172.in-addr.arpa",
+  "29.172.in-addr.arpa",
+  "30.172.in-addr.arpa",
+  "31.172.in-addr.arpa",
+  "170.0.0.192.in-addr.arpa",
+  "171.0.0.192.in-addr.arpa",
+  "168.192.in-addr.arpa",
+  "8.e.f.ip6.arpa",
+  "9.e.f.ip6.arpa",
+  "a.e.f.ip6.arpa",
+  "b.e.f.ip6.arpa",
+  "ipv4only.arpa",
+  "resolver.arpa",
+  "service.arpa",
+  "example",
+  "example.com",
+  "example.net",
+  "example.org",
+  "invalid",
+  "local",
+  "localhost",
+  "onion",
+  "test",
+] as const;
+
 function canonicalHostname(value: unknown): string | undefined {
   if (typeof value !== "string" || !HOSTNAME.test(value)) return undefined;
   const hostname = value.toLowerCase().replace(/\.$/, "");
   if (
-    hostname.endsWith(".localhost") ||
-    hostname.endsWith(".local") ||
-    hostname.endsWith(".home.arpa")
+    IANA_SPECIAL_USE_DOMAINS.some(
+      (domain) => hostname === domain || hostname.endsWith(`.${domain}`),
+    )
   ) {
     return undefined;
   }
@@ -619,7 +667,7 @@ export function validateExecutionContribution(input: unknown): ExecutionValidati
     if (domain === undefined) {
       c.err(
         `targetDomains[${i}]`,
-        "must be a DNS hostname (no scheme, port, path, wildcard, IP address or local hostname)",
+        "must be a DNS hostname outside the IANA Special-Use Domain Names registry (no scheme, port, path, wildcard or IP address)",
       );
     } else if (c.domains.has(domain)) c.err(`targetDomains[${i}]`, "duplicate domain");
     else c.domains.add(domain);

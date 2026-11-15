@@ -114,17 +114,17 @@ const execution = (related?: unknown): Record<string, unknown> => ({
   objective: "Fetch an item by id and verify its status",
   inputs: [{ name: "itemId", type: "string", required: true }],
   outputs: [{ name: "status", type: "string", variable: "itemStatus" }],
-  targetDomains: ["api.example.com", "cdn.example.com"],
+  targetDomains: ["api.acme.com", "cdn.acme.com"],
   compatibility: {
     requiredCapabilities: ["http-client"],
-    targetVersions: [{ domain: "api.example.com", version: "v1" }],
+    targetVersions: [{ domain: "api.acme.com", version: "v1" }],
   },
   steps: [
     {
       id: "fetch",
       type: "http_request",
       method: "GET",
-      domain: "api.example.com",
+      domain: "api.acme.com",
       path: "/v1/items",
       query: { id: { input: "itemId" } },
       expectStatus: [200],
@@ -332,7 +332,7 @@ describe("valid Execution creation", () => {
       )
       .bind(c.id)
       .all();
-    expect(domains.results.map((r) => r.domain)).toEqual(["api.example.com", "cdn.example.com"]);
+    expect(domains.results.map((r) => r.domain)).toEqual(["api.acme.com", "cdn.acme.com"]);
     const ref = await db
       .prepare("SELECT * FROM contribution_references WHERE from_contribution_id = ?")
       .bind(c.id)

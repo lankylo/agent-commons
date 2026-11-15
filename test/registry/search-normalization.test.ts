@@ -192,14 +192,14 @@ const execution = (
   objective,
   inputs: [],
   outputs: [{ name: "status", type: "integer", variable: "status" }],
-  targetDomains: ["narwhal.example.net"],
+  targetDomains: ["narwhal.acme.com"],
   compatibility: { requiredCapabilities: ["http-client"] },
   steps: [
     {
       id: "call",
       type: "http_request",
       method: "GET",
-      domain: "narwhal.example.net",
+      domain: "narwhal.acme.com",
       path: "/v1/ingest",
       expectStatus: [200],
       saveAs: "body",

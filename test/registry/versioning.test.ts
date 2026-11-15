@@ -116,14 +116,14 @@ const execution = (related?: unknown): Record<string, unknown> => ({
   objective: `Fetch an item by id and verify its status ${n}`,
   inputs: [{ name: "itemId", type: "string", required: true }],
   outputs: [{ name: "status", type: "string", variable: "itemStatus" }],
-  targetDomains: ["api.example.com"],
+  targetDomains: ["api.acme.com"],
   compatibility: { requiredCapabilities: ["http-client"] },
   steps: [
     {
       id: "fetch",
       type: "http_request",
       method: "GET",
-      domain: "api.example.com",
+      domain: "api.acme.com",
       path: "/v1/items",
       query: { id: { input: "itemId" } },
       expectStatus: [200],
@@ -302,7 +302,7 @@ describe("Execution version 2 and references", () => {
       )
       .bind(e1.id)
       .all();
-    expect(dom.results).toEqual([{ domain: "api.example.com" }]);
+    expect(dom.results).toEqual([{ domain: "api.acme.com" }]);
   });
 
   it("resolves references to a new version of the referenced contribution", async () => {

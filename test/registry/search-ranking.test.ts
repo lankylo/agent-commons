@@ -102,14 +102,14 @@ function execution(word: string, over: Record<string, unknown> = {}): Record<str
     objective: `Fetch item ${serial} and verify its status`,
     inputs: [{ name: "itemId", type: "string", required: true }],
     outputs: [{ name: "status", type: "integer", variable: "itemStatus" }],
-    targetDomains: ["api.example.net"],
+    targetDomains: ["api.acme.com"],
     compatibility: { requiredCapabilities: ["http-client"] },
     steps: [
       {
         id: "fetch",
         type: "http_request",
         method: "GET",
-        domain: "api.example.net",
+        domain: "api.acme.com",
         path: "/v1/items",
         query: { id: { input: "itemId" } },
         expectStatus: [200],

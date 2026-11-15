@@ -95,10 +95,10 @@ beforeAll(async () => {
     "e2",
     execution({
       title: "Archive a pelican record",
-      targetDomains: ["heron.example.org"],
+      targetDomains: ["heron.acme.com"],
       compatibility: { requiredCapabilities: ["http-client"] },
       steps: execution().steps.map((s: Record<string, unknown>) =>
-        s.type === "http_request" ? { ...s, domain: "heron.example.org" } : s,
+        s.type === "http_request" ? { ...s, domain: "heron.acme.com" } : s,
       ),
       safety: {
         sideEffect: "irreversible-write",
@@ -157,14 +157,14 @@ function execution(over: Record<string, unknown> = {}): ExecFixture {
     objective: "Fetch the pelican manifest and verify its status",
     inputs: [{ name: "pelicanId", type: "string", required: true }],
     outputs: [{ name: "status", type: "integer", variable: "itemStatus" }],
-    targetDomains: ["pelican.example.net"],
+    targetDomains: ["pelican.acme.com"],
     compatibility: { requiredCapabilities: ["http-client", "jsonpointer"] },
     steps: [
       {
         id: "fetch",
         type: "http_request",
         method: "GET",
-        domain: "pelican.example.net",
+        domain: "pelican.acme.com",
         path: "/v1/items",
         query: { id: { input: "pelicanId" } },
         expectStatus: [200],
@@ -298,8 +298,8 @@ describe("filters", () => {
     const one = async (filters: Record<string, unknown>) => found({ ...q, filters });
     expect(await one({ verificationMethod: "owner-tested" })).toEqual([ids.e1]);
     expect(await one({ verificationMethod: "simulated" })).toEqual([ids.e2]);
-    expect(await one({ targetDomain: "heron.example.org" })).toEqual([ids.e2]);
-    expect(await one({ targetDomain: "pelican.example.net" })).toEqual([ids.e1]);
+    expect(await one({ targetDomain: "heron.acme.com" })).toEqual([ids.e2]);
+    expect(await one({ targetDomain: "pelican.acme.com" })).toEqual([ids.e1]);
     expect(await one({ targetDomain: "example.net" })).toEqual([]);
     expect(await one({ requiredCapability: "jsonpointer" })).toEqual([ids.e1]);
     expect(await one({ requiredCapability: "http-client" })).toEqual([ids.e1, ids.e2]);
