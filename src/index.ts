@@ -18,8 +18,22 @@ import {
 import { handleReview, REVIEW_PATH_PREFIX, type ReviewEnv } from "./review/routes";
 import { ENROLL_PATH_PREFIX, handleEnrollment, type EnrollmentEnv } from "./enrollment/routes";
 import { handleEnrollmentPage } from "./enrollment/page";
+import { handleMcpHttp, MCP_PATH, type McpHttpEnv } from "./mcp/http";
 
-interface WorkerEnv extends ReviewEnv, EnrollmentEnv {
+/**
+ * Private one-shot marker set only by the `/mcp` gate on a fresh per-request bindings object after
+ * it has already verified the credential and charged the shared limiter for that MCP request. The
+ * first tool dispatch by the same agent consumes it instead of charging again. It is a module
+ * symbol, so request data can never set it.
+ */
+const MCP_PRECHARGE = Symbol("mcp-precharge");
+interface McpPrecharge {
+  readonly agentId: string;
+  used: boolean;
+}
+
+interface WorkerEnv extends ReviewEnv, EnrollmentEnv, McpHttpEnv {
+  readonly [MCP_PRECHARGE]?: McpPrecharge;
   readonly DB?: D1Database;
   readonly CONTENT_BUCKET?: R2Bucket;
   readonly EXECUTION_DOMAIN_POLICY_JSON?: string;
@@ -99,7 +113,14 @@ type AuthorizationResult =
 async function authenticateAndRateLimit(
   request: Request,
   env: WorkerEnv,
-  operation: "Search" | "Retrieval" | "Contribution" | "Feedback" | "Needs intake" | "Preview",
+  operation:
+    | "Search"
+    | "Retrieval"
+    | "Contribution"
+    | "Feedback"
+    | "Needs intake"
+    | "Preview"
+    | "MCP access",
 ): Promise<AuthorizationResult> {
   if (!env.DB) {
     return {
@@ -117,6 +138,15 @@ async function authenticateAndRateLimit(
   const verification = await new CredentialService(env.DB, { now }).verifyCredential(token);
   if (!verification.ok) {
     return { ok: false, response: httpError(401, "unauthorized", "Authentication required.") };
+  }
+
+  const precharge = env[MCP_PRECHARGE];
+  if (precharge && !precharge.used && precharge.agentId === verification.agentId) {
+    precharge.used = true;
+    return {
+      ok: true,
+      actor: { agentId: verification.agentId, operatorId: verification.operatorId },
+    };
   }
 
   const limiter = new RateLimitService(env.DB, {
@@ -936,7 +966,7 @@ function resolvePilotMode(value: unknown): PilotMode | undefined {
   return undefined;
 }
 
-export default {
+const worker = {
   async fetch(request: Request, env?: unknown): Promise<Response> {
     const workerEnv = (env ?? {}) as WorkerEnv;
     const { pathname } = new URL(request.url);
@@ -952,6 +982,19 @@ export default {
     // Wallet enrollment: unauthenticated by design, off by default, never accepts identity IDs.
     if (pathname.startsWith(ENROLL_PATH_PREFIX)) {
       return handleEnrollment(request, workerEnv);
+    }
+    if (pathname === MCP_PATH) {
+      return handleMcpHttp(request, workerEnv, {
+        authenticate: async (mcpRequest) => {
+          const result = await authenticateAndRateLimit(mcpRequest, workerEnv, "MCP access");
+          return result.ok ? { ok: true, agentId: result.actor.agentId } : result;
+        },
+        dispatch: (toolRequest, toolEnv) => worker.fetch(toolRequest, toolEnv),
+        toolEnv: (agentId) => ({
+          ...workerEnv,
+          [MCP_PRECHARGE]: { agentId, used: false } satisfies McpPrecharge,
+        }),
+      });
     }
     if (pathname.startsWith("/v1/commons/")) {
       const mode = resolvePilotMode(workerEnv.PILOT_MODE);
@@ -995,3 +1038,5 @@ export default {
     return new Response("Not Found", { status: 404 });
   },
 } satisfies ExportedHandler;
+
+export default worker;

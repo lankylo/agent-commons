@@ -106,7 +106,7 @@ function env(overrides: Record<string, unknown> = {}) {
 }
 
 async function connectMcp(credential = token, bindings: unknown = env()): Promise<TestConnection> {
-  const server = createCommonsMcpServer(bindings, credential);
+  const server = createCommonsMcpServer(bindings, credential, worker.fetch);
   const client = new Client({ name: "commons-mcp-test-client", version: "1.0.0" });
   const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
   await server.connect(serverTransport);

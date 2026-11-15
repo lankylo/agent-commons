@@ -7,6 +7,7 @@
  */
 import { isAcceptableReviewerToken } from "../review/routes";
 import { resolveEnrollmentConfig } from "../enrollment/routes";
+import { resolveMcpHttpConfig } from "../mcp/http";
 import { parseExecutionDomainPolicy } from "../registry/execution";
 import { parseKnowledgePermissionPolicy } from "../registry/knowledge-policy";
 
@@ -55,6 +56,8 @@ const ALLOWED_VARS = new Set([
   "REVIEWER_ID",
   "NEEDS_INTAKE",
   "NEEDS_INTAKE_OPERATOR_DAILY_LIMIT",
+  "MCP_HTTP",
+  "MCP_ALLOWED_HOSTNAMES",
   "RATE_LIMIT_AGENT_LIMIT",
   "RATE_LIMIT_OPERATOR_LIMIT",
   "RATE_LIMIT_WINDOW_SECONDS",
@@ -251,14 +254,33 @@ function checkSettings(vars: Record<string, unknown>, phase: PilotPhase, errors:
       errors.push(`vars.${key}: must be explicitly "on" or "off"`);
     }
   }
+  // Remote MCP is optional in older local copies (absent means off) but never implicit.
+  const mcp = vars["MCP_HTTP"];
+  if (mcp !== undefined && (typeof mcp !== "string" || !ON_OFF.has(mcp))) {
+    errors.push('vars.MCP_HTTP: must be explicitly "on" or "off" when present');
+  }
   const on = (k: string) => vars[k] === "on";
 
   if (phase === "initial") {
     if (mode !== "read-only") errors.push('initial phase: PILOT_MODE must be "read-only"');
-    for (const key of ["ENROLLMENT", "REVIEW_INTERFACE", "NEEDS_INTAKE"]) {
+    for (const key of ["ENROLLMENT", "REVIEW_INTERFACE", "NEEDS_INTAKE", "MCP_HTTP"]) {
       if (on(key)) errors.push(`initial phase: ${key} must be "off"`);
     }
     return;
+  }
+  if (on("MCP_HTTP")) {
+    const hosts = vars["MCP_ALLOWED_HOSTNAMES"];
+    if (
+      resolveMcpHttpConfig({ MCP_HTTP: "on", MCP_ALLOWED_HOSTNAMES: hosts as string }).state !==
+      "on"
+    ) {
+      errors.push("vars.MCP_ALLOWED_HOSTNAMES: missing or invalid while MCP_HTTP is on");
+    } else if (
+      isPlaceholder(hosts) ||
+      /(^|,|\.)(example\.[a-z]+|localhost|test|invalid)(,|$)|127\.0\.0\.1/i.test(String(hosts))
+    ) {
+      errors.push("vars.MCP_ALLOWED_HOSTNAMES: placeholder, example or local value");
+    }
   }
   if (on("REVIEW_INTERFACE")) {
     const id = vars["REVIEWER_ID"];

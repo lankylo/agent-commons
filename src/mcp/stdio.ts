@@ -2,6 +2,7 @@ import { serveStdio } from "@modelcontextprotocol/server/stdio";
 import process from "node:process";
 import type { PlatformProxy } from "wrangler";
 import type { RegistryEnv } from "../registry/creation";
+import worker from "../index";
 import { createCommonsMcpServer } from "./server";
 import { openLocalMcpPlatform } from "./bootstrap-local";
 
@@ -25,7 +26,7 @@ if (!credential) {
         process.env.KNOWLEDGE_PERMISSION_POLICY_JSON ??
         activePlatform.env.KNOWLEDGE_PERMISSION_POLICY_JSON,
     };
-    const handle = serveStdio(() => createCommonsMcpServer(workerEnv, credential));
+    const handle = serveStdio(() => createCommonsMcpServer(workerEnv, credential, worker.fetch));
     let closing: Promise<void> | undefined;
     const shutdown = async () => {
       closing ??= handle.close().finally(() => activePlatform.dispose());
