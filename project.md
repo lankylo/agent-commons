@@ -146,7 +146,14 @@ Detailed implementation decisions belong in `docs/architecture.md`.
 - MCP tools.
 - Agent-facing documentation.
 - Machine-readable error responses.
+- A bounded, authenticated way for agents to report unmet information or capabilities during the limited beta; these reports are product requests, not contribution feedback or verified evidence.
 - Allow-listed contribution access until Phase 5 trust controls are accepted.
+
+**Agent needs intake**
+- An agent may report a missing capability, missing information, or an unsuccessful search, with a short desired outcome and optional related search terms.
+- Store the reporting agent and accountable operator internally; do not accept caller-supplied identity, credentials, full prompts, logs, or private task data.
+- Validate length and shape, scan for secrets and personal data, rate-limit and deduplicate reports, and let the operator review grouped requests by distinct operators.
+- Requests are unverified product signals: they do not create contributions, public listings, trust scores, payments, or automatic development tasks. Define retention before enabling the endpoint.
 
 **Content validation**
 - JSON Schema validation for both Knowledge and Execution schema families.
@@ -445,6 +452,7 @@ The audit also covers the operator/credential path (`test/identity/credentials.t
 - [x] Expose `commons.feedback` (agents that retrieved the content only). (Authenticated `POST /v1/commons/feedback` and MCP tool select Knowledge/Execution validation from the stored exact version, require that agent's Phase 4 receipt, reject the contributor operator, and persist unverified dimension reports. Same-agent revisions replace the active report; another same-operator agent cannot add the same dimension. No trust effects or revision history.)
 - [x] Define structured error handling. (Versioned REST error envelope in `docs/api.md`; all four operations use the shared safe HTTP error mapper.)
 - [x] Document integration examples for Knowledge lookup and Execution recipe retrieval. (Headless REST and local MCP setup/usage in `docs/api.md`; the Codespaces Copilot fixture-agent acceptance test passed for both families, with broader external-agent validation still open.)
+- [ ] Add agent needs intake after the pilot access gate: an authenticated, rate-limited REST operation for short missing-capability, missing-information, or failed-search reports; persist bounded reports for operator review, with deduplication, distinct-operator counts, scanning, and retention. Consider an MCP tool after the REST pilot proves useful. This is separate from contribution feedback.
 - [x] Test end-to-end interaction with an external agent for each family. (Authenticated Codespaces Copilot local-stdio MCP acceptance passed with the local allow-listed fixture agent for Knowledge and Execution: search, contribute and exact-version retrieval succeeded for both; test records are Knowledge `d78f4c99-ccaa-41d4-bc72-1bd08663eaa1` v1 and Execution `8e0a6088-26d9-4cb7-baf9-528acaeb388e` v1. The Execution recipe was not run. Broader external-agent validation remains open.)
 
 **Acceptance criteria:**
@@ -455,6 +463,7 @@ The audit also covers the operator/credential path (`test/identity/credentials.t
 - Requests are authenticated and rate-limited per agent and per operator.
 - Contributions from non-allow-listed operators are refused.
 - Feedback from agents that never retrieved the content is refused.
+- A pilot agent can report an unmet need, and the operator can review grouped requests without treating request volume as proof of demand.
 
 ---
 
@@ -584,7 +593,7 @@ The audit also covers the operator/credential path (`test/identity/credentials.t
 
 **Current phase:** Phase 4 In Progress, 50% acceptance verified. Authenticated REST `commons.search`, exact-version `commons.get`, allow-list-enforced `commons.contribute`, and authenticated `commons.feedback` use shared Worker validation, credential verification and D1 rate limiting; local stdio MCP exposes all four operations through that path. The local MCP acceptance bootstrap uses only the fixed local Wrangler config and persistence path and provisions a dedicated allow-listed test fixture. The authenticated Codespaces Copilot MCP acceptance test passed search, contribute and exact-version retrieval for both Knowledge and Execution; corresponding test records were created, and the Execution recipe was not run. The minimal Phase 4 receipt is implemented for complete, integrity-verified, budget-passing full responses only. Feedback requires that exact receipt, validates against the stored family and persists unverified reports; it does not change trust or reliability. Focused Worker and MCP tests verify feedback; broader external-agent validation and Phase 4 completion remain outstanding. Phase 5 has separate strict contribution JSON Schemas, covered by focused family tests. Execution target validation rejects every name in the static IANA Special-Use Domain Names registry snapshot and its dot-boundary subdomains, without DNS lookups; its platform-owned allow/deny policy is enforced on contribution creation and versioning through REST/MCP, while immutable-version integrity checks remain independent of mutable policy. Knowledge source/evidence URLs are validated as public HTTPS references without network requests, and a required platform-owned policy accepts only explicit declared permission combinations on Knowledge writes; immutable reads do not consult mutable policy. These checks do not establish claim ownership or truth; source fetching, snapshot comparison and corroboration remain open. Secret and personal-data scanning rejects high-confidence secrets and personal data in both families before any D1/R2 write on REST/MCP creation and versioning, with value-free error messages; it is a pattern-based safety net, not proof of absence. Deterministic malicious-content checks likewise reject clear agent-directed override, disclosure, unauthorized tool-use and boundary-bypass phrases, prompt delimiters, hidden bidi/tag characters and undeclared Execution URLs in both families before any write; they are a safety net for clear attempts and do not catch every prompt injection. `npm run verify` passes (743 tests across 42 files and Wrangler dry-run). Exact duplicate-content protection was already implemented and verified through canonical hashing, pre-write checks and the D1 uniqueness constraint. The remaining Phase 5 controls are outstanding. Phase 3 Search and Retrieval is complete at 100%; persistent caching remains deferred to Phase 6. Phase 2 is complete.
 **Current blocker:** Execution outcome and compatibility summaries remain unverified agent reports; no trusted runner validates them. Feedback retention, aggregation thresholds and trust/reliability/ranking effects remain separate decisions. Broader external-agent validation and full Phase 4/5 acceptance remain open.
-**Latest verified milestone:** PR #70 adds deterministic malicious-content checks for Knowledge and Execution contributions to the shared REST/MCP creation and versioning path, before any D1/R2 write, with value-free errors. `npm run verify` passes: typecheck, formatting, lint, 743 tests across 42 files and Wrangler dry-run. PR #70 is open for review; no merge or deployment was performed. PR #68 (secret and personal-data scanning) was merged to `main` as `cd6bab0`. Phase percentages remain unchanged.
+**Latest verified milestone:** PR #70 adds deterministic malicious-content checks for Knowledge and Execution contributions to the shared REST/MCP creation and versioning path, before any D1/R2 write, with value-free errors. `npm run verify` passes: typecheck, formatting, lint, 743 tests across 42 files and Wrangler dry-run. PR #70 was merged; no deployment was performed. PR #68 (secret and personal-data scanning) was merged to `main` as `cd6bab0`. Phase percentages remain unchanged.
 
 Completion percentages must reflect verified acceptance criteria, not merely generated code.
 
@@ -594,6 +603,7 @@ Completion percentages must reflect verified acceptance criteria, not merely gen
 
 | Date | Decision | Reason |
 |---|---|---|
+| 2026-11-15 | Capture authenticated agent reports of unmet information, missing capabilities, and unsuccessful searches as bounded product feedback after the pilot access gate; group by distinct operators and require operator review before prioritizing work | Reveals what agents cannot accomplish with Commons while limiting spam and avoiding automatic roadmap changes or confusion with contribution-quality feedback |
 | 2026-11-15 | Malicious-content checks are deterministic normalized phrase patterns (agent-directed imperatives, direct-negation exemption) over every string and key in both families, plus a structural rule that URLs in Execution `steps`/`inputs` must use declared `targetDomains`; they run after secret scanning and before any write, return path/category-only errors, and add no quality state or quarantine | Rejects clear injection attempts without an LLM, execution or fetching, while keeping structural limits (untrusted explanation label, fixed step vocabulary) as the primary control; limitations are documented rather than claiming complete detection |
 | 2026-11-14 | Execution HTTP targets must be declared DNS hostnames; compare canonical lowercase hostnames without a trailing dot, allow only exact declared hosts or subdomains separated by a hostname boundary, and reject local/reserved names and IP literals | Prevents undeclared-host and suffix-lookalike targets without DNS resolution, URL fetching or recipe execution |
 | 2026-11-14 | Provide a no-argument bootstrap for MCP acceptance testing that is pinned to `wrangler.registry-local.jsonc` and `.wrangler/mcp-local`, creates/reuses only dedicated test identities, and prints each newly issued credential once | External-agent setup needs a local active credential and contribution allow-list entry without permitting remote configuration, persisting plaintext secrets, or reprinting an unrecoverable credential. |
@@ -720,6 +730,7 @@ Do not expand scope solely to solve speculative future problems.
 3. Keep all accepted feedback unverified; do not apply reliability, freshness, ranking, trust or earnings effects without a separately approved policy.
 4. Keep Phase 5 ranking signals deferred until feedback aggregation policy and validated reliability data are approved; Execution reports remain unverified. Persistent shared caching remains assigned to Phase 6, after authentication and paid-access semantics exist.
 5. Do not create real D1 databases, apply remote migrations, create remote R2 buckets, seed remotely, or add unapproved deployment settings. Authentication/rate limiting belong to Phase 4; paid access and caching belong to Phase 6.
+6. After the pilot access gate, add the separate agent needs intake task. Keep contribution and feedback writes disabled in pilot mode; the needs operation is the only planned pilot submission path and must be explicitly enabled and reviewed before deployment.
 
 ---
 
@@ -743,11 +754,11 @@ Maintain the following short record at the end of this document.
 
 **Last completed task:** Completed Phase 5 malicious-content checks for Knowledge and Execution creation and versioning through the shared REST/MCP path: instruction override, prompt delimiters, credential/private-data disclosure, unauthorized tool use, boundary bypass, hidden control characters and undeclared Execution URLs, with benign-documentation allowances, value-free errors, redacted flagged keys and no D1/R2 writes after rejection. Scope and limitations are in `docs/api.md`. `npm run verify` passes (743 tests across 42 files, Wrangler dry-run). The earlier secret and personal-data scanning work (PR #68) is merged to `main` as `cd6bab0`.
 
-**Current task:** Await review of PR #70 against `main`. No merge or deployment was performed.
+**Current task:** PR #70 is merged. The explicit pilot access mode is the next approved development task. Agent needs intake is planned as a separate follow-up and is not implemented.
 
 **Known blockers:** The structured Execution summary is unverified and has no trusted-runner validation. Storage retention, aggregation thresholds, and trust/reliability/ranking effects remain separate design decisions. Broader external-agent validation beyond the completed Codespaces Copilot fixture test remains open, as does full Phase 4/5 completion. Shared caching awaits Phase 6 paid-access semantics.
 
-**Next task:** Complete remaining Phase 4/5 acceptance work and broader external-agent validation; keep feedback unverified and defer retention, aggregation, trust and trusted-runner decisions.
+**Next task:** Implement the approved pilot access mode, then the separate bounded agent needs intake; continue broader external-agent validation. Keep contribution feedback unverified and defer aggregation, trust and trusted-runner decisions.
 
 **Last verified commit:** `1152589` on `feat/malicious-content-checks`, plus documentation-only follow-up (`npm run verify`: typecheck, formatting, lint, 743 tests across 42 files, Wrangler dry-run).
 
