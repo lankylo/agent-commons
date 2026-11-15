@@ -134,6 +134,7 @@ describe("clean migration", () => {
         "rate_limit_windows",
         "retrieval_receipts",
         "version_platform_state",
+        "version_quality_states",
       ].sort(),
     );
     // FTS5 virtual table plus its document table (shadow tables are filtered out above).
@@ -146,7 +147,7 @@ describe("clean migration", () => {
       count(
         "SELECT count(*) AS c FROM sqlite_master WHERE type = 'index' AND name LIKE '%\\_idx' ESCAPE '\\'",
       ),
-    ).toBe(17);
+    ).toBe(18);
     expect(
       db
         .prepare("PRAGMA table_info(retrieval_receipts)")
@@ -473,5 +474,78 @@ describe("needs_reports", () => {
     expect(() => insert("n4", "op-cccccccc", AG)).toThrow(/FOREIGN KEY/);
     expect(() => insert("n5", OP, AG, "bug")).toThrow(/CHECK/);
     expect(count("SELECT count(*) AS c FROM needs_reports")).toBe(2);
+  });
+});
+
+describe("version_quality_states", () => {
+  const states = () =>
+    db
+      .prepare(
+        "SELECT contribution_id AS id, version, state FROM version_quality_states WHERE contribution_id = ? ORDER BY version",
+      )
+      .all(K);
+
+  it("gives every newly inserted version an initial pending state", () => {
+    addVersion(K, 2, "knowledge", AG, OP);
+    expect(states()).toEqual([
+      { id: K, version: 1, state: "pending" },
+      { id: K, version: 2, state: "pending" },
+    ]);
+    expect(count("SELECT count(*) AS c FROM version_quality_states WHERE state <> 'pending'")).toBe(
+      0,
+    );
+  });
+
+  it("backfills pre-existing versions as pending, never approved", () => {
+    const old = new DatabaseSync(":memory:");
+    old.exec("PRAGMA foreign_keys = ON");
+    const files = readdirSync(MIGRATIONS_DIR)
+      .filter((f) => f.endsWith(".sql") && f < "0008")
+      .sort();
+    for (const f of files) old.exec(readFileSync(new URL(f, MIGRATIONS_DIR), "utf8"));
+    const prior = db;
+    db = old;
+    addOperator(OP);
+    addAgent(AG, OP);
+    addContribution(K, "knowledge", AG, OP);
+    addVersion(K, 1, "knowledge", AG, OP);
+    addVersion(K, 2, "knowledge", AG, OP);
+    old.exec(readFileSync(new URL("0008_version_quality_states.sql", MIGRATIONS_DIR), "utf8"));
+    expect(states()).toEqual([
+      { id: K, version: 1, state: "pending" },
+      { id: K, version: 2, state: "pending" },
+    ]);
+    db = prior;
+  });
+
+  it("accepts only the four designed states", () => {
+    for (const s of ["listed_unverified", "rejected", "withdrawn", "pending"])
+      run(
+        "UPDATE version_quality_states SET state = ?, updated_at = ? WHERE contribution_id = ?",
+        s,
+        TS,
+        K,
+      );
+    for (const s of ["approved", "verified", "", "PENDING"])
+      expect(() => run("UPDATE version_quality_states SET state = ?", s)).toThrow(/CHECK/);
+  });
+
+  it("requires an existing version, an immutable key and no deletion", () => {
+    expect(() =>
+      run(
+        "INSERT INTO version_quality_states (contribution_id, version, state, updated_at) VALUES (?, 9, 'pending', ?)",
+        K,
+        TS,
+      ),
+    ).toThrow(/FOREIGN KEY/);
+    expect(() => run("UPDATE version_quality_states SET version = 2")).toThrow(/immutable/);
+    expect(() => run("DELETE FROM version_quality_states")).toThrow(/cannot be deleted/);
+    expect(() =>
+      run(
+        "INSERT INTO version_quality_states (contribution_id, version, state, updated_at) VALUES (?, 1, 'pending', ?)",
+        K,
+        TS,
+      ),
+    ).toThrow(/UNIQUE|PRIMARY/);
   });
 });
