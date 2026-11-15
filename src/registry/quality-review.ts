@@ -1,8 +1,10 @@
 /**
  * Platform-only reviewer decisions on exact contribution versions (Phase 5, private).
  *
- * Not imported by the Worker, REST or MCP code. The reviewer identity is supplied by trusted
- * platform code (e.g. the local operator script), never by contributors or public requests.
+ * Not used by public Commons REST or MCP operations. It is reached only from trusted platform code:
+ * the local operator script and the disabled-by-default, reviewer-token-authenticated remote review
+ * routes (`src/review/routes.ts`). The reviewer identity always comes from platform configuration,
+ * never from contributors or request bodies.
  * `listed_unverified` means only "allowed to list as unverified": it never changes
  * `version_platform_state` (verification, reliability, consumers), and nothing consults the
  * state for search or retrieval visibility yet.
@@ -72,6 +74,33 @@ export type InspectResult =
       readonly decisions: readonly QualityDecision[];
     }
   | { readonly ok: false; readonly error: ReviewError | RetrievalError };
+
+export const MAX_QUEUE_PAGE = 50;
+export const DEFAULT_QUEUE_PAGE = 20;
+
+/** Pending-queue keyset position: oldest first by (pending since, contribution ID, version). */
+export interface QueuePosition {
+  readonly since: string;
+  readonly contributionId: string;
+  readonly version: number;
+}
+
+/** D1 metadata only; `title` and `contentType` are contributor-supplied, untrusted text. */
+export interface PendingQueueItem {
+  readonly contributionId: string;
+  readonly version: number;
+  readonly family: string;
+  readonly title: string;
+  readonly contentType: string;
+  readonly createdAt: string;
+  readonly pendingSince: string;
+}
+
+export interface PendingQueuePage {
+  readonly items: readonly PendingQueueItem[];
+  /** Position after the last item when more may follow; null on the last page. */
+  readonly next: QueuePosition | null;
+}
 
 export type DecideResult =
   | { readonly ok: true; readonly decision: QualityDecision }
@@ -165,6 +194,56 @@ export class QualityReviewer {
       limit: PILOT_CAPACITY_LIMIT,
       used,
       remaining: Math.max(0, PILOT_CAPACITY_LIMIT - used),
+    };
+  }
+
+  /** Paginated `pending` versions (D1 only; no R2 read). Throws on storage failure. */
+  async pendingQueue(
+    options: { readonly limit?: number; readonly after?: QueuePosition | null } = {},
+  ): Promise<PendingQueuePage> {
+    const limit = options.limit ?? DEFAULT_QUEUE_PAGE;
+    if (!Number.isSafeInteger(limit) || limit < 1 || limit > MAX_QUEUE_PAGE) {
+      throw new RangeError("invalid queue page size");
+    }
+    const a = options.after ?? null;
+    const rows = await this.db
+      .prepare(
+        `SELECT q.contribution_id, q.version, q.updated_at, v.family, v.title, v.content_type,
+                v.created_at
+           FROM version_quality_states q
+           JOIN contribution_versions v
+             ON v.contribution_id = q.contribution_id AND v.version = q.version
+          WHERE q.state = 'pending'
+            AND (?1 IS NULL OR (q.updated_at, q.contribution_id, q.version) > (?1, ?2, ?3))
+          ORDER BY q.updated_at, q.contribution_id, q.version
+          LIMIT ?4`,
+      )
+      .bind(a?.since ?? null, a?.contributionId ?? null, a?.version ?? null, limit + 1)
+      .all<{
+        contribution_id: string;
+        version: number;
+        updated_at: string;
+        family: string;
+        title: string;
+        content_type: string;
+        created_at: string;
+      }>();
+    const page = rows.results.slice(0, limit);
+    const last = page[page.length - 1];
+    return {
+      items: page.map((r) => ({
+        contributionId: r.contribution_id,
+        version: r.version,
+        family: r.family,
+        title: r.title,
+        contentType: r.content_type,
+        createdAt: r.created_at,
+        pendingSince: r.updated_at,
+      })),
+      next:
+        rows.results.length > limit && last
+          ? { since: last.updated_at, contributionId: last.contribution_id, version: last.version }
+          : null,
     };
   }
 
