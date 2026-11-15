@@ -464,7 +464,7 @@ The audit also covers the operator/credential path (`test/identity/credentials.t
 
 - [x] Implement separate strict Knowledge and Execution JSON Schema validation. (Draft-07 schemas reject unsupported fields and preserve intentionally open Knowledge records and Execution value maps; existing family validators remain responsible for semantic and cross-field checks. Focused family schema tests pass.)
 - [x] Implement duplicate detection. (Existing canonical SHA-256 content hashes, pre-write duplicate rejection and the D1 unique constraint are covered by content-hash, creation, versioning and migration tests; no duplicate-protection logic was rebuilt.)
-- [x] Implement Execution target-domain allow/deny checks. (`src/registry/execution.ts` uses an explicit static snapshot of all names in the [IANA Special-Use Domain Names registry](https://www.iana.org/assignments/special-use-domain-names/), last updated 2026-05-22; rejects each listed name and dot-boundary subdomains without DNS lookups. `test/registry/execution.test.ts` covers every registry name and subdomain, hostname boundaries, and allowed public `httpbin.org`.)
+- [ ] Implement Execution target-domain allow/deny checks. (The IANA special-use deny list is implemented, but platform-owned allow/deny policy enforcement at contribution creation and versioning remains incomplete.)
 - [ ] Implement Knowledge source/permission checks.
 - [ ] Implement secret and personal-data scanning.
 - [ ] Implement malicious-content checks for both structured Knowledge text/data and declarative Execution fields.

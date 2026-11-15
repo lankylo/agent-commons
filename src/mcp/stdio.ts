@@ -19,6 +19,8 @@ if (!credential) {
       RATE_LIMIT_AGENT_LIMIT: process.env.RATE_LIMIT_AGENT_LIMIT,
       RATE_LIMIT_OPERATOR_LIMIT: process.env.RATE_LIMIT_OPERATOR_LIMIT,
       RATE_LIMIT_WINDOW_SECONDS: process.env.RATE_LIMIT_WINDOW_SECONDS,
+      EXECUTION_DOMAIN_POLICY_JSON:
+        process.env.EXECUTION_DOMAIN_POLICY_JSON ?? activePlatform.env.EXECUTION_DOMAIN_POLICY_JSON,
     };
     const handle = serveStdio(() => createCommonsMcpServer(workerEnv, credential));
     let closing: Promise<void> | undefined;

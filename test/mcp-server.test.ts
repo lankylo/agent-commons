@@ -94,6 +94,7 @@ function env(overrides: Record<string, unknown> = {}) {
   return {
     DB: db,
     CONTENT_BUCKET: proxy.env.CONTENT_BUCKET,
+    EXECUTION_DOMAIN_POLICY_JSON: proxy.env.EXECUTION_DOMAIN_POLICY_JSON,
     RATE_LIMIT_AGENT_LIMIT: 1000,
     RATE_LIMIT_OPERATOR_LIMIT: 1000,
     RATE_LIMIT_WINDOW_SECONDS: 60,
@@ -202,6 +203,31 @@ describe("local stdio MCP server", () => {
       });
       const executionMeta = field(structured(executionCreated), "contribution");
       expect(executionMeta.family).toBe("execution");
+
+      const deniedExecution = {
+        ...HTTPBIN_EXECUTION_SEED,
+        title: "MCP blocked domain policy check",
+        targetDomains: ["blocked.acme.com"],
+        steps: HTTPBIN_EXECUTION_SEED.steps.map((step) =>
+          step.type === "http_request" ? { ...step, domain: "blocked.acme.com" } : step,
+        ),
+      };
+      const deniedCreate = await callTool(connection.client, "commons.contribute", {
+        contribution: deniedExecution,
+      });
+      expect(deniedCreate.isError).toBe(true);
+      expect(errorCode(deniedCreate)).toBe("invalid_content");
+
+      const deniedVersion = await callTool(connection.client, "commons.contribute", {
+        contributionId: executionMeta.contributionId as string,
+        expectedPreviousVersion: 1,
+        contribution: {
+          ...deniedExecution,
+          title: "MCP blocked version policy check",
+        },
+      });
+      expect(deniedVersion.isError).toBe(true);
+      expect(errorCode(deniedVersion)).toBe("invalid_content");
 
       const searchCases = [
         { family: "knowledge", filters: { permittedUse: "redistribute" } },

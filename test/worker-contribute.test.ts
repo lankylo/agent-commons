@@ -71,6 +71,7 @@ function env(overrides: Record<string, unknown> = {}) {
   return {
     DB: db,
     CONTENT_BUCKET: proxy.env.CONTENT_BUCKET,
+    EXECUTION_DOMAIN_POLICY_JSON: proxy.env.EXECUTION_DOMAIN_POLICY_JSON,
     RATE_LIMIT_AGENT_LIMIT: 1000,
     RATE_LIMIT_OPERATOR_LIMIT: 1000,
     RATE_LIMIT_WINDOW_SECONDS: 60,
@@ -113,6 +114,16 @@ function execution(title = `Worker Execution ${++n}`, related?: unknown) {
     ...HTTPBIN_EXECUTION_SEED,
     title,
     ...(related === undefined ? {} : { related }),
+  };
+}
+
+function executionForDomain(title: string, domain: string) {
+  return {
+    ...execution(title),
+    targetDomains: [domain],
+    steps: HTTPBIN_EXECUTION_SEED.steps.map((step) =>
+      step.type === "http_request" ? { ...step, domain } : step,
+    ),
   };
 }
 
@@ -189,6 +200,47 @@ describe("worker contribute endpoint", () => {
     });
     expect(familyChange.status).toBe(422);
     expect((await payload(familyChange)).error?.code).toBe("family_mismatch");
+  });
+
+  it("enforces the platform domain policy on REST creation and versioning", async () => {
+    const deniedCreate = await callContribute({
+      contribution: executionForDomain("Denied REST create", "blocked.acme.com"),
+    });
+    expect(deniedCreate.status).toBe(422);
+    expect((await payload(deniedCreate)).error?.code).toBe("invalid_content");
+
+    const created = await payload(
+      await callContribute({ contribution: execution("REST policy version 1") }),
+    );
+    expect(created.contribution?.family).toBe("execution");
+    const contributionId = created.contribution?.contributionId as string;
+    const deniedVersion = await callContribute({
+      contributionId,
+      expectedPreviousVersion: 1,
+      contribution: executionForDomain("Denied REST version", "blocked.acme.com"),
+    });
+    expect(deniedVersion.status).toBe(422);
+    expect((await payload(deniedVersion)).error?.code).toBe("invalid_content");
+
+    const missingPolicy = await callContribute(
+      { contribution: execution("Missing REST policy") },
+      token,
+      { EXECUTION_DOMAIN_POLICY_JSON: undefined },
+    );
+    expect(missingPolicy.status).toBe(503);
+    expect((await payload(missingPolicy)).error?.code).toBe("execution_domain_policy_unavailable");
+
+    const override = await callContribute({
+      contribution: {
+        ...execution("REST policy override"),
+        executionDomainPolicy: {
+          allowed: [{ domain: "blocked.acme.com", includeSubdomains: true }],
+          denied: [],
+        },
+      },
+    });
+    expect(override.status).toBe(422);
+    expect((await payload(override)).error?.code).toBe("platform_field_rejected");
   });
 
   it("requires the original operator for versioning and keeps allow-list defaults off", async () => {
@@ -275,6 +327,7 @@ describe("worker contribute endpoint", () => {
       "reliabilityScore",
       "consumerCount",
       "platformState",
+      "executionDomainPolicy",
     ];
     for (const field of platformFields) {
       const response = await callContribute({

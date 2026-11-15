@@ -596,6 +596,23 @@ or later; this repository uses Node 24. The stdio server is local-only and uses
 `wrangler.registry-local.jsonc` with local D1/R2 state under `.wrangler/mcp-local`. It does not
 open a network listener.
 
+### Execution target-domain policy
+
+Execution creation and versioning require the platform-owned `EXECUTION_DOMAIN_POLICY_JSON`
+configuration. It is not accepted from contribution payloads. The JSON object has an `allowed`
+array of `{ "domain": "...", "includeSubdomains": false }` rules and a `denied` array of domain
+strings. Each allow rule must explicitly set `includeSubdomains`; denied names also deny their
+subdomains, and denial takes precedence over allowance. Matching canonicalizes case and a trailing
+dot and uses hostname-label boundaries. Missing or invalid configuration rejects Execution writes;
+it never defaults to allowing public hosts. The local-only registry config allows `httpbin.org` and
+the `acme.com` test fixture domain, and denies `blocked.acme.com`. The deployable `wrangler.jsonc`
+is intentionally unchanged.
+
+This is a storage policy only: accepting a recipe does not authorize or execute it. Policy is checked
+when a new contribution or version is written, not during integrity validation of an already stored
+immutable version. A later policy change therefore does not make an existing version corrupt or
+unreadable; any reclassification under a changed policy is a separate quality-state decision.
+
 ## Bootstrap for local MCP acceptance
 
 From the repository root, run:
