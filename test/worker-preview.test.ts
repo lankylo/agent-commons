@@ -77,7 +77,7 @@ async function call(
   path: "preview" | "get" | "search",
   body: Record<string, unknown>,
   who: keyof typeof tokens | null = "author",
-  limits: Record<string, number> = {},
+  limits: Record<string, unknown> = {},
 ) {
   const headers = new Headers();
   if (who) headers.set("Authorization", `Bearer ${tokens[who]}`);

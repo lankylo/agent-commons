@@ -96,7 +96,7 @@ type AuthorizationResult =
 async function authenticateAndRateLimit(
   request: Request,
   env: WorkerEnv,
-  operation: "Search" | "Retrieval" | "Contribution" | "Feedback" | "Needs intake",
+  operation: "Search" | "Retrieval" | "Contribution" | "Feedback" | "Needs intake" | "Preview",
 ): Promise<AuthorizationResult> {
   if (!env.DB) {
     return {
