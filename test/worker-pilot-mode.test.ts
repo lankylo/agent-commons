@@ -10,6 +10,7 @@ import type { RegistryEnv } from "../src/registry/creation";
 import { ContributionRegistry } from "../src/registry/creation";
 import { HTTPBIN_KNOWLEDGE_SEED } from "../src/seed/httpbin";
 import worker from "../src/index";
+import { listVersion } from "./helpers/quality";
 
 let proxy: PlatformProxy<RegistryEnv>;
 let dir: string;
@@ -58,6 +59,7 @@ beforeAll(async () => {
   }).createContribution(agent.id, { ...HTTPBIN_KNOWLEDGE_SEED, title: "Pilot Knowledge" });
   if (!created.ok) throw new Error("fixture failed");
   contributionId = created.contribution.id;
+  await listVersion(proxy.env, contributionId);
 }, 180_000);
 
 afterAll(async () => {

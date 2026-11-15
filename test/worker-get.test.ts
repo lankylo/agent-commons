@@ -11,6 +11,7 @@ import { ContributionRegistry, type RegistryEnv } from "../src/registry/creation
 import { contentObjectKey } from "../src/storage/content-objects";
 import { HTTPBIN_EXECUTION_SEED, HTTPBIN_KNOWLEDGE_SEED } from "../src/seed/httpbin";
 import worker from "../src/index";
+import { listVersion } from "./helpers/quality";
 
 let proxy: PlatformProxy<RegistryEnv>;
 let dir: string;
@@ -71,12 +72,14 @@ beforeAll(async () => {
   });
   if (!knowledge.ok) throw new Error(`Knowledge fixture creation failed: ${knowledge.error.code}`);
   knowledgeId = knowledge.contribution.id;
+  await listVersion(proxy.env, knowledgeId);
   const execution = await registry.createContribution(agent.id, {
     ...HTTPBIN_EXECUTION_SEED,
     related: [{ family: "knowledge", id: knowledgeId, version: 1 }],
   });
   if (!execution.ok) throw new Error(`Execution fixture creation failed: ${execution.error.code}`);
   executionId = execution.contribution.id;
+  await listVersion(proxy.env, executionId);
 }, 180_000);
 
 afterAll(async () => {
@@ -301,6 +304,7 @@ describe("worker get endpoint", () => {
     });
     if (!version2.ok) throw new Error(`Knowledge version creation failed: ${version2.error.code}`);
 
+    await listVersion(proxy.env, knowledgeId, 2);
     const first = await callGet(exactRequest(knowledgeId, 1));
     const second = await callGet(exactRequest(knowledgeId, 2));
     expect(first.status).toBe(200);
@@ -509,6 +513,7 @@ describe("worker get endpoint", () => {
         title: `Integrity fixture ${testCase.name}`,
       });
       if (!created.ok) throw new Error(`Fixture creation failed: ${created.error.code}`);
+      await listVersion(proxy.env, created.contribution.id);
       const key = contentObjectKey(created.contribution.contentHash);
       await testCase.alter(key, created.contribution.contentHash);
       const response = await callGet({

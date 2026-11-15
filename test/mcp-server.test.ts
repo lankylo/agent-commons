@@ -10,6 +10,7 @@ import { CredentialService } from "../src/identity/credentials";
 import { IdentityRepository } from "../src/identity/repository";
 import type { AgentId, OperatorId } from "../src/identity/types";
 import type { RegistryEnv } from "../src/registry/creation";
+import { listVersion } from "./helpers/quality";
 import { HTTPBIN_EXECUTION_SEED, HTTPBIN_KNOWLEDGE_SEED } from "../src/seed/httpbin";
 import worker from "../src/index";
 import { createCommonsMcpServer } from "../src/mcp/server";
@@ -260,6 +261,22 @@ describe("local stdio MCP server", () => {
       expect(deniedVersion.isError).toBe(true);
       expect(errorCode(deniedVersion)).toBe("invalid_content");
 
+      // Consumer gate through MCP: pending versions are neither searchable nor retrievable.
+      const pendingSearch = await callTool(connection.client, "commons.search", {
+        query: "httpbin get",
+        maxUtf8Bytes: 16_000,
+      });
+      expect(field(structured(pendingSearch), "data").results).toEqual([]);
+      const pendingGet = await callTool(connection.client, "commons.get", {
+        contributionId: knowledgeId,
+        version: 1,
+        maxUtf8Bytes: 64_000,
+      });
+      expect(pendingGet.isError).toBe(true);
+      expect(errorCode(pendingGet)).toBe("not_found");
+      await listVersion(proxy.env, knowledgeId);
+      await listVersion(proxy.env, executionMeta.contributionId as string);
+
       const searchCases = [
         { family: "knowledge", filters: { permittedUse: "redistribute" } },
         { family: "execution", filters: { sideEffect: "read-only" } },
@@ -395,6 +412,7 @@ describe("local stdio MCP server", () => {
       });
       const metadata = field(structured(created), "contribution");
       const contributionId = metadata.contributionId as string;
+      await listVersion(proxy.env, contributionId);
       const retrieved = await callTool(reviewerConnection.client, "commons.get", {
         contributionId,
         version: 1,

@@ -101,6 +101,13 @@ export const SEARCH_RANKING = {
 export type FreshnessState = "current" | "stale";
 
 export interface ContributionSearchOptions {
+  /**
+   * Which quality states are searchable. `listed_unverified` (consumer gate): only versions in that
+   * state are candidates, the "latest" version of a contribution is its newest LISTED version (a
+   * pending newer version never hides an older listed one), and references to non-listed versions
+   * are omitted. `all` (default, internal/private use and legacy tests) applies no state filter.
+   */
+  readonly visibility?: "listed_unverified" | "all";
   /** Reference time for freshness; injected for deterministic tests. Defaults to the clock. */
   readonly now?: () => Date;
 }
@@ -636,12 +643,14 @@ const epochMs = (expr: string): string =>
 
 export class ContributionSearch {
   private readonly now: () => Date;
+  private readonly listedOnly: boolean;
 
   constructor(
     private readonly env: { readonly DB: D1Database },
     options: ContributionSearchOptions = {},
   ) {
     this.now = options.now ?? (() => new Date());
+    this.listedOnly = options.visibility === "listed_unverified";
   }
 
   /** Ranked plain-text search over the latest version of each contribution; D1 only. */
@@ -735,8 +744,16 @@ export class ContributionSearch {
         ${matched}
       ),
       latest AS (
-        SELECT contribution_id, MAX(version) AS version
-          FROM contribution_versions GROUP BY contribution_id
+        SELECT lv.contribution_id, MAX(lv.version) AS version
+          FROM contribution_versions lv${
+            this.listedOnly
+              ? `
+          JOIN version_quality_states lq
+            ON lq.contribution_id = lv.contribution_id AND lq.version = lv.version
+           AND lq.state = 'listed_unverified'`
+              : ""
+          }
+         GROUP BY lv.contribution_id
       ),
       candidates AS (
         SELECT v.contribution_id AS id, v.version, v.family, v.content_type, v.title, v.purpose,
@@ -791,7 +808,14 @@ export class ContributionSearch {
          FROM json_each(?) j
          JOIN contribution_references r
            ON r.from_contribution_id = json_extract(j.value, '$.id')
-          AND r.from_version = json_extract(j.value, '$.version')
+          AND r.from_version = json_extract(j.value, '$.version')${
+            this.listedOnly
+              ? `
+         JOIN version_quality_states tq
+           ON tq.contribution_id = r.to_contribution_id AND tq.version = r.to_version
+          AND tq.state = 'listed_unverified'`
+              : ""
+          }
         ORDER BY r.from_contribution_id, r.from_version, r.ordinal`,
     )
       .bind(keys)
