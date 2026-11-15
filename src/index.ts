@@ -96,7 +96,7 @@ type AuthorizationResult =
 async function authenticateAndRateLimit(
   request: Request,
   env: WorkerEnv,
-  operation: "Search" | "Retrieval" | "Contribution" | "Feedback" | "Needs intake",
+  operation: "Search" | "Retrieval" | "Contribution" | "Feedback" | "Needs intake" | "Preview",
 ): Promise<AuthorizationResult> {
   if (!env.DB) {
     return {
@@ -464,6 +464,123 @@ async function handleGet(request: Request, env: WorkerEnv): Promise<Response> {
     });
   } catch {
     return httpError(500, "internal_error", "Retrieval is unavailable.");
+  }
+}
+
+const PREVIEW_QUALITY_LABEL = Object.freeze({
+  state: "pending",
+  preview: true,
+  independentlyVerified: false,
+  note: "Contributor preview of your own pending version; it is not listed, searchable or reviewed.",
+} as const);
+
+/**
+ * Contributor preview: the authenticated agent retrieves an exact `pending` version it authored.
+ * Identity comes only from the credential. Ownership and state are checked in one query before any
+ * content read; every other case shares one 404. Never writes a receipt and never changes state.
+ */
+async function handlePreview(request: Request, env: WorkerEnv): Promise<Response> {
+  try {
+    const authorization = await authenticateAndRateLimit(request, env, "Preview");
+    if (!authorization.ok) return authorization.response;
+    if (!env.DB || !env.CONTENT_BUCKET) {
+      return httpError(500, "content_unavailable", "Contribution content is unavailable.");
+    }
+
+    const parsed = await parseJsonBody(request);
+    if (!parsed.ok) return parsed.response;
+    const body = parsed.value;
+    if (typeof body !== "object" || body === null || Array.isArray(body)) {
+      return httpError(400, "invalid_request", "Preview request body must be an object.");
+    }
+    const record = body as Record<string, unknown>;
+    if (record.agentId !== undefined || record.operatorId !== undefined) {
+      return httpError(400, "invalid_request", "Identity fields are resolved from the credential.");
+    }
+    if (
+      !Object.keys(record).every((f) => ["contributionId", "version", "maxUtf8Bytes"].includes(f))
+    ) {
+      return httpError(400, "invalid_request", "Preview request contains unsupported fields.");
+    }
+    if (
+      typeof record.contributionId !== "string" ||
+      record.contributionId.length === 0 ||
+      !requirePositiveSafeInteger(record.version)
+    ) {
+      return httpError(
+        400,
+        "invalid_request",
+        "contributionId and a positive safe-integer version are required.",
+      );
+    }
+    if (!requirePositiveSafeInteger(record.maxUtf8Bytes)) {
+      return httpError(
+        400,
+        "invalid_budget",
+        "maxUtf8Bytes is required and must be a positive safe integer.",
+      );
+    }
+
+    const notFound = () =>
+      httpError(404, "not_found", "The requested contribution version was not found.");
+    const owned = await env.DB.prepare(
+      `SELECT 1 AS ok
+         FROM contribution_versions v
+         JOIN version_quality_states q
+           ON q.contribution_id = v.contribution_id AND q.version = v.version
+        WHERE v.contribution_id = ? AND v.version = ?
+          AND v.author_agent_id = ? AND v.author_operator_id = ?
+          AND q.state = 'pending'`,
+    )
+      .bind(
+        record.contributionId,
+        record.version,
+        authorization.actor.agentId,
+        authorization.actor.operatorId,
+      )
+      .first();
+    if (owned === null) return notFound();
+
+    const result = await new ContributionRetriever({
+      DB: env.DB,
+      CONTENT_BUCKET: env.CONTENT_BUCKET,
+    }).getConditionalContributionVersion(record.contributionId, record.version);
+    if (!result.ok) {
+      switch (result.error.code) {
+        case "invalid_request":
+          return httpError(400, "invalid_request", "The retrieval request is invalid.");
+        case "contribution_not_found":
+        case "version_not_found":
+          return notFound();
+        case "content_missing":
+        case "content_corrupted":
+        case "metadata_inconsistent":
+          return httpError(500, "content_unavailable", "Contribution content is unavailable.");
+      }
+    }
+
+    const data = await withListedReferencesOnly(
+      toPublicRetrievalResponse(result.response),
+      new QualityStateStore(env.DB),
+      record.contributionId,
+    );
+    const usedUtf8Bytes = new TextEncoder().encode(JSON.stringify(data)).length;
+    if (usedUtf8Bytes > record.maxUtf8Bytes) {
+      return httpError(
+        413,
+        "response_too_large",
+        "The complete retrieval response exceeds the UTF-8 byte budget.",
+        { requiredUtf8Bytes: usedUtf8Bytes, maxUtf8Bytes: record.maxUtf8Bytes },
+      );
+    }
+
+    return Response.json({
+      data,
+      budget: { maxUtf8Bytes: record.maxUtf8Bytes, usedUtf8Bytes },
+      quality: PREVIEW_QUALITY_LABEL,
+    });
+  } catch {
+    return httpError(500, "internal_error", "Preview is unavailable.");
   }
 }
 
@@ -852,6 +969,9 @@ export default {
     }
     if (pathname === "/v1/commons/get" && request.method === "POST") {
       return handleGet(request, workerEnv);
+    }
+    if (pathname === "/v1/commons/preview" && request.method === "POST") {
+      return handlePreview(request, workerEnv);
     }
     if (pathname === "/v1/commons/contribute" && request.method === "POST") {
       return handleContribute(request, workerEnv);

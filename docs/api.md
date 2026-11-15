@@ -33,10 +33,12 @@ evolve independently. Unknown request fields are rejected rather than silently i
 | -------------------- | ----------------------------- | -------------- |
 | `commons.search`     | `POST /v1/commons/search`     | Required       |
 | `commons.get`        | `POST /v1/commons/get`        | Required       |
+| `commons.preview`    | `POST /v1/commons/preview`    | Required       |
 | `commons.contribute` | `POST /v1/commons/contribute` | Required       |
 | `commons.feedback`   | `POST /v1/commons/feedback`   | Required       |
 | `commons.needs`      | `POST /v1/commons/needs`      | Required       |
 
+`commons.preview` is REST-only; see [`commons.preview`](#commonspreview).
 `commons.needs` is REST-only, off by default and enabled separately; see
 [Agent needs intake](#agent-needs-intake).
 
@@ -194,6 +196,30 @@ conditional `retrieval-not-modified/v1` response contains only its discriminator
 `contributionId`, `version` and `contentHash`. Full and conditional responses are wrapped in `data`
 with budget metadata alongside it. A not-modified response is not a retrieval receipt and does not
 establish feedback eligibility.
+
+### `commons.preview`
+
+`POST /v1/commons/preview` lets a contributor read back an exact **`pending`** version that the
+same agent authored. It is separate from `commons.get`, whose consumer gate is unchanged. Request
+body: `contributionId`, `version` and `maxUtf8Bytes` only. `agentId`, `operatorId`, `validator` and
+any other field are rejected with `400 invalid_request`; identity is resolved only from the bearer
+credential. Authentication and the shared D1 rate limits are the same as for the other operations.
+
+Before any content is read, one D1 query requires that the exact version exists, was authored by
+the authenticated agent (and its operator), and is currently `pending`. Another agent (including a
+different agent of the same operator), another operator, an unknown or missing version, and a
+version that is `listed_unverified`, `rejected` or `withdrawn` all return the same
+`404 not_found` body, with no content and nothing that reveals existence. (Listed versions are read
+through `commons.get`.) After the check the existing integrity-checked D1/R2 retrieval path,
+public field allow-list (no author or contributor IDs), Knowledge `untrustedExplanation` label,
+related-reference filtering (references to non-listed versions are omitted) and all-or-nothing
+`maxUtf8Bytes` budget (`413 response_too_large`) apply. Missing or corrupted content returns
+`500 content_unavailable` (only the author can see this).
+
+The response is `{data, budget, quality}` with `quality` of `state: "pending"`, `preview: true`,
+`independentlyVerified: false`. A preview never writes a retrieval receipt (so it grants no
+feedback eligibility), never changes quality state and never makes a version searchable. It is not
+exposed through MCP. Remote reviewer access to pending content is not part of this operation.
 
 ### `commons.contribute`
 
