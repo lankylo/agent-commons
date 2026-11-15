@@ -26,7 +26,7 @@ concurrency:
 jobs:
   develop:
     runs-on: ubuntu-24.04
-    timeout-minutes: 30
+    timeout-minutes: 60
     steps:
       - name: Checkout repository
         uses: actions/checkout@v7
@@ -41,10 +41,10 @@ jobs:
             Follow AGENTS.md and project.md strictly.
             Perform only this manually approved development task:
             ${{ inputs.task }}
-            Work on a branch and open a PR for review; do not merge.
+            Work on a branch and open or update a PR for review; do not merge.
             Update project.md progress only for tested changes.
           claude_args: |
             --model ${{ inputs.use_opus && 'opus' || 'sonnet' }}
-            --max-turns 30
+            --max-turns 60
             --permission-mode auto
             --allowedTools "Bash(npm install),Bash(npm run:*),Bash(npx tsc:*),Bash(npx eslint:*),Bash(npx vitest:*),Edit,Write"
