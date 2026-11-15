@@ -1,5 +1,5 @@
 import { execFileSync } from "node:child_process";
-import { mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { getPlatformProxy, type PlatformProxy } from "wrangler";
@@ -8,13 +8,11 @@ import { IdentityRepository } from "../../src/identity/repository";
 import type { AgentId } from "../../src/identity/types";
 import { ContributionRegistry, type RegistryEnv } from "../../src/registry/creation";
 import { QualityReviewer, type DecideResult } from "../../src/registry/quality-review";
-import { QualityStateStore, type QualityState } from "../../src/registry/quality-state";
-import { contentObjectKey } from "../../src/storage/content-objects";
+import { QualityStateStore } from "../../src/registry/quality-state";
 
 let proxy: PlatformProxy<RegistryEnv>;
 let dir: string;
 let db: D1Database;
-let bucket: R2Bucket;
 let registry: ContributionRegistry;
 let agent: AgentId;
 const store = () => new QualityStateStore(db);
@@ -43,7 +41,6 @@ beforeAll(async () => {
     persist: { path: join(dir, "v3") },
   });
   db = proxy.env.DB;
-  bucket = proxy.env.CONTENT_BUCKET;
   const identity = new IdentityRepository(db);
   const op = await identity.createOperator({ kind: "organization", displayName: "Op" });
   await db
