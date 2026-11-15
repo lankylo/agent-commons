@@ -11,6 +11,7 @@ import type { RegistryEnv } from "../src/registry/creation";
 import { ContributionRegistry } from "../src/registry/creation";
 import { HTTPBIN_EXECUTION_SEED, HTTPBIN_KNOWLEDGE_SEED } from "../src/seed/httpbin";
 import worker from "../src/index";
+import { listVersion } from "./helpers/quality";
 
 interface Actor {
   readonly agentId: AgentId;
@@ -134,6 +135,7 @@ async function createKnowledge(): Promise<string> {
     title: `Feedback Knowledge ${++contributionNumber}`,
   });
   if (!result.ok) throw new Error(`Failed to create Knowledge fixture: ${result.error.code}`);
+  await listVersion(proxy.env, result.contribution.id);
   return result.contribution.id;
 }
 
@@ -143,6 +145,7 @@ async function createExecution(): Promise<string> {
     title: `Feedback Execution ${++contributionNumber}`,
   });
   if (!result.ok) throw new Error(`Failed to create Execution fixture: ${result.error.code}`);
+  await listVersion(proxy.env, result.contribution.id);
   return result.contribution.id;
 }
 

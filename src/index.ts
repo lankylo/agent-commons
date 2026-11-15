@@ -3,6 +3,7 @@ import type { AgentId, OperatorId } from "./identity/types";
 import { ContributionSearch } from "./registry/search";
 import { budgetDiscoveryResponse } from "./registry/discovery-budget";
 import { ContributionRetriever } from "./registry/retrieval";
+import { CONSUMER_QUALITY_LABEL, QualityStateStore } from "./registry/quality-state";
 import type { ConditionalRetrievalResponse } from "./registry/retrieval-conditional";
 import type { RetrievalResponse } from "./registry/retrieval-response";
 import { ContributionRegistry, type CreationError, type VersionError } from "./registry/creation";
@@ -197,7 +198,7 @@ async function handleSearch(request: Request, env: WorkerEnv): Promise<Response>
       );
     }
 
-    const search = new ContributionSearch({ DB: env.DB });
+    const search = new ContributionSearch({ DB: env.DB }, { visibility: "listed_unverified" });
     const result = await search.search(searchInput);
     if (!result.ok) {
       return httpError(400, "invalid_search_request", "The search request is invalid.", {
@@ -219,6 +220,7 @@ async function handleSearch(request: Request, env: WorkerEnv): Promise<Response>
           usedUtf8Bytes: budgeted.budget.usedUtf8Bytes,
           omittedResultCount: budgeted.budget.omittedResultCount,
         },
+        quality: CONSUMER_QUALITY_LABEL,
       },
       { status: 200 },
     );
@@ -279,6 +281,43 @@ function toPublicRetrievalResponse(
     family: "execution",
     content: response.content,
   };
+}
+
+/**
+ * Removes metadata about related versions that are not listed: references (top-level and the
+ * contributed `content.related`) to non-listed versions are dropped, and `previousVersion` becomes
+ * null unless that exact earlier version is listed.
+ */
+async function withListedReferencesOnly(
+  data: PublicRetrievalResponse,
+  states: QualityStateStore,
+  contributionId: string,
+): Promise<PublicRetrievalResponse> {
+  if (data.schemaVersion === "retrieval-not-modified/v1") return data;
+  const candidates = [
+    ...data.related,
+    ...(data.content.related ?? []),
+    ...(data.previousVersion === null
+      ? []
+      : [{ id: contributionId, version: data.previousVersion }]),
+  ];
+  const listed = await states.listedKeys(candidates);
+  const keep = <T extends { id: string; version: number }>(refs: readonly T[]): T[] =>
+    refs.filter((r) => listed.has(`${r.id}\u0000${r.version}`));
+  const previousVersion =
+    data.previousVersion !== null && listed.has(`${contributionId}\u0000${data.previousVersion}`)
+      ? data.previousVersion
+      : null;
+  const content =
+    data.content.related === undefined
+      ? data.content
+      : { ...data.content, related: keep(data.content.related) };
+  return {
+    ...data,
+    previousVersion,
+    related: keep(data.related),
+    content,
+  } as PublicRetrievalResponse;
 }
 
 function getRequestFieldsAreValid(record: Record<string, unknown>): boolean {
@@ -361,6 +400,14 @@ async function handleGet(request: Request, env: WorkerEnv): Promise<Response> {
       };
     }
 
+    // Consumer visibility gate: only an exact listed_unverified version is retrievable. Pending,
+    // rejected, withdrawn, unknown and missing-state versions share one 404 before any content,
+    // R2 read, validator comparison or receipt, so conditional requests cannot probe them either.
+    const states = new QualityStateStore(env.DB);
+    if (!(await states.isListed(record.contributionId, record.version))) {
+      return httpError(404, "not_found", "The requested contribution version was not found.");
+    }
+
     const result = await new ContributionRetriever({
       DB: env.DB,
       CONTENT_BUCKET: env.CONTENT_BUCKET,
@@ -379,7 +426,11 @@ async function handleGet(request: Request, env: WorkerEnv): Promise<Response> {
       }
     }
 
-    const data = toPublicRetrievalResponse(result.response);
+    const data = await withListedReferencesOnly(
+      toPublicRetrievalResponse(result.response),
+      states,
+      record.contributionId,
+    );
     const usedUtf8Bytes = new TextEncoder().encode(JSON.stringify(data)).length;
     if (usedUtf8Bytes > record.maxUtf8Bytes) {
       return httpError(
@@ -409,6 +460,7 @@ async function handleGet(request: Request, env: WorkerEnv): Promise<Response> {
         maxUtf8Bytes: record.maxUtf8Bytes,
         usedUtf8Bytes,
       },
+      quality: CONSUMER_QUALITY_LABEL,
     });
   } catch {
     return httpError(500, "internal_error", "Retrieval is unavailable.");

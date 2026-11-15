@@ -10,6 +10,7 @@ import type { AgentId } from "../src/identity/types";
 import { ContributionRegistry, type RegistryEnv } from "../src/registry/creation";
 import { seedHttpbinContributions } from "../src/seed/load-httpbin";
 import worker from "../src/index";
+import { listVersion } from "./helpers/quality";
 
 let proxy: PlatformProxy<RegistryEnv>;
 let dir: string;
@@ -59,6 +60,10 @@ beforeAll(async () => {
   token = issued.token;
   const seeded = await seedHttpbinContributions(registry, agent.id);
   expect(seeded.ok).toBe(true);
+  if (seeded.ok) {
+    await listVersion(proxy.env, seeded.knowledge.id);
+    await listVersion(proxy.env, seeded.execution.id);
+  }
 }, 180_000);
 
 afterAll(async () => {

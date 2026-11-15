@@ -99,6 +99,16 @@ match the selected family; filters without `family` are invalid.
   `targetDomain`, `requiredCapability`, `sideEffect` (`read-only`, `reversible-write`,
   `irreversible-write`) and `requiresHumanApproval` (boolean).
 
+**Consumer visibility gate.** Search returns only versions whose platform quality state is
+`listed_unverified`. A contribution's searched version is its newest *listed* version, so a pending,
+rejected or withdrawn newer version never hides an older listed one (and listing a newer version
+makes it the searched version). Pending, rejected, withdrawn and missing-state versions are never
+returned. Related references to versions that are not listed are omitted. `listed_unverified` means
+only "allowed to list"; it does not mean independently verified, and every successful response
+carries a top-level `quality` label (`state: "listed_unverified"`, `independentlyVerified: false`)
+beside `data` and `budget`. The gate lives in the shared Worker handler, so REST and local MCP
+behave identically.
+
 `maxUtf8Bytes` is required by this contract. The response wraps the existing discovery shape and
 budget metadata. This REST-only field must be removed before passing the remaining request to
 `ContributionSearch.search`, whose internal request type does not include a budget.
@@ -160,6 +170,15 @@ before comparing a validator. An exact match on all three validator fields retur
 `retrieval-not-modified/v1`; an absent or mismatched validator returns the complete
 `retrieval-response/v1`. A not-modified result does not itself prove or record a previous full
 retrieval.
+
+**Consumer visibility gate.** `commons.get` serves only an exact version in the `listed_unverified`
+state. A pending, rejected, withdrawn, unknown or missing-state version returns the same
+`404 not_found` body as an unknown ID, including when a `validator` is supplied (the check runs
+before any content or validator comparison), with no content, no R2 read and no retrieval receipt.
+In successful responses, `related` and `content.related` omit references to versions that are not
+listed, and `previousVersion` is `null` unless that exact earlier version is listed. Successful full
+and not-modified responses carry the same top-level `quality` label as search; `listed_unverified`
+is not independent verification. Private platform review (`QualityReviewer.inspect`) is unaffected.
 
 The full response is all-or-nothing: if it exceeds `maxUtf8Bytes`, return `413 response_too_large`
 with required and maximum UTF-8 byte counts and no partial content. A conditional response is
