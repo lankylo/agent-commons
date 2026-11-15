@@ -1,7 +1,9 @@
 import { MAX_REVIEW_INTERVAL_DAYS } from "../../src/registry/review-intervals";
 import { describe, expect, it } from "vitest";
 import {
+  checkExecutionDomainPolicy,
   EXECUTION_LIMITS,
+  parseExecutionDomainPolicy,
   STEP_TYPES,
   validateExecutionContribution,
   validateExecutionContributionJsonSchema,
@@ -82,6 +84,22 @@ const errorsFor = (mutate: (v: Rec) => void): string[] => {
   return r.ok ? [] : [...r.errors];
 };
 
+function policyFor(value: Record<string, unknown>) {
+  const parsed = parseExecutionDomainPolicy(JSON.stringify(value));
+  if (!parsed.ok) throw new Error(parsed.errors.join(", "));
+  return parsed.policy;
+}
+
+function executionForDomains(targetDomain: string, requestDomain = targetDomain) {
+  const input = valid();
+  input.targetDomains = [targetDomain];
+  (input.compatibility as Rec).targetVersions = [{ domain: targetDomain, version: "v1" }];
+  step(input).domain = requestDomain;
+  const result = validateExecutionContribution(input);
+  if (!result.ok) throw new Error(result.errors.join(", "));
+  return result.value;
+}
+
 describe("validateExecutionContribution: valid", () => {
   it("accepts a complete valid execution targeting public httpbin.org", () => {
     const r = validateExecutionContribution(valid());
@@ -140,6 +158,99 @@ describe("Execution contribution JSON Schema", () => {
     const extraStepField = valid();
     step(extraStepField).extra = true;
     expect(validateExecutionContributionJsonSchema(extraStepField)).not.toEqual([]);
+  });
+});
+
+describe("platform Execution target policy", () => {
+  it("requires a valid explicit allow set and canonicalizes policy hosts", () => {
+    for (const value of [
+      undefined,
+      "",
+      "{",
+      JSON.stringify({ allowed: [], denied: [] }),
+      JSON.stringify({ allowed: [{ domain: "httpbin.org" }], denied: [] }),
+      JSON.stringify({ allowed: [{ domain: "example.com", includeSubdomains: true }], denied: [] }),
+      JSON.stringify({
+        allowed: [{ domain: "httpbin.org", includeSubdomains: true }],
+      }),
+      JSON.stringify({
+        allowed: [
+          { domain: "httpbin.org", includeSubdomains: false },
+          { domain: "HTTPBIN.ORG.", includeSubdomains: true },
+        ],
+        denied: [],
+      }),
+      JSON.stringify({
+        allowed: [{ domain: "httpbin.org", includeSubdomains: true }],
+        denied: [],
+        override: true,
+      }),
+    ]) {
+      expect(parseExecutionDomainPolicy(value).ok).toBe(false);
+    }
+
+    expect(
+      parseExecutionDomainPolicy(
+        JSON.stringify({
+          allowed: [{ domain: "HTTPBIN.ORG.", includeSubdomains: true }],
+          denied: ["BLOCKED.HTTPBIN.ORG."],
+        }),
+      ),
+    ).toEqual({
+      ok: true,
+      policy: {
+        allowed: [{ domain: "httpbin.org", includeSubdomains: true }],
+        denied: ["blocked.httpbin.org"],
+      },
+    });
+  });
+
+  it("requires explicit subdomain allowance and preserves hostname boundaries", () => {
+    const exactPolicy = policyFor({
+      allowed: [{ domain: "HTTPBIN.ORG.", includeSubdomains: false }],
+      denied: [],
+    });
+    expect(checkExecutionDomainPolicy(executionForDomains("HTTPBIN.ORG."), exactPolicy)).toEqual(
+      [],
+    );
+    expect(
+      checkExecutionDomainPolicy(
+        executionForDomains("httpbin.org", "api.httpbin.org"),
+        exactPolicy,
+      ),
+    ).toContain("steps[0].domain: is not allowed by the platform Execution domain policy");
+
+    const subdomainPolicy = policyFor({
+      allowed: [{ domain: "httpbin.org", includeSubdomains: true }],
+      denied: [],
+    });
+    expect(
+      checkExecutionDomainPolicy(executionForDomains("api.httpbin.org"), subdomainPolicy),
+    ).toEqual([]);
+    for (const hostname of ["nothttpbin.org", "httpbin.org.evil"]) {
+      expect(
+        checkExecutionDomainPolicy(executionForDomains(hostname), subdomainPolicy),
+      ).toHaveLength(2);
+    }
+  });
+
+  it("denies configured domains and subdomains before applying allow rules", () => {
+    const policy = policyFor({
+      allowed: [{ domain: "acme.com", includeSubdomains: true }],
+      denied: ["blocked.acme.com"],
+    });
+    for (const hostname of ["blocked.acme.com", "child.blocked.acme.com"]) {
+      expect(checkExecutionDomainPolicy(executionForDomains(hostname), policy)).toEqual([
+        "targetDomains[0]: is not allowed by the platform Execution domain policy",
+        "steps[0].domain: is not allowed by the platform Execution domain policy",
+      ]);
+    }
+    for (const hostname of ["notblocked.acme.com"]) {
+      expect(checkExecutionDomainPolicy(executionForDomains(hostname), policy)).toEqual([]);
+    }
+    expect(
+      checkExecutionDomainPolicy(executionForDomains("blocked.acme.com.evil"), policy),
+    ).toHaveLength(2);
   });
 });
 

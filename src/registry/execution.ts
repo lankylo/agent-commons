@@ -149,6 +149,17 @@ export interface ExecutionContributionInput extends ContributionEnvelopeInput<"e
   readonly asOf: string;
 }
 
+export interface ExecutionDomainAllowRule {
+  readonly domain: string;
+  readonly includeSubdomains: boolean;
+}
+
+export interface ExecutionDomainPolicy {
+  readonly allowed: readonly ExecutionDomainAllowRule[];
+  /** Each denied domain also denies its label-boundary subdomains. */
+  readonly denied: readonly string[];
+}
+
 export type ExecutionValidation =
   | { readonly ok: true; readonly value: ExecutionContributionInput }
   | { readonly ok: false; readonly errors: readonly string[] };
@@ -612,6 +623,125 @@ function canonicalHostname(value: unknown): string | undefined {
     return undefined;
   }
   return hostname;
+}
+
+export type ExecutionDomainPolicyParseResult =
+  | { readonly ok: true; readonly policy: ExecutionDomainPolicy }
+  | { readonly ok: false; readonly errors: readonly string[] };
+
+/** Parse and validate the platform-owned JSON policy; contributors never supply it. */
+export function parseExecutionDomainPolicy(value: unknown): ExecutionDomainPolicyParseResult {
+  if (typeof value !== "string" || value.trim().length === 0) {
+    return {
+      ok: false,
+      errors: ["EXECUTION_DOMAIN_POLICY_JSON: must be configured"],
+    };
+  }
+
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(value) as unknown;
+  } catch {
+    return {
+      ok: false,
+      errors: ["EXECUTION_DOMAIN_POLICY_JSON: must contain valid JSON"],
+    };
+  }
+  if (!isObj(parsed)) {
+    return {
+      ok: false,
+      errors: ["EXECUTION_DOMAIN_POLICY_JSON: must be an object"],
+    };
+  }
+
+  const errors: string[] = [];
+  if (Object.keys(parsed).some((key) => key !== "allowed" && key !== "denied")) {
+    errors.push("EXECUTION_DOMAIN_POLICY_JSON: only allowed and denied are supported");
+  }
+
+  const allowed: ExecutionDomainAllowRule[] = [];
+  const seenAllowed = new Set<string>();
+  if (!Array.isArray(parsed.allowed) || parsed.allowed.length === 0) {
+    errors.push("EXECUTION_DOMAIN_POLICY_JSON.allowed: requires at least one rule");
+  } else {
+    parsed.allowed.forEach((rule, index) => {
+      const path = `EXECUTION_DOMAIN_POLICY_JSON.allowed[${index}]`;
+      if (!isObj(rule)) {
+        errors.push(`${path}: must be an object`);
+        return;
+      }
+      if (Object.keys(rule).some((key) => key !== "domain" && key !== "includeSubdomains")) {
+        errors.push(`${path}: only domain and includeSubdomains are supported`);
+      }
+      const domain = canonicalHostname(rule.domain);
+      if (domain === undefined) errors.push(`${path}.domain: must be a non-special DNS hostname`);
+      if (typeof rule.includeSubdomains !== "boolean") {
+        errors.push(`${path}.includeSubdomains: must be an explicit boolean`);
+      }
+      if (domain === undefined || typeof rule.includeSubdomains !== "boolean") return;
+      if (seenAllowed.has(domain)) errors.push(`${path}.domain: duplicate domain`);
+      else {
+        seenAllowed.add(domain);
+        allowed.push({ domain, includeSubdomains: rule.includeSubdomains });
+      }
+    });
+  }
+
+  const denied: string[] = [];
+  const seenDenied = new Set<string>();
+  if (!Array.isArray(parsed.denied)) {
+    errors.push("EXECUTION_DOMAIN_POLICY_JSON.denied: must be an array");
+  } else {
+    parsed.denied.forEach((value, index) => {
+      const path = `EXECUTION_DOMAIN_POLICY_JSON.denied[${index}]`;
+      const domain = canonicalHostname(value);
+      if (domain === undefined) {
+        errors.push(`${path}: must be a non-special DNS hostname`);
+        return;
+      }
+      if (seenDenied.has(domain)) errors.push(`${path}: duplicate domain`);
+      else {
+        seenDenied.add(domain);
+        denied.push(domain);
+      }
+    });
+  }
+
+  if (errors.length > 0) return { ok: false, errors };
+  return { ok: true, policy: { allowed, denied } };
+}
+
+function isAllowedByExecutionDomainPolicy(value: string, policy: ExecutionDomainPolicy): boolean {
+  const hostname = canonicalHostname(value);
+  if (hostname === undefined) return false;
+  if (policy.denied.some((domain) => hostname === domain || hostname.endsWith(`.${domain}`))) {
+    return false;
+  }
+  return policy.allowed.some(
+    (rule) =>
+      hostname === rule.domain || (rule.includeSubdomains && hostname.endsWith(`.${rule.domain}`)),
+  );
+}
+
+/** Mutable platform policy is checked only before writes, never during integrity retrieval. */
+export function checkExecutionDomainPolicy(
+  content: ExecutionContributionInput,
+  policy: ExecutionDomainPolicy,
+): readonly string[] {
+  const errors: string[] = [];
+  content.targetDomains.forEach((domain, index) => {
+    if (!isAllowedByExecutionDomainPolicy(domain, policy)) {
+      errors.push(
+        `targetDomains[${index}]: is not allowed by the platform Execution domain policy`,
+      );
+    }
+  });
+  content.steps.forEach((step, index) => {
+    if (step.type === "http_request" && !isAllowedByExecutionDomainPolicy(step.domain, policy)) {
+      errors.push(`steps[${index}].domain: is not allowed by the platform Execution domain policy`);
+    }
+  });
+  return errors;
 }
 
 function matchesDeclaredTarget(hostname: unknown, declared: ReadonlySet<string>): boolean {

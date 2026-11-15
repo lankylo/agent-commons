@@ -333,6 +333,33 @@ describe("Execution version 2 and references", () => {
     }
     expect(await snapshot()).toEqual(before);
   });
+
+  it("checks current policy for new versions but not immutable-version integrity", async () => {
+    const v1 = must(await registry.createContribution(agent, execution()));
+    const restrictivePolicy = new ContributionRegistry(
+      {
+        ...proxy.env,
+        EXECUTION_DOMAIN_POLICY_JSON: JSON.stringify({
+          allowed: [{ domain: "httpbin.org", includeSubdomains: true }],
+          denied: ["acme.com"],
+        }),
+      },
+      { now: () => clock },
+    );
+
+    expect(
+      codeOf(await restrictivePolicy.createContributionVersion(agent, v1.id, 1, execution())),
+    ).toBe("invalid_content");
+
+    const stored = await restrictivePolicy.getContributionVersion(v1.id, 1);
+    expect(stored.ok).toBe(true);
+
+    const missingPolicy = new ContributionRegistry({ DB: db, CONTENT_BUCKET: bucket });
+    expect(
+      codeOf(await missingPolicy.createContributionVersion(agent, v1.id, 1, execution())),
+    ).toBe("execution_domain_policy_unavailable");
+    expect(await versionRow(v1.id, 1)).toMatchObject({ version: 1 });
+  });
 });
 
 describe("rejections", () => {
@@ -549,7 +576,11 @@ describe("failure behavior (R2 first, then one atomic D1 batch)", () => {
       },
     });
     const broken = new ContributionRegistry(
-      { DB: failingDb, CONTENT_BUCKET: bucket },
+      {
+        DB: failingDb,
+        CONTENT_BUCKET: bucket,
+        EXECUTION_DOMAIN_POLICY_JSON: proxy.env.EXECUTION_DOMAIN_POLICY_JSON,
+      },
       { now: () => clock },
     );
     const input = execution();

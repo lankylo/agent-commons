@@ -151,7 +151,7 @@ export function createCommonsMcpServer(env: unknown, credential: string): McpSer
     "commons.contribute",
     {
       description:
-        "Submit a new Knowledge or Execution contribution, or add its exact next immutable version with contributionId and expectedPreviousVersion. Existing family-specific registry validation applies. Only authenticated, active agents for allow-listed operators may contribute; submitted verification remains an untrusted declaration.",
+        "Submit a new Knowledge or Execution contribution, or add its exact next immutable version with contributionId and expectedPreviousVersion. Execution targets must satisfy the platform-managed domain policy. Only authenticated, active agents for allow-listed operators may contribute; submitted verification remains an untrusted declaration, and recipes are never run here.",
       inputSchema: contributeInputSchema,
     },
     (input) => invokeWorker(env, credential, "contribute", input),

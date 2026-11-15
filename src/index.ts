@@ -16,6 +16,7 @@ import { RateLimitService, DEFAULT_RATE_LIMITS } from "./rate-limit";
 interface WorkerEnv {
   readonly DB?: D1Database;
   readonly CONTENT_BUCKET?: R2Bucket;
+  readonly EXECUTION_DOMAIN_POLICY_JSON?: string;
   readonly NOW?: () => Date;
   readonly RATE_LIMIT_AGENT_LIMIT?: number | string;
   readonly RATE_LIMIT_OPERATOR_LIMIT?: number | string;
@@ -432,6 +433,7 @@ const CONTRIBUTION_PLATFORM_FIELDS = new Set([
   "platformState",
   "updatedAt",
   "timestamp",
+  "executionDomainPolicy",
 ]);
 
 function hasReservedContributionFields(record: Record<string, unknown>): boolean {
@@ -445,6 +447,12 @@ function mapContributionError(code: CreationErrorCode | VersionErrorCode): Respo
         403,
         "contribution_not_allowed",
         "This operator is not allowed to contribute.",
+      );
+    case "execution_domain_policy_unavailable":
+      return httpError(
+        503,
+        "execution_domain_policy_unavailable",
+        "Execution target policy is unavailable.",
       );
     case "actor_not_found":
     case "actor_inactive":
@@ -555,6 +563,7 @@ async function handleContribute(request: Request, env: WorkerEnv): Promise<Respo
     const registry = new ContributionRegistry({
       DB: env.DB,
       CONTENT_BUCKET: env.CONTENT_BUCKET,
+      EXECUTION_DOMAIN_POLICY_JSON: env.EXECUTION_DOMAIN_POLICY_JSON,
     });
     const result = isVersion
       ? await registry.createContributionVersion(

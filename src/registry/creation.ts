@@ -26,7 +26,13 @@ import { putContentObject } from "../storage/content-objects";
 import { canonicalJson, CanonicalJsonError, sha256Hex } from "./content-hash";
 import { findPlatformFieldViolations, type ContributionFamily } from "./envelope";
 import { buildSearchText } from "./search-document";
-import { validateExecutionContribution, type ExecutionContributionInput } from "./execution";
+import {
+  checkExecutionDomainPolicy,
+  parseExecutionDomainPolicy,
+  validateExecutionContribution,
+  type ExecutionContributionInput,
+  type ExecutionDomainPolicy,
+} from "./execution";
 import { validateKnowledgeContribution, type KnowledgeContributionInput } from "./knowledge";
 import { resolveContributionRefs } from "./references";
 import { ContributionRetriever, type RetrieveResult } from "./retrieval";
@@ -35,6 +41,7 @@ export type CreationErrorCode =
   | "actor_not_found"
   | "actor_inactive"
   | "operator_not_allow_listed"
+  | "execution_domain_policy_unavailable"
   | "platform_field_rejected"
   | "invalid_content"
   | "unresolved_reference"
@@ -98,6 +105,7 @@ interface PreparedContent {
 export interface RegistryEnv {
   DB: D1Database;
   CONTENT_BUCKET: R2Bucket;
+  EXECUTION_DOMAIN_POLICY_JSON?: string;
 }
 
 /** Platform-supplied sources, injectable for tests only. */
@@ -125,10 +133,12 @@ export class ContributionRegistry {
   private readonly db: D1Database;
   private readonly bucket: R2Bucket;
   private readonly platform: RegistryPlatform;
+  private readonly executionDomainPolicyJson: string | undefined;
 
   constructor(env: RegistryEnv, platform: Partial<RegistryPlatform> = {}) {
     this.db = env.DB;
     this.bucket = env.CONTENT_BUCKET;
+    this.executionDomainPolicyJson = env.EXECUTION_DOMAIN_POLICY_JSON;
     this.platform = { ...defaultPlatform, ...platform };
   }
 
@@ -372,6 +382,19 @@ export class ContributionRegistry {
         message: `a ${requiredFamily} contribution cannot change family`,
       });
     }
+    let executionDomainPolicy: ExecutionDomainPolicy | undefined;
+    if (family === "execution") {
+      const policy = parseExecutionDomainPolicy(this.executionDomainPolicyJson);
+      if (!policy.ok) {
+        return bad({
+          code: "execution_domain_policy_unavailable",
+          message: "Execution domain policy is missing or invalid.",
+          errors: policy.errors,
+        });
+      }
+      executionDomainPolicy = policy.policy;
+    }
+
     const validated =
       family === "knowledge"
         ? validateKnowledgeContribution(input)
@@ -386,6 +409,23 @@ export class ContributionRegistry {
       });
     }
     const content = validated.value;
+
+    if (content.family === "execution") {
+      if (executionDomainPolicy === undefined) {
+        return bad({
+          code: "execution_domain_policy_unavailable",
+          message: "Execution domain policy is missing or invalid.",
+        });
+      }
+      const policyErrors = checkExecutionDomainPolicy(content, executionDomainPolicy);
+      if (policyErrors.length > 0) {
+        return bad({
+          code: "invalid_content",
+          message: "content failed platform Execution domain policy",
+          errors: policyErrors,
+        });
+      }
+    }
 
     // Cross-family references must resolve to exact stored versions.
     const refs = await resolveContributionRefs(

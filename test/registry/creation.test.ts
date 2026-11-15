@@ -161,6 +161,18 @@ const execution = (related?: unknown): Record<string, unknown> => ({
   asOf: "2026-11-10T10:00:00Z",
 });
 
+function executionForTarget(domain: string): Record<string, unknown> {
+  const input = execution();
+  input.targetDomains = [domain];
+  (input.compatibility as Record<string, unknown>).targetVersions = [{ domain, version: "v1" }];
+  const request = (input.steps as Record<string, unknown>[]).find(
+    (step) => step.type === "http_request",
+  );
+  if (!request) throw new Error("Execution fixture must contain an HTTP request step");
+  request.domain = domain;
+  return input;
+}
+
 function must(r: CreateContributionResult) {
   if (!r.ok) throw new Error(`expected success: ${JSON.stringify(r.error)}`);
   return r.contribution;
@@ -303,6 +315,39 @@ describe("valid Knowledge creation", () => {
 });
 
 describe("valid Execution creation", () => {
+  it("uses the local platform policy for allowed and denied targets and request steps", async () => {
+    const before = await snapshot();
+    const denied = await registry.createContribution(agent, executionForTarget("blocked.acme.com"));
+    expect(codeOf(denied)).toBe("invalid_content");
+    expect(!denied.ok && denied.error.errors).toEqual(
+      expect.arrayContaining([
+        "targetDomains[0]: is not allowed by the platform Execution domain policy",
+        "steps[0].domain: is not allowed by the platform Execution domain policy",
+      ]),
+    );
+    expect(await snapshot()).toEqual(before);
+
+    const allowed = must(
+      await registry.createContribution(agent, executionForTarget("httpbin.org")),
+    );
+    expect(allowed.family).toBe("execution");
+  });
+
+  it("rejects missing or invalid platform policy before writing Execution content", async () => {
+    const before = await snapshot();
+    const missingPolicy = new ContributionRegistry({ DB: db, CONTENT_BUCKET: bucket });
+    const missing = await missingPolicy.createContribution(agent, execution());
+    expect(codeOf(missing)).toBe("execution_domain_policy_unavailable");
+
+    const invalidPolicy = new ContributionRegistry(
+      { ...proxy.env, EXECUTION_DOMAIN_POLICY_JSON: "{" },
+      { now: () => FIXED },
+    );
+    const invalid = await invalidPolicy.createContribution(agent, execution());
+    expect(codeOf(invalid)).toBe("execution_domain_policy_unavailable");
+    expect(await snapshot()).toEqual(before);
+  });
+
   it("stores normalized rows, JSON columns and target domains", async () => {
     const k = must(await registry.createContribution(agent, knowledge()));
     const input = execution([{ family: "knowledge", id: k.id, version: 1 }]);
@@ -430,6 +475,10 @@ describe("rejections", () => {
       lastVerifiedAt: "2020-01-01T00:00:00Z",
       reliabilityScore: 1,
       consumerCount: 99,
+      executionDomainPolicy: {
+        allowed: [{ domain: "blocked.acme.com", includeSubdomains: true }],
+        denied: [],
+      },
     };
     for (const [k, v] of Object.entries(fields)) {
       for (const base of [knowledge(), execution()]) {
