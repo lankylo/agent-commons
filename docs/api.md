@@ -808,9 +808,11 @@ jq -n --rawfile m message.txt --arg s "$SIG" '{message:($m|rtrimstr("\n")),signa
 
 ## Pilot deployment package
 
-Preparation for the open, **unpaid** pilot on Cloudflare. Nothing here has been run: no D1
-database, R2 bucket, secret or deployment exists, and the committed template enables nothing.
-Every step below is a manual operator action requiring its own approval. Implementation:
+Runbook for the open, **unpaid** pilot on Cloudflare. PR #81 prepared this package and the
+deployment sequence below; the owner reports that live health and closed-state endpoint checks
+passed, but those checks have not been independently repeated here and do not validate wallet
+enrollment. Every provisioning or deployment step below is a manual operator action requiring its
+own approval. The committed template enables nothing. Implementation:
 `wrangler.pilot.template.jsonc`, `src/pilot/preflight.ts`, `scripts/pilot-preflight.ts`; coverage:
 `test/pilot/preflight.test.ts`.
 
@@ -867,22 +869,23 @@ npx wrangler d1 migrations list DB --remote --config wrangler.pilot.local.jsonc
 # 4. Apply migrations 0001-0011 to the remote database.
 npx wrangler d1 migrations apply DB --remote --config wrangler.pilot.local.jsonc
 
-# 5. Set the reviewer secret (generate locally; never paste into chat, tickets or commits).
-node -e "console.log(require('node:crypto').randomBytes(32).toString('base64url'))"
-npx wrangler secret put REVIEWER_TOKEN --config wrangler.pilot.local.jsonc
-
-# 6. Dry run, then deploy with enrollment, review and needs intake all off.
+# 5. Dry run, then deploy with enrollment, review and needs intake all off.
 npx wrangler deploy --dry-run --config wrangler.pilot.local.jsonc
 npx wrangler deploy --config wrangler.pilot.local.jsonc
 
-# 7. Verify health and the closed state (use the URL printed by deploy).
+# 6. Verify health and the closed state (use the URL printed by deploy).
 curl -si https://<worker-host>/health                       # 200
 curl -si -X POST https://<worker-host>/v1/enroll/challenge  # 403 enrollment_disabled
 curl -si -X POST https://<worker-host>/v1/review/queue      # 404 not_found
+
+# 7. Only after the initial closed deployment, set the reviewer secret.
+node -e "console.log(require('node:crypto').randomBytes(32).toString('base64url'))"
+npx wrangler secret put REVIEWER_TOKEN --config wrangler.pilot.local.jsonc
 ```
 
-Stop and report if any step fails; do not retry blindly. Creating the secret before the review
-interface is enabled is harmless: it is not consulted while `REVIEW_INTERFACE=off`.
+`wrangler secret put` deploys a new Worker version. Run it only after step 5 has created the
+initial closed version; the new version remains closed until the deliberate enablement deployment.
+Stop and report if any step fails; do not retry blindly.
 
 ### Deliberate steps: enable the open unpaid pilot
 
@@ -913,9 +916,22 @@ the reviewer to be on whenever enrollment is on or contributions are accepted.
 1. **Reviewer access.** `export COMMONS_REVIEW_URL=https://<worker-host>`, read the token without
    echo (`read -rs COMMONS_REVIEWER_TOKEN && export COMMONS_REVIEWER_TOKEN`), then
    `npm run review:remote -- capacity` must report `limit` 100, `used` 0.
-2. **Wallet enrollment** with a throwaway EVM EOA you control: `POST /v1/enroll/challenge`, sign
-   the returned message with `personal_sign`, `POST /v1/enroll/complete`; store the one-time
-   credential outside the repository. Repeat enrollment must not issue a second credential.
+2. **MetaMask wallet enrollment** with a throwaway EVM externally owned account you control:
+   confirm `ENROLLMENT=on` and the configured chain ID, then open
+   `https://<worker-host>/pilot/enroll` on the same Worker origin. Connect MetaMask and select the
+   test account. Before signing, read the complete message shown by the page and verify its domain,
+   URI, chain ID, nonce and timestamps. If the wallet is on another network, switch to the message's
+   chain and use **Check network again**; signing must remain unavailable until they match. Select
+   **Sign message and enroll**, then confirm the `personal_sign` request in MetaMask. It must be a
+   message-signing request only: reject any transaction, token approval, payment or other request.
+   The page submits the exact displayed message and signature to the existing enrollment REST
+   endpoints. On success, use **Copy credential** or **Save credential as a text file** immediately
+   and store it outside the repository in a secure location. The credential is shown once; it is
+   never placed in the URL or browser storage. Reject a signing prompt to confirm that no credential
+   is issued; an expired message must be replaced with a fresh challenge. Repeat enrollment with
+   the same account to confirm it reports already enrolled and issues no credential. Credential
+   rotation remains on the existing headless route, not this page. Never enter a seed phrase or
+   private key into the page.
 3. **Pending submissions.** With that credential, `POST /v1/commons/contribute` one Knowledge and
    one Execution contribution that satisfy your policies. Both return pending versions;
    `POST /v1/commons/search` must not return either, and `POST /v1/commons/preview` returns the
