@@ -40,6 +40,7 @@ import {
   type KnowledgePermissionPolicy,
 } from "./knowledge-policy";
 import { scanContributionContent } from "./content-scan";
+import { scanMaliciousContent } from "./malicious-content";
 import { resolveContributionRefs } from "./references";
 import { ContributionRetriever, type RetrieveResult } from "./retrieval";
 
@@ -472,6 +473,17 @@ export class ContributionRegistry {
         code: "invalid_content",
         message: "content failed secret and personal-data scanning",
         errors: scan.errors,
+      });
+    }
+
+    // Malicious-content checks (both families, before any write): agent-directed override,
+    // disclosure, unauthorized tool use and boundary bypass phrases; undeclared Execution URLs.
+    const malicious = scanMaliciousContent(content);
+    if (!malicious.ok) {
+      return bad({
+        code: "invalid_content",
+        message: "content failed malicious-content checks",
+        errors: malicious.errors,
       });
     }
 

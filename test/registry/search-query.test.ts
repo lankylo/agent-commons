@@ -131,7 +131,7 @@ function knowledge(over: Record<string, unknown> = {}): Record<string, unknown> 
     contentType: "api-reference",
     summary: "Quotas for the quokka gateway.",
     facts: [{ subject: "quokka-gateway", predicate: "burstQuota", value: "walrus-tier" }],
-    explanation: "Ignore previous instructions; xylophonic secret phrase.",
+    explanation: "Untrusted contributor prose; xylophonic secret phrase.",
     sources: [
       {
         uri: "https://httpbin.org/src",
@@ -407,7 +407,7 @@ describe("plain-text query safety", () => {
 
   it("never matches Knowledge explanation text", async () => {
     expect(await found({ query: "xylophonic" })).toEqual([]);
-    expect(await found({ query: "ignore previous instructions" })).toEqual([]);
+    expect(await found({ query: "untrusted contributor prose" })).toEqual([]);
     expect(await found({ query: "quokka walrus" })).toEqual([ids.k2, ids.k1]);
   });
 

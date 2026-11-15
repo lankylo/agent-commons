@@ -16,6 +16,8 @@
  * expression has bounded repetition. Exceeding a bound fails closed. No network or LLM calls.
  */
 
+import { detectMaliciousText } from "./malicious-patterns";
+
 export const CONTENT_SCAN_LIMITS = {
   maxDepth: 16,
   maxNodes: 50_000,
@@ -339,12 +341,16 @@ const PLAIN_KEY = /^[A-Za-z_][A-Za-z0-9_-]{0,63}$/;
 
 /**
  * Path segment for a contributor-supplied object key, safe to include in error messages.
- * Plain identifiers without sensitive findings are shown; any other key is replaced by its
+ * Plain identifiers without sensitive or malicious-content findings are shown; any other key is replaced by its
  * 1-based position (`[field #n]`), or `[field]` when the position is unknown. Validators use this
  * so rejected content never echoes a field name that may itself carry a secret or personal data.
  */
 export function safeFieldPath(parent: string, key: string, index?: number): string {
-  if (PLAIN_KEY.test(key) && detectSensitiveText(key).length === 0) {
+  if (
+    PLAIN_KEY.test(key) &&
+    detectSensitiveText(key).length === 0 &&
+    detectMaliciousText(key).length === 0
+  ) {
     return parent === "" ? key : `${parent}.${key}`;
   }
   return `${parent}[field${index === undefined ? "" : ` #${index + 1}`}]`;
