@@ -137,6 +137,8 @@ describe("clean migration", () => {
         "version_platform_state",
         "version_quality_decisions",
         "version_quality_states",
+        "wallet_accounts",
+        "wallet_challenges",
       ].sort(),
     );
     // FTS5 virtual table plus its document table (shadow tables are filtered out above).
@@ -149,7 +151,7 @@ describe("clean migration", () => {
       count(
         "SELECT count(*) AS c FROM sqlite_master WHERE type = 'index' AND name LIKE '%\\_idx' ESCAPE '\\'",
       ),
-    ).toBe(19);
+    ).toBe(20);
     expect(
       db
         .prepare("PRAGMA table_info(retrieval_receipts)")

@@ -76,16 +76,28 @@ export class RateLimitService {
     return { allowed: true };
   }
 
+  /**
+   * Count one request against an arbitrary platform-chosen key (for unauthenticated routes such
+   * as wallet enrollment). Keys must not contain secrets; the scope label is not reported.
+   */
+  async checkKey(key: string, limit: number): Promise<RateLimitDecision> {
+    const d = await this.count(key, safePositiveInt(limit, 1));
+    return { allowed: d.allowed, retryAfterMs: d.retryAfterMs, unavailable: d.unavailable };
+  }
+
   private async checkScope(
     scope: "agent" | "operator",
     id: string,
     limit: number,
   ): Promise<RateLimitDecision> {
+    return { ...(await this.count(`${scope}:${id}`, limit)), scope };
+  }
+
+  private async count(key: string, limit: number): Promise<RateLimitDecision> {
     const nowMs = this.now().getTime();
     const bucketMs = Math.floor(nowMs / this.windowMs) * this.windowMs;
     const windowStart = new Date(bucketMs).toISOString();
     const staleBefore = new Date(Math.max(0, bucketMs - this.windowMs * 2)).toISOString();
-    const key = `${scope}:${id}`;
     try {
       await this.db
         .prepare("DELETE FROM rate_limit_windows WHERE window_start < ?")
@@ -103,11 +115,11 @@ export class RateLimitService {
         .first<{ count: number } | null>();
       if (row === null || row === undefined) {
         const retryAfterMs = Math.max(0, bucketMs + this.windowMs - nowMs);
-        return { allowed: false, retryAfterMs, scope, limit };
+        return { allowed: false, retryAfterMs, limit };
       }
-      return { allowed: true, scope, limit };
+      return { allowed: true, limit };
     } catch {
-      return { allowed: false, unavailable: true, scope, limit };
+      return { allowed: false, unavailable: true, limit };
     }
   }
 }

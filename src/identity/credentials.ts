@@ -48,6 +48,13 @@ export interface IssuedCredential {
   readonly credential: CredentialRecord;
 }
 
+export interface PreparedCredential {
+  readonly id: CredentialId;
+  /** The complete token. Shown only once; never log it. */
+  readonly token: string;
+  readonly statement: D1PreparedStatement;
+}
+
 export interface NewCredential {
   readonly label: string;
   /** Optional expiry; must be in the future. */
@@ -143,24 +150,37 @@ export class CredentialService {
       expiresAt = input.expiresAt.toISOString();
     }
 
-    const idBytes = crypto.getRandomValues(new Uint8Array(12));
-    const secretBytes = crypto.getRandomValues(new Uint8Array(32));
-    const id = toHex(idBytes);
-    const secret = toHex(secretBytes);
-    const digest = toHex(await digestSecret(secret));
+    const prepared = await this.prepareIssue(agentId, label, now, expiresAt);
+    const res = await prepared.statement.run();
+    if (res.meta.changes === 0) await this.explainIssueFailure(agentId);
 
-    const res = await this.db
+    const credential = await this.requireCredential(prepared.id);
+    return { token: prepared.token, credential };
+  }
+
+  /**
+   * Prepare (but do not run) the conditional insert for a new credential, so callers can place
+   * it in an atomic D1 batch. The insert affects no row unless the agent and its operator are
+   * active. The returned token is the only copy of the secret.
+   */
+  async prepareIssue(
+    agentId: AgentId,
+    labelInput: string,
+    now: Date = this.platform.now(),
+    expiresAt: string | null = null,
+  ): Promise<PreparedCredential> {
+    const label = checkLabel(labelInput);
+    const id = toHex(crypto.getRandomValues(new Uint8Array(12)));
+    const secret = toHex(crypto.getRandomValues(new Uint8Array(32)));
+    const digest = toHex(await digestSecret(secret));
+    const statement = this.db
       .prepare(
         `INSERT INTO agent_credentials (id, agent_id, label, secret_digest, created_at, expires_at)
          SELECT ?, a.id, ?, ?, ?, ? FROM agents a JOIN operators o ON o.id = a.operator_id
          WHERE a.id = ? AND a.status = 'active' AND o.status = 'active'`,
       )
-      .bind(id, label, digest, now.toISOString(), expiresAt, agentId)
-      .run();
-    if (res.meta.changes === 0) await this.explainIssueFailure(agentId);
-
-    const credential = await this.requireCredential(id as CredentialId);
-    return { token: `ac1_${id}_${secret}`, credential };
+      .bind(id, label, digest, now.toISOString(), expiresAt, agentId);
+    return { id: id as CredentialId, token: `ac1_${id}_${secret}`, statement };
   }
 
   /** Verify a presented token. Never throws for bad credentials; returns a reason instead. */
