@@ -96,14 +96,14 @@ const execution = (over: Record<string, unknown> = {}): Record<string, unknown> 
   objective: "Fetch the pelican manifest and verify its status",
   inputs: [{ name: "pelicanId", type: "string", required: true }],
   outputs: [{ name: "status", type: "integer", variable: "itemStatus" }],
-  targetDomains: ["pelican.example.net"],
+  targetDomains: ["pelican.acme.com"],
   compatibility: { requiredCapabilities: ["http-client", "jsonpointer"] },
   steps: [
     {
       id: "fetch",
       type: "http_request",
       method: "GET",
-      domain: "pelican.example.net",
+      domain: "pelican.acme.com",
       path: "/v1/items",
       query: { id: { input: "pelicanId" } },
       expectStatus: [200],
@@ -200,7 +200,7 @@ describe("FTS5 search index", () => {
       "pelican",
       "pelicanId",
       "jsonpointer",
-      "pelican.example.net",
+      "pelican.acme.com",
       "manifest",
       "integer",
     ]) {

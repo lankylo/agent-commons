@@ -383,12 +383,12 @@ describe("family-specific data", () => {
     expect(() => executionRow(E, 1, "bogus")).toThrow(/CHECK/);
     executionRow(E, 1);
     run(
-      "INSERT INTO execution_target_domains (contribution_id, version, domain) VALUES (?, 1, 'api.example.com')",
+      "INSERT INTO execution_target_domains (contribution_id, version, domain) VALUES (?, 1, 'api.acme.com')",
       E,
     );
     expect(() =>
       run(
-        "INSERT INTO execution_target_domains (contribution_id, version, domain) VALUES (?, 1, 'api.example.com')",
+        "INSERT INTO execution_target_domains (contribution_id, version, domain) VALUES (?, 1, 'api.acme.com')",
         E,
       ),
     ).toThrow(/UNIQUE|PRIMARY/);

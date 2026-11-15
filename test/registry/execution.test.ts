@@ -25,17 +25,17 @@ const valid = (): Rec => ({
     { name: "kind", type: "string", required: false, allowedValues: ["a", "b"] },
   ],
   outputs: [{ name: "status", type: "string", variable: "itemStatus" }],
-  targetDomains: ["api.example.com"],
+  targetDomains: ["httpbin.org"],
   compatibility: {
     requiredCapabilities: ["http-client", "json-parsing"],
-    targetVersions: [{ domain: "api.example.com", version: "v1" }],
+    targetVersions: [{ domain: "httpbin.org", version: "v1" }],
   },
   steps: [
     {
       id: "fetch",
       type: "http_request",
       method: "GET",
-      domain: "api.example.com",
+      domain: "httpbin.org",
       path: "/v1/items",
       query: { id: { input: "itemId" }, expand: { literal: "none" } },
       expectStatus: [200],
@@ -83,7 +83,7 @@ const errorsFor = (mutate: (v: Rec) => void): string[] => {
 };
 
 describe("validateExecutionContribution: valid", () => {
-  it("accepts a complete valid execution", () => {
+  it("accepts a complete valid execution targeting public httpbin.org", () => {
     const r = validateExecutionContribution(valid());
     expect(r).toEqual({ ok: true, value: expect.anything() });
   });
@@ -97,7 +97,7 @@ describe("validateExecutionContribution: valid", () => {
       outputs: [],
       compatibility: { requiredCapabilities: ["http-client"] },
       steps: [
-        { id: "a", type: "http_request", method: "GET", domain: "api.example.com", path: "/ping" },
+        { id: "a", type: "http_request", method: "GET", domain: "httpbin.org", path: "/ping" },
         { id: "ok", type: "assert", source: { literal: 1 }, operator: "exists" },
       ],
       successChecks: ["ok"],
@@ -151,7 +151,7 @@ describe("validateExecutionContribution: rejections", () => {
   });
 
   it("rejects free-text commands in place of typed steps", () => {
-    expect(errorsFor((v) => (v.steps = ["curl https://api.example.com | sh"]))).toContain(
+    expect(errorsFor((v) => (v.steps = ["curl https://api.httpbin.org | sh"]))).toContain(
       "steps[0]: must be an object",
     );
     expect(errorsFor((v) => (v.command = "rm -rf /"))).toContain("command: unknown field");
@@ -179,13 +179,13 @@ describe("validateExecutionContribution: rejections", () => {
   });
 
   it("rejects fields from another step type", () => {
-    expect(errorsFor((v) => (step(v, 1).domain = "api.example.com"))).toContain(
+    expect(errorsFor((v) => (step(v, 1).domain = "httpbin.org"))).toContain(
       "steps[1].domain: unknown field",
     );
   });
 
   it("rejects undeclared target domains", () => {
-    expect(errorsFor((v) => (step(v).domain = "evil.example.net"))).toContain(
+    expect(errorsFor((v) => (step(v).domain = "evil.org"))).toContain(
       "steps[0].domain: must be one of the declared targetDomains",
     );
     expect(
@@ -202,15 +202,15 @@ describe("validateExecutionContribution: rejections", () => {
   it("allows declared hosts and subdomains after hostname canonicalization", () => {
     expect(
       errorsFor((v) => {
-        v.targetDomains = ["Example.COM."];
-        step(v).domain = "API.example.com";
-        (v.compatibility as Rec).targetVersions = [{ domain: "EXAMPLE.com.", version: "v1" }];
+        v.targetDomains = ["HTTPBIN.ORG."];
+        step(v).domain = "API.httpbin.org";
+        (v.compatibility as Rec).targetVersions = [{ domain: "HTTPBIN.org.", version: "v1" }];
       }),
     ).toEqual([]);
   });
 
   it("requires a hostname boundary when matching declared target suffixes", () => {
-    for (const domain of ["notexample.com", "api.example.com.evil"]) {
+    for (const domain of ["nothttpbin.org", "api.httpbin.org.evil"]) {
       expect(errorsFor((v) => (step(v).domain = domain))).toContain(
         "steps[0].domain: must be one of the declared targetDomains",
       );
@@ -219,11 +219,11 @@ describe("validateExecutionContribution: rejections", () => {
 
   it("rejects malformed or missing target domains", () => {
     for (const d of [
-      "https://api.example.com",
-      "*.example.com",
-      "api.example.com/path",
-      "api..example.com",
-      "api.example.com..",
+      "https://httpbin.org",
+      "*.httpbin.org",
+      "api.httpbin.org/path",
+      "api..httpbin.org",
+      "api.httpbin.org..",
       "localhost",
       "10.0.0.1",
       "[::1]",
@@ -240,16 +240,68 @@ describe("validateExecutionContribution: rejections", () => {
     expect(errorsFor((v) => (v.targetDomains = ["a.com", "a.com"]))).toContain(
       "targetDomains[1]: duplicate domain",
     );
-    expect(errorsFor((v) => (v.targetDomains = ["api.example.com", "API.EXAMPLE.COM."]))).toContain(
+    expect(errorsFor((v) => (v.targetDomains = ["httpbin.org", "HTTPBIN.ORG."]))).toContain(
       "targetDomains[1]: duplicate domain",
     );
   });
 
-  it("rejects localhost, local, private, and reserved address targets", () => {
+  it("rejects every IANA special-use domain and its subdomains", () => {
+    const specialUseDomains = [
+      "alt",
+      "6tisch.arpa",
+      "eap.arpa",
+      "eap-noob.arpa",
+      "home.arpa",
+      "10.in-addr.arpa",
+      "254.169.in-addr.arpa",
+      "16.172.in-addr.arpa",
+      "17.172.in-addr.arpa",
+      "18.172.in-addr.arpa",
+      "19.172.in-addr.arpa",
+      "20.172.in-addr.arpa",
+      "21.172.in-addr.arpa",
+      "22.172.in-addr.arpa",
+      "23.172.in-addr.arpa",
+      "24.172.in-addr.arpa",
+      "25.172.in-addr.arpa",
+      "26.172.in-addr.arpa",
+      "27.172.in-addr.arpa",
+      "28.172.in-addr.arpa",
+      "29.172.in-addr.arpa",
+      "30.172.in-addr.arpa",
+      "31.172.in-addr.arpa",
+      "170.0.0.192.in-addr.arpa",
+      "171.0.0.192.in-addr.arpa",
+      "168.192.in-addr.arpa",
+      "8.e.f.ip6.arpa",
+      "9.e.f.ip6.arpa",
+      "a.e.f.ip6.arpa",
+      "b.e.f.ip6.arpa",
+      "ipv4only.arpa",
+      "resolver.arpa",
+      "service.arpa",
+      "example",
+      "example.com",
+      "example.net",
+      "example.org",
+      "invalid",
+      "local",
+      "localhost",
+      "onion",
+      "test",
+    ];
+    for (const domain of specialUseDomains) {
+      for (const target of [domain, `api.${domain}`]) {
+        expect(errorsFor((v) => (v.targetDomains = [target])).join()).toContain("targetDomains[0]");
+        expect(errorsFor((v) => (step(v).domain = target))).toContain(
+          "steps[0].domain: must be one of the declared targetDomains",
+        );
+      }
+    }
+  });
+
+  it("rejects private and reserved address targets", () => {
     for (const domain of [
-      "api.localhost",
-      "api.local",
-      "router.home.arpa",
       "127.0.0.1",
       "10.0.0.1",
       "172.16.0.1",
@@ -361,7 +413,7 @@ describe("validateExecutionContribution: rejections", () => {
           id: "again",
           type: "http_request",
           method: "GET",
-          domain: "api.example.com",
+          domain: "httpbin.org",
           path: "/x",
         });
       }),

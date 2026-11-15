@@ -133,14 +133,14 @@ function execution(title: string, related: unknown[]): Record<string, unknown> {
     objective: `Fetch the manifest ${title}`,
     inputs: [{ name: "pelicanId", type: "string", required: true }],
     outputs: [{ name: "status", type: "integer", variable: "itemStatus" }],
-    targetDomains: ["pelican.example.net"],
+    targetDomains: ["pelican.acme.com"],
     compatibility: { requiredCapabilities: ["http-client", "jsonpointer"] },
     steps: [
       {
         id: "fetch",
         type: "http_request",
         method: "GET",
-        domain: "pelican.example.net",
+        domain: "pelican.acme.com",
         path: "/v1/items",
         query: { id: { input: "pelicanId" } },
         expectStatus: [200],

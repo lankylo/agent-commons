@@ -50,17 +50,17 @@ const validExecution = (): Rec => ({
     { name: "kind", type: "string", required: false, allowedValues: ["a", "b"] },
   ],
   outputs: [{ name: "status", type: "string", variable: "itemStatus" }],
-  targetDomains: ["api.example.com"],
+  targetDomains: ["api.acme.com"],
   compatibility: {
     requiredCapabilities: ["http-client", "json-parsing"],
-    targetVersions: [{ domain: "api.example.com", version: "v1" }],
+    targetVersions: [{ domain: "api.acme.com", version: "v1" }],
   },
   steps: [
     {
       id: "fetch",
       type: "http_request",
       method: "GET",
-      domain: "api.example.com",
+      domain: "api.acme.com",
       path: "/v1/items",
       query: { id: { input: "itemId" }, expand: { literal: "none" } },
       expectStatus: [200],
