@@ -2,8 +2,15 @@ import { describe, expect, it } from "vitest";
 import {
   CONTENT_SCAN_LIMITS,
   detectSensitiveText,
+  safeFieldPath,
   scanContributionContent,
 } from "../../src/registry/content-scan";
+import { validateExecutionContribution } from "../../src/registry/execution";
+import {
+  validateKnowledgeContribution,
+  validateKnowledgeContributionJsonSchema,
+} from "../../src/registry/knowledge";
+import { safeInstancePath } from "../../src/registry/schema-validation";
 import { HTTPBIN_EXECUTION_SEED, HTTPBIN_KNOWLEDGE_SEED } from "../../src/seed/httpbin";
 
 // Synthetic, non-functional values assembled at runtime so no secret-shaped literal is committed.
@@ -175,5 +182,67 @@ describe("scanContributionContent", () => {
     const started = performance.now();
     expect(scanContributionContent({ explanation: text })).toEqual({ ok: true });
     expect(performance.now() - started).toBeLessThan(2000);
+  });
+});
+
+describe("value-free validation messages", () => {
+  it("shows plain field names and redacts sensitive or non-identifier keys", () => {
+    expect(safeFieldPath("", "title")).toBe("title");
+    expect(safeFieldPath("records[0]", "endpoint", 0)).toBe("records[0].endpoint");
+    expect(safeFieldPath("records[0]", EMAIL, 2)).toBe("records[0][field #3]");
+    expect(safeFieldPath("q", GITHUB_TOKEN, 0)).toBe("q[field #1]");
+    expect(safeFieldPath("q", AWS_KEY)).toBe("q[field]");
+    expect(safeInstancePath(`#/records/0/${EMAIL}/a~1b`)).toBe("records[0][field][field]");
+    expect(safeInstancePath("#")).toBe("input");
+  });
+
+  it("does not echo contributed Knowledge field names or values in validation errors", () => {
+    const k = structuredClone(HTTPBIN_KNOWLEDGE_SEED) as unknown as Record<string, unknown>;
+    k[EMAIL] = "x";
+    k.records = [{ [PHONE_INTL]: { nested: true }, ok: 1 }];
+    (k.licensing as Record<string, unknown>)[AWS_KEY] = true;
+    const result = validateKnowledgeContribution(k);
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.errors).toEqual(
+      expect.arrayContaining([
+        "[field #" + (Object.keys(k).indexOf(EMAIL) + 1) + "]: unknown field",
+        "records[0][field #1]: must be a non-empty string",
+        "licensing[field #3]: unknown field",
+      ]),
+    );
+    expect(JSON.stringify(result)).not.toMatch(VALUE_MARK);
+  });
+
+  it("does not echo contributed Execution field names in validation errors", () => {
+    const e = structuredClone(HTTPBIN_EXECUTION_SEED) as unknown as Record<string, unknown>;
+    const steps = e.steps as Record<string, unknown>[];
+    steps[0]!.query = { [EMAIL]: { literal: "x" }, [GITHUB_TOKEN]: { bad: 1 } };
+    steps[0]![EMAIL] = 1;
+    e[AWS_KEY] = 1;
+    const result = validateExecutionContribution(e);
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.errors).toEqual(
+      expect.arrayContaining([
+        "steps[0].query[field #1]: key must be a valid identifier",
+        "steps[0].query[field #2].bad: unknown field",
+        "steps[0].query[field #2]: must contain exactly one of literal, input, variable",
+      ]),
+    );
+    expect(JSON.stringify(result)).not.toMatch(VALUE_MARK);
+    expect(JSON.stringify(result)).not.toContain("aB3dE5");
+  });
+
+  it("does not echo contributed keys or numbers in JSON Schema errors", () => {
+    const k = structuredClone(HTTPBIN_KNOWLEDGE_SEED) as unknown as Record<string, unknown>;
+    k.records = [{ [EMAIL]: { nested: true } }];
+    k.reviewIntervalDays = 4539148803436467;
+    k[PHONE_NANP] = 1;
+    const errors = validateKnowledgeContributionJsonSchema(k);
+    expect(errors.length).toBeGreaterThan(0);
+    for (const error of errors)
+      expect(error).toMatch(/: does not satisfy the "[A-Za-z]+" schema rule$/);
+    expect(JSON.stringify(errors)).not.toMatch(VALUE_MARK);
   });
 });

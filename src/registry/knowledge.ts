@@ -8,6 +8,7 @@ import { PLATFORM_ONLY_FIELDS, type ContributionEnvelopeInput } from "./envelope
 import { checkReviewInterval } from "./review-intervals";
 import { checkContributionRefs } from "./references";
 import { Checker, ISO_UTC, SHA256_HEX, isObj } from "./check";
+import { safeFieldPath } from "./content-scan";
 import { HOSTNAME, isIanaSpecialUseHostname } from "./hostname";
 import type { Schema } from "@cfworker/json-schema";
 import {
@@ -289,11 +290,11 @@ export function validateKnowledgeContribution(input: unknown): KnowledgeValidati
       c.err(k, "platform-computed field cannot be set by contributors");
     }
   }
-  for (const k of Object.keys(input)) {
+  Object.keys(input).forEach((k, i) => {
     if (!ALLOWED_KEYS.has(k) && !(PLATFORM_ONLY_FIELDS as readonly string[]).includes(k)) {
-      c.err(k, "unknown field");
+      c.err(safeFieldPath("", k, i), "unknown field");
     }
-  }
+  });
 
   if (input.family !== "knowledge") c.err("family", 'must be "knowledge"');
   c.str(input.title, "title", KNOWLEDGE_LIMITS.titleMaxChars);
@@ -348,10 +349,10 @@ export function validateKnowledgeContribution(input: unknown): KnowledgeValidati
       if (keys.length > KNOWLEDGE_LIMITS.maxRecordFields) {
         c.err(`records[${i}]`, `exceeds ${KNOWLEDGE_LIMITS.maxRecordFields} fields`);
       }
-      for (const k of keys.slice(0, KNOWLEDGE_LIMITS.maxRecordFields)) {
+      keys.slice(0, KNOWLEDGE_LIMITS.maxRecordFields).forEach((k, j) => {
         c.str(k, `records[${i}] key`, 64);
-        c.scalar(r[k], `records[${i}].${k}`);
-      }
+        c.scalar(r[k], safeFieldPath(`records[${i}]`, k, j));
+      });
     });
   }
   c.str(input.summary, "summary", KNOWLEDGE_LIMITS.summaryMaxChars, { optional: true });

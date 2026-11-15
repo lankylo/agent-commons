@@ -658,6 +658,10 @@ A detection returns `invalid_content` (HTTP 422) with `details.errors` entries s
 `facts[1].value: contains a possible email address; remove it or use a placeholder`. Messages contain
 the field path and category only, never the value. Object keys that were flagged or are not plain
 identifiers appear as `[field #n]`. At most 20 findings are listed.
+Family and JSON Schema validation errors, which run before scanning, follow the same rule: a
+contributed object key that is not a plain identifier or that triggers a detector is reported as
+`[field #n]` (or `[field]`), and JSON Schema failures report only the location and the schema keyword,
+never the library message, which can quote property names or numbers.
 
 Scanning is deterministic and bounded: depth 16, 50,000 nodes and 2,000,000 scanned characters, with
 bounded regular-expression repetition. Exceeding a bound fails closed with

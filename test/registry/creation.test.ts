@@ -481,6 +481,26 @@ describe("secret and personal-data scanning", () => {
     expect(await objectCount()).toBe(objects);
   });
 
+  it("does not echo sensitive field names rejected by validation and writes nothing", async () => {
+    const before = await snapshot();
+    const objects = await objectCount();
+    const k = knowledge();
+    (k.records as Record<string, unknown>[])[0]![email] = { nested: true };
+    k[token] = 1;
+    const e = execution();
+    (e.steps as Record<string, unknown>[])[0]!.query = { [email]: { literal: "x" } };
+    for (const result of [
+      await registry.createContribution(agent, k),
+      await registry.createContribution(agent, e),
+    ]) {
+      expect(!result.ok && result.error.code).toBe("invalid_content");
+      expect(JSON.stringify(result)).not.toContain("acme-corp");
+      expect(JSON.stringify(result)).not.toContain("aB3dE5gH7jK9");
+    }
+    expect(await snapshot()).toEqual(before);
+    expect(await objectCount()).toBe(objects);
+  });
+
   it("accepts benign documentation terms and placeholders in both families", async () => {
     const k = knowledge();
     k.explanation =

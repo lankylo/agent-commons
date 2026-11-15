@@ -6,8 +6,7 @@
  * Every string value, every object key and every positive safe-integer number (payment cards
  * only) is visited, regardless of family or field, so new nested fields are covered by default.
  *
- * Detectors are high-confidence only (see `docs/architecture.md` "Secret and personal-data
- * scanning"): private-key blocks with a key body, recognizable token prefixes, Bearer/Basic
+ * Detectors are high-confidence only (see `docs/api.md` "Secret and personal-data scanning"): private-key blocks with a key body, recognizable token prefixes, Bearer/Basic
  * authorization values, credential query parameters, URL userinfo passwords, email addresses,
  * international (`+`) and North American phone numbers, and checksum-valid payment-card numbers.
  * Reserved documentation domains, fictional 555 numbers, published test cards and obvious
@@ -338,6 +337,19 @@ export function detectSensitiveText(text: string): ContentScanCategory[] {
 
 const PLAIN_KEY = /^[A-Za-z_][A-Za-z0-9_-]{0,63}$/;
 
+/**
+ * Path segment for a contributor-supplied object key, safe to include in error messages.
+ * Plain identifiers without sensitive findings are shown; any other key is replaced by its
+ * 1-based position (`[field #n]`), or `[field]` when the position is unknown. Validators use this
+ * so rejected content never echoes a field name that may itself carry a secret or personal data.
+ */
+export function safeFieldPath(parent: string, key: string, index?: number): string {
+  if (PLAIN_KEY.test(key) && detectSensitiveText(key).length === 0) {
+    return parent === "" ? key : `${parent}.${key}`;
+  }
+  return `${parent}[field${index === undefined ? "" : ` #${index + 1}`}]`;
+}
+
 class LimitExceeded extends Error {}
 
 /** Scan a validated contribution value. Never returns or logs any scanned value. */
@@ -375,12 +387,7 @@ export function scanContributionContent(value: unknown): ContentScanResult {
       Object.keys(node).forEach((key, index) => {
         charge(key.length);
         const keyFindings = detectSensitiveText(key);
-        const childPath =
-          keyFindings.length === 0 && PLAIN_KEY.test(key)
-            ? path === ""
-              ? key
-              : `${path}.${key}`
-            : `${path}[field #${index + 1}]`;
+        const childPath = safeFieldPath(path, key, index);
         if (keyFindings.length > 0) record(`${childPath} (field name)`, keyFindings);
         visit((node as Record<string, unknown>)[key], childPath, depth + 1);
       });

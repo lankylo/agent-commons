@@ -13,6 +13,7 @@ import { PLATFORM_ONLY_FIELDS, type ContributionEnvelopeInput } from "./envelope
 import { checkReviewInterval } from "./review-intervals";
 import { checkContributionRefs } from "./references";
 import { Checker, ISO_UTC, isObj, type Obj } from "./check";
+import { safeFieldPath } from "./content-scan";
 import { canonicalPublicHostname as canonicalHostname, HOSTNAME } from "./hostname";
 import type { Schema } from "@cfworker/json-schema";
 import {
@@ -545,10 +546,11 @@ class ExecutionChecker extends Checker {
     if (keys.length > EXECUTION_LIMITS.maxParams) {
       this.err(path, `exceeds ${EXECUTION_LIMITS.maxParams} entries`);
     }
-    for (const k of keys.slice(0, EXECUTION_LIMITS.maxParams)) {
-      if (!NAME.test(k)) this.err(`${path}.${k}`, "key must be a valid identifier");
-      this.valueRef(v[k], `${path}.${k}`);
-    }
+    keys.slice(0, EXECUTION_LIMITS.maxParams).forEach((k, i) => {
+      const keyPath = safeFieldPath(path, k, i);
+      if (!NAME.test(k)) this.err(keyPath, "key must be a valid identifier");
+      this.valueRef(v[k], keyPath);
+    });
   }
 
   saveVariable(v: unknown, path: string): void {
@@ -698,11 +700,13 @@ export function validateExecutionContribution(input: unknown): ExecutionValidati
   if (!isObj(input)) return { ok: false, errors: ["input: must be an object"] };
   const L = EXECUTION_LIMITS;
 
-  for (const k of Object.keys(input)) {
+  Object.keys(input).forEach((k, i) => {
     if ((PLATFORM_ONLY_FIELDS as readonly string[]).includes(k)) {
       c.err(k, "platform-computed field cannot be set by contributors");
-    } else if (!(ALLOWED_KEYS as readonly string[]).includes(k)) c.err(k, "unknown field");
-  }
+    } else if (!(ALLOWED_KEYS as readonly string[]).includes(k)) {
+      c.err(safeFieldPath("", k, i), "unknown field");
+    }
+  });
 
   // Envelope
   if (input.family !== "execution") c.err("family", 'must be "execution"');
