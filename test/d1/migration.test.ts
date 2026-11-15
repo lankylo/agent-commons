@@ -134,6 +134,7 @@ describe("clean migration", () => {
         "rate_limit_windows",
         "retrieval_receipts",
         "version_platform_state",
+        "version_quality_decisions",
         "version_quality_states",
       ].sort(),
     );
@@ -147,7 +148,7 @@ describe("clean migration", () => {
       count(
         "SELECT count(*) AS c FROM sqlite_master WHERE type = 'index' AND name LIKE '%\\_idx' ESCAPE '\\'",
       ),
-    ).toBe(18);
+    ).toBe(19);
     expect(
       db
         .prepare("PRAGMA table_info(retrieval_receipts)")
@@ -519,15 +520,18 @@ describe("version_quality_states", () => {
   });
 
   it("accepts only the four designed states", () => {
-    for (const s of ["listed_unverified", "rejected", "withdrawn", "pending"])
-      run(
-        "UPDATE version_quality_states SET state = ?, updated_at = ? WHERE contribution_id = ?",
-        s,
-        TS,
-        K,
-      );
-    for (const s of ["approved", "verified", "", "PENDING"])
-      expect(() => run("UPDATE version_quality_states SET state = ?", s)).toThrow(/CHECK/);
+    const sql = (
+      db.prepare("SELECT sql FROM sqlite_master WHERE name = 'version_quality_states'").get() as {
+        sql: string;
+      }
+    ).sql;
+    expect(sql).toContain(
+      "CHECK (state IN ('pending','listed_unverified','rejected','withdrawn'))",
+    );
+    // State changes need a matching decision (migration 0009).
+    expect(() => run("UPDATE version_quality_states SET state = 'approved'")).toThrow(
+      /matching decision/,
+    );
   });
 
   it("requires an existing version, an immutable key and no deletion", () => {
