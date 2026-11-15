@@ -129,6 +129,7 @@ describe("clean migration", () => {
         "knowledge_facts",
         "knowledge_sources",
         "knowledge_versions",
+        "needs_reports",
         "operators",
         "rate_limit_windows",
         "retrieval_receipts",
@@ -145,7 +146,7 @@ describe("clean migration", () => {
       count(
         "SELECT count(*) AS c FROM sqlite_master WHERE type = 'index' AND name LIKE '%\\_idx' ESCAPE '\\'",
       ),
-    ).toBe(14);
+    ).toBe(17);
     expect(
       db
         .prepare("PRAGMA table_info(retrieval_receipts)")
@@ -443,5 +444,34 @@ describe("integrity queries from docs/d1-schema.md", () => {
       )
       .all();
     expect(missingExt).toHaveLength(2);
+  });
+});
+
+describe("needs_reports", () => {
+  const FP = "f".repeat(64);
+  const insert = (id: string, op: string, agent: string, category = "missing_capability") =>
+    run(
+      `INSERT INTO needs_reports (id, operator_id, agent_id, fingerprint, category, summary,
+         desired_outcome, search_terms_json, created_at, last_reported_at, expires_at)
+       VALUES (?, ?, ?, ?, ?, 'need', 'outcome', '[]', ?, ?, ?)`,
+      id,
+      op,
+      agent,
+      FP,
+      category,
+      TS,
+      TS,
+      TS,
+    );
+
+  it("keeps one row per operator and fingerprint, bound to that operator's agent", () => {
+    insert("n1", OP, AG);
+    expect(() => insert("n2", OP, AG)).toThrow(/UNIQUE/);
+    addOperator("op-bbbbbbbb");
+    addAgent("ag-bbbbbbbb", "op-bbbbbbbb");
+    insert("n3", "op-bbbbbbbb", "ag-bbbbbbbb");
+    expect(() => insert("n4", "op-cccccccc", AG)).toThrow(/FOREIGN KEY/);
+    expect(() => insert("n5", OP, AG, "bug")).toThrow(/CHECK/);
+    expect(count("SELECT count(*) AS c FROM needs_reports")).toBe(2);
   });
 });

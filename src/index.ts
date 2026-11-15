@@ -8,12 +8,20 @@ import type { RetrievalResponse } from "./registry/retrieval-response";
 import { ContributionRegistry, type CreationError, type VersionError } from "./registry/creation";
 import { FeedbackRegistry } from "./registry/feedback";
 import { RateLimitService, DEFAULT_RATE_LIMITS } from "./rate-limit";
+import {
+  DEFAULT_NEEDS_OPERATOR_DAILY_LIMIT,
+  NEEDS_LIMITS,
+  NeedsIntake,
+  validateNeedsReport,
+} from "./registry/needs";
 
 interface WorkerEnv {
   readonly DB?: D1Database;
   readonly CONTENT_BUCKET?: R2Bucket;
   readonly EXECUTION_DOMAIN_POLICY_JSON?: string;
   readonly KNOWLEDGE_PERMISSION_POLICY_JSON?: string;
+  readonly NEEDS_INTAKE?: string;
+  readonly NEEDS_INTAKE_OPERATOR_DAILY_LIMIT?: number | string;
   readonly NOW?: () => Date;
   readonly PILOT_MODE?: string;
   readonly RATE_LIMIT_AGENT_LIMIT?: number | string;
@@ -87,7 +95,7 @@ type AuthorizationResult =
 async function authenticateAndRateLimit(
   request: Request,
   env: WorkerEnv,
-  operation: "Search" | "Retrieval" | "Contribution" | "Feedback",
+  operation: "Search" | "Retrieval" | "Contribution" | "Feedback" | "Needs intake",
 ): Promise<AuthorizationResult> {
   if (!env.DB) {
     return {
@@ -677,6 +685,76 @@ async function handleFeedback(request: Request, env: WorkerEnv): Promise<Respons
   }
 }
 
+async function handleNeeds(request: Request, env: WorkerEnv): Promise<Response> {
+  try {
+    const authorization = await authenticateAndRateLimit(request, env, "Needs intake");
+    if (!authorization.ok) return authorization.response;
+    if (!env.DB) return httpError(500, "internal_error", "Needs intake is unavailable.");
+
+    const declared = Number(request.headers.get("Content-Length") ?? "0");
+    if (Number.isFinite(declared) && declared > NEEDS_LIMITS.maxBodyBytes) {
+      return httpError(413, "request_too_large", "The needs report body is too large.", {
+        maxBodyBytes: NEEDS_LIMITS.maxBodyBytes,
+      });
+    }
+    const text = await request.text();
+    if (new TextEncoder().encode(text).length > NEEDS_LIMITS.maxBodyBytes) {
+      return httpError(413, "request_too_large", "The needs report body is too large.", {
+        maxBodyBytes: NEEDS_LIMITS.maxBodyBytes,
+      });
+    }
+    let body: unknown;
+    try {
+      if (!text.trim()) return httpError(400, "invalid_request", "Request body is required.");
+      body = JSON.parse(text) as unknown;
+    } catch {
+      return httpError(400, "invalid_request", "Request body must be valid JSON.");
+    }
+
+    const validated = validateNeedsReport(body);
+    if (!validated.ok) {
+      const status = validated.code === "invalid_request" ? 400 : 422;
+      const message =
+        validated.code === "needs_report_rejected"
+          ? "The needs report contains content that is not accepted."
+          : validated.code === "invalid_needs_report"
+            ? "The needs report is invalid."
+            : "The needs report request is invalid.";
+      return httpError(status, validated.code, message, { errors: validated.errors });
+    }
+
+    const result = await new NeedsIntake(env.DB, {
+      now: env.NOW,
+      operatorDailyLimit: coercePositiveInteger(
+        env.NEEDS_INTAKE_OPERATOR_DAILY_LIMIT,
+        DEFAULT_NEEDS_OPERATOR_DAILY_LIMIT,
+      ),
+    }).submit(authorization.actor, validated.report);
+    if (!result.ok) {
+      return httpError(
+        429,
+        "needs_intake_limited",
+        "This operator has reached the needs report limit; try again later.",
+        { scope: "operator" },
+      );
+    }
+
+    return Response.json(
+      { schemaVersion: "needs-report-accepted/v1", accepted: true, duplicate: result.duplicate },
+      { status: 202 },
+    );
+  } catch {
+    return httpError(500, "internal_error", "Needs intake is unavailable.");
+  }
+}
+
+/** Needs intake is a separately enabled pilot operation; off unless explicitly "on". */
+function resolveNeedsIntake(value: unknown): boolean | undefined {
+  if (value === undefined || value === "" || value === "off") return false;
+  if (value === "on") return true;
+  return undefined;
+}
+
 type PilotMode = "off" | "read-only";
 
 /** Explicit allow-list: unset/empty means unrestricted (local development); anything else invalid fails closed. */
@@ -695,7 +773,8 @@ export default {
     }
     if (pathname.startsWith("/v1/commons/")) {
       const mode = resolvePilotMode(workerEnv.PILOT_MODE);
-      if (mode === undefined) {
+      const needsIntake = resolveNeedsIntake(workerEnv.NEEDS_INTAKE);
+      if (mode === undefined || needsIntake === undefined) {
         return httpError(503, "misconfigured", "Service configuration is invalid.");
       }
       if (
@@ -709,6 +788,12 @@ export default {
           "This operation is disabled while the service is in read-only pilot mode.",
         );
       }
+    }
+    if (pathname === "/v1/commons/needs" && request.method === "POST") {
+      if (resolveNeedsIntake(workerEnv.NEEDS_INTAKE) !== true) {
+        return httpError(403, "needs_intake_disabled", "Needs intake is not enabled.");
+      }
+      return handleNeeds(request, workerEnv);
     }
     if (pathname === "/v1/commons/search" && request.method === "POST") {
       return handleSearch(request, workerEnv);

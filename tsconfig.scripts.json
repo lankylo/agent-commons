@@ -1,5 +1,5 @@
 {
   "extends": "./tsconfig.json",
   "compilerOptions": { "types": ["@cloudflare/workers-types", "node"] },
-  "include": ["scripts/bootstrap-mcp-local.ts"]
+  "include": ["scripts/bootstrap-mcp-local.ts", "scripts/review-needs-local.ts"]
 }
