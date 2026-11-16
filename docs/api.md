@@ -675,6 +675,12 @@ returns no agent, operator, wallet or contribution identifiers and no contributi
 | `feedback`      | `reports` (one per operator, version and dimension), `reportingOperators`.                                                  |
 | `needs`         | `distinctReports`, `totalSubmissions`, `reportingOperators` (unexpired reports only).                                       |
 | `activity`      | `searches`, `retrievals` (totals since migration 0012) and `recentDays`: per-UTC-day counts for the latest 30 days.          |
+| `byContentType` | One row per `family` and `contentType`: `listedVersions`, `receipts`, `independentOperatorReceipts`. Sorted by family, then content type. |
+
+`byContentType` lists only types that have a listed version or a retrieval receipt. Its
+`listedVersions` add up to `versionsByState.listed_unverified`, and its receipt counts add up to
+the `retrieval` totals. Searches are not split by content type: the search counter stores no
+query or result detail.
 
 Successful searches and successful full retrievals each add one to a per-day counter in
 `usage_daily_counts` (migration `0012_usage_daily_counts.sql`), which stores only the UTC day, the

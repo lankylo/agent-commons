@@ -678,6 +678,47 @@ describe("remote review: pilot usage", () => {
     await expect(recordUsage({} as D1Database, "search", clock)).resolves.toBeUndefined();
   });
 
+  it("splits listed versions and receipts by content type", async () => {
+    type Row = {
+      family: string;
+      contentType: string;
+      listedVersions: number;
+      receipts: number;
+      independentOperatorReceipts: number;
+    };
+    const find = (rows: Row[]) =>
+      rows.find((r) => r.family === "knowledge" && r.contentType === "api-reference");
+    type Count = "listedVersions" | "receipts" | "independentOperatorReceipts";
+    const sum = (rows: Row[], field: Count) => rows.reduce((total, r) => total + r[field], 0);
+
+    const before = await review("usage");
+    const beforeRows = before.body.byContentType as Row[];
+    const created = await create();
+    const insertReceipt =
+      "INSERT INTO retrieval_receipts (agent_id, contribution_id, version) VALUES (?, ?, 1)";
+    await db.prepare(insertReceipt).bind(author, created.id).run();
+    const after = await review("usage");
+    const rows = after.body.byContentType as Row[];
+
+    // A receipt from the contributor's own operator is counted, but not as independent.
+    expect(find(rows)?.receipts).toBe((find(beforeRows)?.receipts ?? 0) + 1);
+    expect(find(rows)?.independentOperatorReceipts).toBe(
+      find(beforeRows)?.independentOperatorReceipts ?? 0,
+    );
+    // A pending version is not a listed version.
+    expect(find(rows)?.listedVersions).toBe(find(beforeRows)?.listedVersions ?? 0);
+
+    const listed = after.body.contributions.versionsByState.listed_unverified;
+    expect(sum(rows, "listedVersions")).toBe(listed);
+    expect(sum(rows, "receipts")).toBe(after.body.retrieval.receipts);
+    expect(sum(rows, "independentOperatorReceipts")).toBe(
+      after.body.retrieval.independentOperatorReceipts,
+    );
+    const keys = rows.map((r) => `${r.family}\n${r.contentType}`);
+    expect(keys).toEqual([...new Set(keys)].sort());
+    expect(after.text).not.toContain(created.id);
+  });
+
   it("counts listed versions by family and accepts no fields", async () => {
     // Runs after the capacity test filled the pilot, so no further approval is possible here.
     const usage = await review("usage");

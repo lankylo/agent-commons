@@ -1,7 +1,8 @@
 /**
  * Operator-only pilot usage snapshot. Aggregate counts over existing tables: no identifiers, no
  * contribution or report text. Counts are operational signals, not proof of
- * demand or value. Successful searches and full retrievals are counted per UTC day in
+ * demand or value. `byContentType` splits listed versions and retrieval receipts by family and
+ * content type. Successful searches and full retrievals are counted per UTC day in
  * `usage_daily_counts` (migration 0012); activity before that migration is not measured.
  */
 export type UsageOperation = "search" | "retrieval";
@@ -12,6 +13,15 @@ export interface PilotUsageDay {
   readonly day: string;
   readonly searches: number;
   readonly retrievals: number;
+}
+
+/** One row per family and content type that has a listed version or a retrieval receipt. */
+export interface PilotUsageContentType {
+  readonly family: string;
+  readonly contentType: string;
+  readonly listedVersions: number;
+  readonly receipts: number;
+  readonly independentOperatorReceipts: number;
 }
 
 export interface PilotUsageSnapshot {
@@ -48,8 +58,13 @@ export interface PilotUsageSnapshot {
     readonly retrievals: number;
     readonly recentDays: readonly PilotUsageDay[];
   };
+  readonly byContentType: readonly PilotUsageContentType[];
   readonly notMeasured: readonly string[];
 }
+
+type MutableContentType = {
+  -readonly [K in keyof PilotUsageContentType]: PilotUsageContentType[K];
+};
 
 interface TotalsRow {
   wallets: number;
@@ -86,11 +101,22 @@ const TOTALS_SQL = `SELECT
   (SELECT COALESCE(SUM(report_count), 0) FROM needs_reports) AS needs_submissions,
   (SELECT COUNT(DISTINCT operator_id) FROM needs_reports) AS needs_operators`;
 
-const STATES_SQL = `SELECT s.state AS state, v.family AS family, COUNT(*) AS n
+const STATES_SQL = `SELECT s.state AS state, v.family AS family, v.content_type AS content_type,
+       COUNT(*) AS n
   FROM version_quality_states s
   JOIN contribution_versions v
     ON v.contribution_id = s.contribution_id AND v.version = s.version
- GROUP BY s.state, v.family`;
+ GROUP BY s.state, v.family, v.content_type`;
+
+const RECEIPTS_BY_TYPE_SQL = `SELECT v.family AS family, v.content_type AS content_type,
+       COUNT(*) AS receipts,
+       SUM(CASE WHEN a.operator_id <> c.contributor_operator_id THEN 1 ELSE 0 END) AS independent
+  FROM retrieval_receipts r
+  JOIN contribution_versions v
+    ON v.contribution_id = r.contribution_id AND v.version = r.version
+  JOIN agents a ON a.id = r.agent_id
+  JOIN contributions c ON c.id = r.contribution_id
+ GROUP BY v.family, v.content_type`;
 
 const ACTIVITY_TOTALS_SQL = `SELECT
   COALESCE(SUM(CASE WHEN operation = 'search' THEN count ELSE 0 END), 0) AS searches,
@@ -136,7 +162,10 @@ export class PilotUsage {
     if (!totals) throw new Error("usage totals unavailable");
     const states = await this.db
       .prepare(STATES_SQL)
-      .all<{ state: string; family: string; n: number }>();
+      .all<{ state: string; family: string; content_type: string; n: number }>();
+    const receiptsByType = await this.db
+      .prepare(RECEIPTS_BY_TYPE_SQL)
+      .all<{ family: string; content_type: string; receipts: number; independent: number }>();
     const activity = await this.db
       .prepare(ACTIVITY_TOTALS_SQL)
       .first<{ searches: number; retrievals: number }>();
@@ -147,12 +176,36 @@ export class PilotUsage {
 
     const versionsByState: Record<string, number> = {};
     const listedVersionsByFamily: Record<string, number> = {};
+    const types = new Map<string, MutableContentType>();
+    const typeRow = (family: string, contentType: string): MutableContentType => {
+      const key = `${family}\n${contentType}`;
+      let entry = types.get(key);
+      if (!entry) {
+        entry = {
+          family,
+          contentType,
+          listedVersions: 0,
+          receipts: 0,
+          independentOperatorReceipts: 0,
+        };
+        types.set(key, entry);
+      }
+      return entry;
+    };
     for (const row of states.results) {
       versionsByState[row.state] = (versionsByState[row.state] ?? 0) + row.n;
       if (row.state === "listed_unverified") {
         listedVersionsByFamily[row.family] = (listedVersionsByFamily[row.family] ?? 0) + row.n;
+        typeRow(row.family, row.content_type).listedVersions += row.n;
       }
     }
+    for (const row of receiptsByType.results) {
+      const entry = typeRow(row.family, row.content_type);
+      entry.receipts += row.receipts;
+      entry.independentOperatorReceipts += row.independent;
+    }
+    const sorted = [...types.entries()].sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0));
+    const byContentType = sorted.map(([, entry]) => entry);
 
     return {
       schemaVersion: "pilot-usage/v1",
@@ -190,6 +243,7 @@ export class PilotUsage {
         retrievals: activity?.retrievals ?? 0,
         recentDays: days.results,
       },
+      byContentType,
       notMeasured: ["searches and retrievals made before the usage counter was deployed"],
     };
   }
