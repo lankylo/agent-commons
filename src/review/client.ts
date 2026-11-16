@@ -21,6 +21,7 @@ export const REMOTE_REVIEW_USAGE = `Usage (environment: COMMONS_REVIEW_URL, COMM
   inspect <contributionId> <version>
   decide <contributionId> <version> <approve|reject|withdraw> <reason>
   needs [limit]
+  usage
 `;
 
 const LOCAL_HOSTS = new Set(["localhost", "127.0.0.1", "[::1]"]);
@@ -32,6 +33,8 @@ function parse(argv: readonly string[]): ParsedCommand | null {
   if (extra.length > 0) return null;
   const version = Number(b);
   switch (command) {
+    case "usage":
+      return a === undefined ? { op: "usage", body: {} } : null;
     case "capacity":
       return a === undefined ? { op: "capacity", body: {} } : null;
     case "queue": {

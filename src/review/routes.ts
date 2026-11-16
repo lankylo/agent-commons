@@ -9,10 +9,12 @@
  * `QualityReviewer.decide`, so the D1 triggers keep enforcing transitions and pilot capacity.
  * The token is never logged or echoed. Inspected contribution content is untrusted data.
  * `needs` returns the identity-free grouped needs review (`NeedsIntake.review`), so a deployed
- * pilot can enable needs intake with a remote operator review path.
+ * pilot can enable needs intake with a remote operator review path. `usage` returns aggregate,
+ * identity-free pilot counts (`PilotUsage.snapshot`).
  */
 import type { RegistryEnv } from "../registry/creation";
 import { NEEDS_REVIEW_MAX_GROUPS, NeedsIntake } from "../registry/needs";
+import { PilotUsage } from "../registry/usage";
 import {
   DEFAULT_QUEUE_PAGE,
   MAX_QUEUE_PAGE,
@@ -287,7 +289,7 @@ export async function handleReview(request: Request, env: ReviewEnv): Promise<Re
   }
   if (request.method !== "POST") return fail(405, "method_not_allowed", "Use POST.");
   const op = new URL(request.url).pathname.slice(REVIEW_PATH_PREFIX.length);
-  if (!["queue", "inspect", "decide", "capacity", "needs"].includes(op)) {
+  if (!["queue", "inspect", "decide", "capacity", "needs", "usage"].includes(op)) {
     return fail(404, "not_found", "Not found.");
   }
   if (!env.DB || !env.CONTENT_BUCKET) {
@@ -300,6 +302,10 @@ export async function handleReview(request: Request, env: ReviewEnv): Promise<Re
   const reviewer = new QualityReviewer(env as RegistryEnv, env.REVIEWER_ID, now);
   try {
     if (op === "needs") return await needs(env.DB, now, body);
+    if (op === "usage") {
+      if (unknownFields(body, [])) return fail(400, "invalid_request", "No fields are accepted.");
+      return reply(200, await new PilotUsage(env.DB, now).snapshot());
+    }
     if (op === "queue") return await queue(reviewer, body);
     if (op === "inspect") return await inspect(reviewer, body);
     if (op === "decide") return await decide(reviewer, body);
