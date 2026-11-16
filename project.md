@@ -763,7 +763,7 @@ Free, operator-reviewed, 100-place-capped pilot that outside agents can find, en
 - [x] Enable `NEEDS_INTAKE=on` on the pilot. (2026-11-16: owner deployed with `NEEDS_INTAKE=on`; an `unsuccessful_search` report from the independent consumer operator returned `202 accepted`, and `npm run review:remote -- needs` showed one identity-free group with `distinctOperators` 1 and `totalReports` 1. Completes the last Phase 4 acceptance criterion.)
 - [x] Low-friction agent onboarding. (PR #88, merged and deployed 2026-11-16: `GET /pilot/agents.md` and alias `/llms.txt` serve the agent-readable guide built from `ENROLLMENT_URI`; while enrollment is on, `401 unauthorized` from `/mcp` and `/v1/commons/*` carries `error.details.onboarding` and a `Link rel="help"` header; the enroll page names the address before signing. Verified live: both paths return `200 text/markdown` with pilot URLs, MCP and needs sections; REST and MCP 401s carry the pointer; both enrolled MCP identities still search normally. CI `npm run verify` passed on the PR. Listing in an MCP registry remains optional and not done.)
 - [x] State the required Knowledge source `hash` in the `commons.contribute` tool description. (PR #88: the description now names `uri`, `accessedAt` and `hash` and says new contributions stay pending until review.)
-- [ ] Seed content: 10–20 owner-reviewed Knowledge and Execution records in the initial domain, chosen so outside agents find useful results.
+- [x] Seed content. (2026-11-16: 15 records submitted through remote MCP by the contributor agent, owner-approved via `npm run review:remote`, and confirmed searchable and retrievable by the independent consumer operator; capacity 18 used / 82 remaining. httpbin: Knowledge for `/status`, redirects, `/delay`, `/post`, `/response-headers` and Execution diagnostics for `/delay/2` and `/response-headers`. GitHub REST: Knowledge for unauthenticated rate limits, link-header pagination and conditional requests, plus a rate-limit check recipe. PyPI JSON API: Knowledge and a latest-version recipe. Frankfurter: Knowledge and a USD to EUR recipe. Every fact was checked against the live API and each source is pinned to a commit with its SHA-256. The owner extended the pilot policies for this: Execution domains `api.github.com`, `pypi.org`, `api.frankfurter.dev` and redistribute combinations for CC-BY-4.0, Apache-2.0 and MIT. Open-Meteo was excluded because its source is AGPL-3.0. All records remain `listed_unverified`.)
 - [ ] Pilot usage measurement: privacy-preserving counts of searches, gets, contributions, feedback and enrollments, readable by the operator only.
 - [ ] Invite a small set of outside operators; record what they find and what they report missing.
 
@@ -787,13 +787,13 @@ Maintain the following short record at the end of this document.
 
 **Current phase:** Phase 4 completed (2026-11-16): REST, local stdio MCP and remote MCP serve all four tools; remote MCP, independent-operator feedback and needs intake with remote grouped review are verified on the pilot. Phase 5 In Progress; Phase 3 remains complete.
 
-**Last completed task:** Low-friction agent onboarding (PR #88, merged and deployed 2026-11-16): `/pilot/agents.md` guide, 401 onboarding pointers, enroll-page address display and the contribute tool-description source fields, verified on the live pilot. Phase 4 completed earlier the same day.
+**Last completed task:** Seed content (2026-11-16): 15 owner-approved records for httpbin, GitHub REST, PyPI and Frankfurter are listed on the pilot (18 of 100 places used). Agent onboarding (PR #88) and Phase 4 completed earlier the same day.
 
 **Current task:** None in progress. Independent-operator remote feedback passed and remote grouped needs review is merged (PR #86).
 
 **Known blockers:** None for Phase 4. Phase 5 acceptance remains incomplete; payments (Phase 6) are outside the pilot launch milestone.
 
-**Next task:** Seed content (Pilot launch milestone, Section 10): 10–20 owner-reviewed Knowledge and Execution records in the initial domain; the owner chooses which APIs. Make no further deployment changes without a separate operator action.
+**Next task:** Pilot usage measurement (Pilot launch milestone, Section 10): privacy-preserving, operator-only counts of searches, gets, contributions, feedback and enrollments; then invite a small set of outside operators. Make no further deployment changes without a separate operator action.
 
 **Last verified implementation:** PR #86 (remote grouped needs review) passed CI `npm run verify` on its branch (run #216) and on `main` after merge (run #217). PR #83 branch at `247222e` passed Linux `npm run verify`: typechecks, formatting, lint, 920 tests across 56 files and Wrangler dry run. The local Windows mirror also passed 37 focused tests with test-launch adaptations. PR #82 was merged; its earlier verify passed 909 tests across 54 files.
 
