@@ -981,7 +981,9 @@ repeated steps 3–5 for a Knowledge contribution through `/mcp`, with the revie
 the owner through `npm run review:remote`; capacity is now 3 used / 97 remaining. Feedback (step 6)
 was refused with `feedback_not_eligible` as designed for the contributor operator, then accepted
 from a second enrolled wallet acting as an independent consumer operator. Needs intake (step 7)
-awaits `NEEDS_INTAKE=on` on the pilot; its remote review is `npm run review:remote -- needs`.
+was then enabled with `NEEDS_INTAKE=on`: a test `unsuccessful_search` report from the consumer
+operator returned `202 accepted`, and `npm run review:remote -- needs` showed one identity-free
+group (`distinctOperators` 1, `totalReports` 1) with the text under `untrusted`.
 
 ### Pause the pilot promptly
 
@@ -1148,7 +1150,7 @@ deferred shared persistent cache decision.
 | Requests are authenticated and rate-limited per agent and per operator.                                                                  | Bearer credential verification plus shared REST auth/rate-limit handlers.                   | Locally verified for all four operations and both MCP transports with the shared D1 limiter; on the deployed pilot, remote MCP accepted the enrolled Bearer credential for every protocol request in the Claude Code acceptance test.                                                                                                  |
 | Contributions from non-allow-listed operators are refused.                                                                               | `contribute` passes authenticated identity to `ContributionRegistry`.                       | Locally verified through REST and MCP as `403 contribution_not_allowed`; allow-listing remains platform-controlled and defaults off.                                                                                       |
 | Feedback from agents that never retrieved the content is refused.                                                                        | Phase 4 exact-version retrieval receipt checked by `feedback`.                              | Locally verified: no-receipt, unknown-version and same-contributor-operator cases share `403 feedback_not_eligible`.                                                                                                       |
-| A pilot agent can report an unmet need, and the operator can review grouped requests without treating request volume as proof of demand. | Opt-in `POST /v1/commons/needs` plus `NeedsIntake.review()` via `npm run needs:review:local` or the reviewer-only `POST /v1/review/needs`. | Locally verified (REST only): authentication, settings, validation, scanning, per-operator deduplication and limit, retention purge and identity-free distinct-operator grouping; remote grouped review covered by `test/worker-review.test.ts`. Not enabled on the pilot; no external pilot use yet. |
+| A pilot agent can report an unmet need, and the operator can review grouped requests without treating request volume as proof of demand. | Opt-in `POST /v1/commons/needs` plus `NeedsIntake.review()` via `npm run needs:review:local` or the reviewer-only `POST /v1/review/needs`. | Locally verified (REST only): authentication, settings, validation, scanning, per-operator deduplication and limit, retention purge and identity-free distinct-operator grouping; remote grouped review covered by `test/worker-review.test.ts`. Live on the pilot (2026-11-16): an independent operator's report was accepted and appeared as one identity-free group in remote review. |
 
 ### Completed Codespaces Copilot MCP acceptance test
 
