@@ -231,7 +231,7 @@ describe("pilot preflight", () => {
     expect(run(config({ vars: { REVIEWER_TOKEN: TOKEN } })).errors.join("\n")).toMatch(/secret/);
   });
 
-  it("requires contiguous migrations through 0011", () => {
+  it("requires contiguous migrations through 0012", () => {
     const text = config({});
     const base = { configText: text, phase: "initial" as const, forbiddenPolicies };
     expect(preflight({ ...base, migrationFiles }).ok).toBe(true);

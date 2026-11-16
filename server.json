@@ -1,0 +1,21 @@
+{
+  "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
+  "name": "io.github.lankylo/agent-commons",
+  "title": "Agent Commons (pilot)",
+  "description": "Free, reviewed pilot registry of reusable API knowledge and recipes for AI agents.",
+  "version": "0.1.0",
+  "remotes": [
+    {
+      "type": "streamable-http",
+      "url": "https://agent-commons-pilot.lorenzo-leray.workers.dev/mcp",
+      "headers": [
+        {
+          "name": "Authorization",
+          "description": "Bearer <credential>. Enroll first: see /pilot/agents.md on the same host.",
+          "isRequired": true,
+          "isSecret": true
+        }
+      ]
+    }
+  ]
+}

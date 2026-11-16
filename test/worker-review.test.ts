@@ -9,6 +9,7 @@ import { IdentityRepository } from "../src/identity/repository";
 import type { AgentId, OperatorId } from "../src/identity/types";
 import { ContributionRegistry, type RegistryEnv } from "../src/registry/creation";
 import { NeedsIntake, type NeedsReport } from "../src/registry/needs";
+import { recordUsage } from "../src/registry/usage";
 import { contentObjectKey } from "../src/storage/content-objects";
 import { HTTPBIN_EXECUTION_SEED, HTTPBIN_KNOWLEDGE_SEED } from "../src/seed/httpbin";
 import { runRemoteReview } from "../src/review/client";
@@ -641,7 +642,7 @@ describe("remote review: pilot usage", () => {
     expect(before.status).toBe(200);
     expect(before.cache).toBe("no-store");
     expect(before.body.schemaVersion).toBe("pilot-usage/v1");
-    expect(before.body.notMeasured).toContain("searches");
+    expect(before.body.notMeasured).toHaveLength(1);
     for (const section of ["enrollment", "retrieval", "feedback", "needs"]) {
       for (const value of Object.values(before.body[section] as Record<string, unknown>)) {
         expect(Number.isSafeInteger(value) && (value as number) >= 0).toBe(true);
@@ -660,6 +661,21 @@ describe("remote review: pilot usage", () => {
     );
     expect(after.text).not.toContain(created.id);
     expect(after.text).not.toContain(author);
+  });
+
+  it("counts recorded searches and retrievals per day without identities", async () => {
+    const before = await review("usage");
+    await recordUsage(db, "search", clock);
+    await recordUsage(db, "search", clock);
+    await recordUsage(db, "retrieval", clock);
+    const after = await review("usage");
+    expect(after.body.activity.searches).toBe(before.body.activity.searches + 2);
+    expect(after.body.activity.retrievals).toBe(before.body.activity.retrievals + 1);
+    const days = after.body.activity.recentDays as { day: string; searches: number }[];
+    const today = days.find((d) => d.day === "2026-11-15");
+    expect(today?.searches).toBeGreaterThanOrEqual(2);
+    // Counting is best effort: a broken database must not throw.
+    await expect(recordUsage({} as D1Database, "search", clock)).resolves.toBeUndefined();
   });
 
   it("counts listed versions by family and accepts no fields", async () => {

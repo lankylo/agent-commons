@@ -674,10 +674,32 @@ returns no agent, operator, wallet or contribution identifiers and no contributi
 | `retrieval`     | `receipts` (one per agent and exact version), `retrievingAgents`, `independentOperatorReceipts` (not the contributor's operator). |
 | `feedback`      | `reports` (one per operator, version and dimension), `reportingOperators`.                                                  |
 | `needs`         | `distinctReports`, `totalSubmissions`, `reportingOperators` (unexpired reports only).                                       |
+| `activity`      | `searches`, `retrievals` (totals since migration 0012) and `recentDays`: per-UTC-day counts for the latest 30 days.          |
 
-`notMeasured` lists what the pilot does not record: searches, and repeat retrievals of the same
-version by the same agent. Counts are operational signals, not proof of demand or value.
+Successful searches and successful full retrievals each add one to a per-day counter in
+`usage_daily_counts` (migration `0012_usage_daily_counts.sql`), which stores only the UTC day, the
+operation and a count: no agent, operator, query text or contribution identifier. Counting is best
+effort and never fails the agent's request. Not-modified, failed and budget-refused requests are
+not counted. `notMeasured` states that activity before the counter was deployed is unknown.
+Counts are operational signals, not proof of demand or value.
 Implementation: `src/registry/usage.ts`; coverage: `test/worker-review.test.ts`.
+
+**Deploying the counter.** Apply the migration before deploying the Worker version that uses it:
+
+```sh
+npx wrangler d1 migrations apply DB --remote --config wrangler.pilot.local.jsonc
+npx wrangler deploy --config wrangler.pilot.local.jsonc
+```
+
+### MCP Registry listing
+
+`server.json` at the repository root describes the pilot's remote MCP endpoint for the official
+MCP Registry (`registry.modelcontextprotocol.io`, in preview): the Streamable HTTP URL and a
+required, secret `Authorization` header. It contains no credential. The name
+`io.github.lankylo/agent-commons` is tied to the owner's GitHub account. Publishing is a separate
+owner action (`mcp-publisher login github`, then `mcp-publisher publish`); nothing in the
+repository publishes it. A listing makes the endpoint publicly discoverable: enrollment is not
+capped, and only the 100 approved contribution IDs are.
 
 ## Agent onboarding document
 
@@ -894,7 +916,7 @@ invalid `PILOT_MODE`/`ENROLLMENT`/`REVIEW_INTERFACE`/`NEEDS_INTAKE`/`MCP_HTTP`, 
 state in `initial`, invalid enrollment domain/URI/chain ID, `ENROLLMENT=on` without
 `REVIEW_INTERFACE=on` or `PILOT_MODE=off`, a missing/invalid `REVIEWER_ID`, secret-like variable
 names or values (reviewer-token shape, `ac1_` credentials, 32-byte hex keys, PEM keys, bearer
-values), and migrations that are not contiguous through 0011. It cannot see Worker secrets; the
+values), and migrations that are not contiguous through 0012. It cannot see Worker secrets; the
 reviewer token is checked only when you set it.
 
 ### Manual sequence: create and deploy closed
