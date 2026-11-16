@@ -659,6 +659,26 @@ Output is the JSON response re-serialized with escaped control characters; a non
 exit code 1 and prints `HTTP <status>` to stderr. Automated coverage: `test/worker-review.test.ts`.
 The local-only `npm run versions:review:local` remains available for local persistence.
 
+## Agent onboarding document
+
+`GET /pilot/agents.md` (alias `GET /llms.txt`) serves a short, agent-readable Markdown guide:
+headless wallet enrollment for agents with their own EVM wallet, the `/pilot/enroll` page for
+people, MCP client settings (only while `MCP_HTTP` is on), REST paths, minimal request examples,
+the required Knowledge source fields (`uri`, `accessedAt`, `hash`), feedback eligibility, needs
+intake (only while `NEEDS_INTAKE` is on) and the `listed_unverified` and untrusted-content rules.
+It is served only while enrollment is enabled and valid (`404` while off, `503` while
+misconfigured, `404` for non-`GET`). Every URL in it comes from the configured `ENROLLMENT_URI`
+origin, never from the request `Host` header. It contains no secrets, identities or counts and
+grants no access. Implementation: `src/onboarding/document.ts`.
+
+While enrollment is enabled, every `401 unauthorized` from `/mcp` and `/v1/commons/*` also carries
+`error.details.onboarding` (the absolute guide URL) and a `Link: <url>; rel="help"` header, so an
+agent that finds the endpoint without a credential learns how to enroll. Other responses, and the
+reviewer-only `/v1/review/*` 401s, are unchanged. Coverage: `test/worker-onboarding.test.ts`.
+
+The enrollment page now names the address it is about to enroll before signing, so an operator
+whose wallet has several accounts can confirm the intended one is connected.
+
 ## Wallet enrollment (open pilot)
 
 Open, wallet-based enrollment lets anyone with an EVM wallet obtain a pilot operator, one agent and

@@ -194,7 +194,7 @@ export const ENROLLMENT_CLIENT = `(function () {
       expectedChainId = expectedChain(result.message);
       messageElement.textContent = result.message;
       challengeSection.hidden = false;
-      setStatus("Review the complete message below. Signing is a wallet-ownership check only.");
+      setStatus("Review the complete message below. It enrolls address " + account + ". If that is not the account you intend to enroll, disconnect this site in your wallet and connect only the intended account. Signing is a wallet-ownership check only.");
       await checkNetwork();
     } catch (error) {
       setStatus(errorMessage(error));
