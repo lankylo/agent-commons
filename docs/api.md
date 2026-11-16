@@ -619,6 +619,7 @@ carry `Cache-Control: no-store`.
 | `/v1/review/decide`   | `{contributionId, version, decision: "approve" \| "reject" \| "withdraw", reason}` | `review-decision/v1`. `approve` = pending→`listed_unverified`, `reject` = pending→`rejected`, `withdraw` = listed→`withdrawn`.  |
 | `/v1/review/capacity` | `{}`                                                                               | `review-capacity/v1`: `{limit, used, remaining}`.                                                                               |
 | `/v1/review/needs`    | `{limit?: 1–200 (default 50)}`                                                     | `needs-review/v1`: purges expired needs reports, then returns identity-free groups (see "Agent needs intake").                  |
+| `/v1/review/usage`    | `{}`                                                                               | `pilot-usage/v1`: aggregate, identity-free pilot counts (see "Pilot usage snapshot").                                           |
 
 `reason` is required (1–500 characters after trimming, no control characters). Errors: `400`
 `invalid_request` / `invalid_reason`; `404` unknown version; `409` `invalid_transition`,
@@ -653,11 +654,30 @@ npm run review:remote -- queue 20 [cursor]
 npm run review:remote -- inspect <contributionId> <version>
 npm run review:remote -- decide <contributionId> <version> approve|reject|withdraw "<reason>"
 npm run review:remote -- needs [limit]
+npm run review:remote -- usage
 ```
 
 Output is the JSON response re-serialized with escaped control characters; a non-2xx status sets
 exit code 1 and prints `HTTP <status>` to stderr. Automated coverage: `test/worker-review.test.ts`.
 The local-only `npm run versions:review:local` remains available for local persistence.
+
+### Pilot usage snapshot
+
+`POST /v1/review/usage` (`npm run review:remote -- usage`) returns `pilot-usage/v1`: aggregate
+counts computed from existing tables at request time. It accepts no fields, stores nothing and
+returns no agent, operator, wallet or contribution identifiers and no contribution or report text.
+
+| Section         | Counts                                                                                                                      |
+| --------------- | --------------------------------------------------------------------------------------------------------------------------- |
+| `enrollment`    | `enrolledWallets`, `operators`, `agents`.                                                                                   |
+| `contributions` | `contributionIds`, `contributingOperators`, `versionsByState`, `listedVersionsByFamily`.                                    |
+| `retrieval`     | `receipts` (one per agent and exact version), `retrievingAgents`, `independentOperatorReceipts` (not the contributor's operator). |
+| `feedback`      | `reports` (one per operator, version and dimension), `reportingOperators`.                                                  |
+| `needs`         | `distinctReports`, `totalSubmissions`, `reportingOperators` (unexpired reports only).                                       |
+
+`notMeasured` lists what the pilot does not record: searches, and repeat retrievals of the same
+version by the same agent. Counts are operational signals, not proof of demand or value.
+Implementation: `src/registry/usage.ts`; coverage: `test/worker-review.test.ts`.
 
 ## Agent onboarding document
 

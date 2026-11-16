@@ -149,7 +149,7 @@ const decisionCount = async (id: string) =>
 const decide = (id: string, decision: string, reason: unknown = "reviewed", version = 1) =>
   review("decide", { contributionId: id, version, decision, reason });
 
-const OPS = ["queue", "inspect", "decide", "capacity", "needs"];
+const OPS = ["queue", "inspect", "decide", "capacity", "needs", "usage"];
 
 describe("remote review: enablement and configuration", () => {
   it("is disabled by default and when off: 404 for every op, no storage access", async () => {
@@ -635,6 +635,49 @@ describe("remote review: needs reports", () => {
   });
 });
 
+describe("remote review: pilot usage", () => {
+  it("returns aggregate counts without identities and tracks new contributions", async () => {
+    const before = await review("usage");
+    expect(before.status).toBe(200);
+    expect(before.cache).toBe("no-store");
+    expect(before.body.schemaVersion).toBe("pilot-usage/v1");
+    expect(before.body.notMeasured).toContain("searches");
+    for (const section of ["enrollment", "retrieval", "feedback", "needs"]) {
+      for (const value of Object.values(before.body[section] as Record<string, unknown>)) {
+        expect(Number.isSafeInteger(value) && (value as number) >= 0).toBe(true);
+      }
+    }
+    expect(before.body.enrollment.operators).toBeGreaterThanOrEqual(1);
+    expect(before.body.enrollment.agents).toBeGreaterThanOrEqual(1);
+
+    const created = await create();
+    const after = await review("usage");
+    expect(after.body.contributions.contributionIds).toBe(
+      before.body.contributions.contributionIds + 1,
+    );
+    expect(after.body.contributions.versionsByState.pending).toBe(
+      (before.body.contributions.versionsByState.pending ?? 0) + 1,
+    );
+    expect(after.text).not.toContain(created.id);
+    expect(after.text).not.toContain(author);
+  });
+
+  it("counts listed versions by family and accepts no fields", async () => {
+    // Runs after the capacity test filled the pilot, so no further approval is possible here.
+    const usage = await review("usage");
+    const byFamily = usage.body.contributions.listedVersionsByFamily as Record<string, number>;
+    const listed = Object.values(byFamily).reduce((sum, n) => sum + n, 0);
+    expect(listed).toBeGreaterThanOrEqual(1);
+    expect(listed).toBe(usage.body.contributions.versionsByState.listed_unverified);
+    for (const family of Object.keys(byFamily)) {
+      expect(["knowledge", "execution"]).toContain(family);
+    }
+    const invalid = await review("usage", { limit: 1 });
+    expect(invalid.status).toBe(400);
+    expect(invalid.body.error.code).toBe("invalid_request");
+  });
+});
+
 describe("remote review: headless operator client", () => {
   const viaWorker = (env: Env = baseEnv()) =>
     (async (input: URL | RequestInfo, init?: RequestInit) =>
@@ -649,6 +692,7 @@ describe("remote review: headless operator client", () => {
       await runRemoteReview(["inspect", c.id, "1"], config, viaWorker()),
       await runRemoteReview(["decide", c.id, "1", "reject", "not useful"], config, viaWorker()),
       await runRemoteReview(["needs", "5"], config, viaWorker()),
+      await runRemoteReview(["usage"], config, viaWorker()),
     ];
     for (const o of outs) {
       expect(o.exitCode).toBe(0);
@@ -679,6 +723,7 @@ describe("remote review: headless operator client", () => {
       [["decide", "id", "1", "approve"], config],
       [["capacity", "extra"], config],
       [["needs", "many"], config],
+      [["usage", "extra"], config],
       [["needs", "1", "2"], config],
       [["capacity"], { ...config, token: undefined }],
       [["capacity"], { ...config, baseUrl: undefined }],
