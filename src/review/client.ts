@@ -20,6 +20,7 @@ export const REMOTE_REVIEW_USAGE = `Usage (environment: COMMONS_REVIEW_URL, COMM
   queue [limit] [cursor]
   inspect <contributionId> <version>
   decide <contributionId> <version> <approve|reject|withdraw> <reason>
+  needs [limit]
 `;
 
 const LOCAL_HOSTS = new Set(["localhost", "127.0.0.1", "[::1]"]);
@@ -43,6 +44,12 @@ function parse(argv: readonly string[]): ParsedCommand | null {
       }
       if (b !== undefined) body.cursor = b;
       return { op: "queue", body };
+    }
+    case "needs": {
+      if (b !== undefined) return null;
+      if (a === undefined) return { op: "needs", body: {} };
+      const limit = Number(a);
+      return Number.isSafeInteger(limit) ? { op: "needs", body: { limit } } : null;
     }
     case "inspect":
       return a && Number.isSafeInteger(version) && c === undefined
