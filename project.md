@@ -761,8 +761,8 @@ Free, operator-reviewed, 100-place-capped pilot that outside agents can find, en
 - [x] Independent-operator feedback over remote MCP. (2026-11-16: the owner enrolled a second MetaMask account as a separate consumer operator; Claude Code, using that credential, retrieved seed Knowledge `02da40ea-dcdc-4602-825d-109992e148ca` v1 and submitted accuracy `mixed` and staleness `appears_stale` feedback (the live `/get` response now includes `method`); the service returned `accepted: true`. The same request from the contributor operator was refused with `feedback_not_eligible`, as designed.)
 - [x] Remote grouped needs review route. (PR #86, merged: reviewer-only `POST /v1/review/needs` and `npm run review:remote -- needs [limit]`, returning the identity-free `NeedsIntake.review()` groups; covered in `test/worker-review.test.ts`. CI `npm run verify` passed on the PR (run #216) and on `main` (run #217).)
 - [x] Enable `NEEDS_INTAKE=on` on the pilot. (2026-11-16: owner deployed with `NEEDS_INTAKE=on`; an `unsuccessful_search` report from the independent consumer operator returned `202 accepted`, and `npm run review:remote -- needs` showed one identity-free group with `distinctOperators` 1 and `totalReports` 1. Completes the last Phase 4 acceptance criterion.)
-- [ ] Low-friction agent onboarding: an agent-readable onboarding document served by the Worker (headless wallet enrollment for agents with their own wallets, `/pilot/enroll` for people, MCP client configuration), and unauthenticated `/mcp` and REST 401 responses that point to it. Optionally list the endpoint in an MCP registry.
-- [ ] State the required Knowledge source `hash` in the `commons.contribute` tool description.
+- [x] Low-friction agent onboarding. (PR #88, merged and deployed 2026-11-16: `GET /pilot/agents.md` and alias `/llms.txt` serve the agent-readable guide built from `ENROLLMENT_URI`; while enrollment is on, `401 unauthorized` from `/mcp` and `/v1/commons/*` carries `error.details.onboarding` and a `Link rel="help"` header; the enroll page names the address before signing. Verified live: both paths return `200 text/markdown` with pilot URLs, MCP and needs sections; REST and MCP 401s carry the pointer; both enrolled MCP identities still search normally. CI `npm run verify` passed on the PR. Listing in an MCP registry remains optional and not done.)
+- [x] State the required Knowledge source `hash` in the `commons.contribute` tool description. (PR #88: the description now names `uri`, `accessedAt` and `hash` and says new contributions stay pending until review.)
 - [ ] Seed content: 10–20 owner-reviewed Knowledge and Execution records in the initial domain, chosen so outside agents find useful results.
 - [ ] Pilot usage measurement: privacy-preserving counts of searches, gets, contributions, feedback and enrollments, readable by the operator only.
 - [ ] Invite a small set of outside operators; record what they find and what they report missing.
@@ -787,13 +787,13 @@ Maintain the following short record at the end of this document.
 
 **Current phase:** Phase 4 completed (2026-11-16): REST, local stdio MCP and remote MCP serve all four tools; remote MCP, independent-operator feedback and needs intake with remote grouped review are verified on the pilot. Phase 5 In Progress; Phase 3 remains complete.
 
-**Last completed task:** Remote MCP external-client acceptance with Claude Code on the deployed pilot (2026-11-16): search, both-family get, Knowledge contribute, pending invisibility, owner review and listed visibility passed; feedback was refused for the contributor operator as designed and accepted from an independent second operator. Remote grouped needs review merged (PR #86). PR #83 remote MCP, PR #82 enrollment page and earlier pilot PRs are merged.
+**Last completed task:** Low-friction agent onboarding (PR #88, merged and deployed 2026-11-16): `/pilot/agents.md` guide, 401 onboarding pointers, enroll-page address display and the contribute tool-description source fields, verified on the live pilot. Phase 4 completed earlier the same day.
 
 **Current task:** None in progress. Independent-operator remote feedback passed and remote grouped needs review is merged (PR #86).
 
 **Known blockers:** None for Phase 4. Phase 5 acceptance remains incomplete; payments (Phase 6) are outside the pilot launch milestone.
 
-**Next task:** Low-friction agent onboarding (Pilot launch milestone, Section 10): an agent-readable onboarding document served by the Worker and unauthenticated 401 responses that point to it. Make no further deployment changes without a separate operator action.
+**Next task:** Seed content (Pilot launch milestone, Section 10): 10–20 owner-reviewed Knowledge and Execution records in the initial domain; the owner chooses which APIs. Make no further deployment changes without a separate operator action.
 
 **Last verified implementation:** PR #86 (remote grouped needs review) passed CI `npm run verify` on its branch (run #216) and on `main` after merge (run #217). PR #83 branch at `247222e` passed Linux `npm run verify`: typechecks, formatting, lint, 920 tests across 56 files and Wrangler dry run. The local Windows mirror also passed 37 focused tests with test-launch adaptations. PR #82 was merged; its earlier verify passed 909 tests across 54 files.
 
