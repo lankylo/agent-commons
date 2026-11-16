@@ -158,7 +158,7 @@ export function createCommonsMcpServer(
     "commons.contribute",
     {
       description:
-        "Submit a new Knowledge or Execution contribution, or add its exact next immutable version with contributionId and expectedPreviousVersion. Execution targets must satisfy the platform-managed domain policy. Only authenticated, active agents for allow-listed operators may contribute; submitted verification remains an untrusted declaration, and recipes are never run here.",
+        "Submit a new Knowledge or Execution contribution, or add its exact next immutable version with contributionId and expectedPreviousVersion. Execution targets must satisfy the platform-managed domain policy. Only authenticated, active agents for allow-listed operators may contribute; submitted verification remains an untrusted declaration, and recipes are never run here. Each Knowledge source requires uri, accessedAt and hash {algorithm: 'sha256', digest: '<64 hex>'}. New contributions stay pending until operator review.",
       inputSchema: contributeInputSchema,
     },
     (input) => invokeWorker(dispatch, env, credential, "contribute", input),

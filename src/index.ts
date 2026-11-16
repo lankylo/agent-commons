@@ -19,6 +19,7 @@ import { handleReview, REVIEW_PATH_PREFIX, type ReviewEnv } from "./review/route
 import { ENROLL_PATH_PREFIX, handleEnrollment, type EnrollmentEnv } from "./enrollment/routes";
 import { handleEnrollmentPage } from "./enrollment/page";
 import { handleMcpHttp, MCP_PATH, type McpHttpEnv } from "./mcp/http";
+import { handleOnboarding, withOnboardingHint } from "./onboarding/document";
 
 /**
  * Private one-shot marker set only by the `/mcp` gate on a fresh per-request bindings object after
@@ -966,7 +967,7 @@ function resolvePilotMode(value: unknown): PilotMode | undefined {
   return undefined;
 }
 
-const worker = {
+const router = {
   async fetch(request: Request, env?: unknown): Promise<Response> {
     const workerEnv = (env ?? {}) as WorkerEnv;
     const { pathname } = new URL(request.url);
@@ -975,6 +976,8 @@ const worker = {
     }
     const enrollmentPage = handleEnrollmentPage(request, workerEnv);
     if (enrollmentPage) return enrollmentPage;
+    const onboarding = handleOnboarding(request, workerEnv);
+    if (onboarding) return onboarding;
     // Operator-only review: separate prefix, reviewer token only, never agent credentials.
     if (pathname.startsWith(REVIEW_PATH_PREFIX)) {
       return handleReview(request, workerEnv);
@@ -1036,6 +1039,16 @@ const worker = {
       return handleFeedback(request, workerEnv);
     }
     return new Response("Not Found", { status: 404 });
+  },
+};
+
+/** Public entry point: routes the request, then points agent-route 401s at onboarding. */
+const worker = {
+  async fetch(request: Request, env?: unknown): Promise<Response> {
+    const { pathname } = new URL(request.url);
+    const response = await router.fetch(request, env);
+    if (pathname !== MCP_PATH && !pathname.startsWith("/v1/commons/")) return response;
+    return withOnboardingHint(response, (env ?? {}) as WorkerEnv);
   },
 } satisfies ExportedHandler;
 
