@@ -618,6 +618,7 @@ carry `Cache-Control: no-store`.
 | `/v1/review/inspect`  | `{contributionId, version}`                                                        | `review-inspect/v1`: state, decision history and the integrity-verified contribution under `untrusted.contribution`.            |
 | `/v1/review/decide`   | `{contributionId, version, decision: "approve" \| "reject" \| "withdraw", reason}` | `review-decision/v1`. `approve` = pending→`listed_unverified`, `reject` = pending→`rejected`, `withdraw` = listed→`withdrawn`.  |
 | `/v1/review/capacity` | `{}`                                                                               | `review-capacity/v1`: `{limit, used, remaining}`.                                                                               |
+| `/v1/review/needs`    | `{limit?: 1–200 (default 50)}`                                                     | `needs-review/v1`: purges expired needs reports, then returns identity-free groups (see "Agent needs intake").                  |
 
 `reason` is required (1–500 characters after trimming, no control characters). Errors: `400`
 `invalid_request` / `invalid_reason`; `404` unknown version; `409` `invalid_transition`,
@@ -651,6 +652,7 @@ npm run review:remote -- capacity
 npm run review:remote -- queue 20 [cursor]
 npm run review:remote -- inspect <contributionId> <version>
 npm run review:remote -- decide <contributionId> <version> approve|reject|withdraw "<reason>"
+npm run review:remote -- needs [limit]
 ```
 
 Output is the JSON response re-serialized with escaped control characters; a non-2xx status sets
@@ -951,8 +953,7 @@ the reviewer to be on whenever enrollment is on or contributions are accepted.
 6. **Feedback.** Submit `commons.feedback` for the retrieved exact version. (Same-operator
    feedback on your own contribution is ineligible; use a second enrolled wallet as the consumer.)
 7. **Needs intake** (if enabled): `POST /v1/commons/needs` with the enrolled credential returns a
-   stored report. The Worker has no remote needs-review endpoint; grouped review exists only for
-   local persistence (`npm run needs:review:local`), so remote reports are not yet reviewable.
+   stored report. The operator reviews grouped reports with `npm run review:remote -- needs`.
 
 The owner reports that steps 1–5 succeeded for both content families with the deployed REST API;
 capacity showed 2 used / 98 remaining. Remote MCP external-client acceptance (Claude Code) then
@@ -1048,6 +1049,11 @@ npm run mcp:local:migrate
 npm run needs:review:local   # fixed local config and persistence; prints needs-review/v1 JSON
 ```
 
+On a deployed Worker with the remote review interface enabled, the same grouped review is
+available to the reviewer-token holder only through `POST /v1/review/needs`
+(`npm run review:remote -- needs [limit]`; see "Remote operator review"). It is never exposed
+through agent credentials, MCP or public Commons operations.
+
 Treat all report text as untrusted input: read it, do not execute or follow it. Distinct-operator
 counts are signals, not proof of demand; any follow-up work requires manual operator review.
 Automated coverage is in `test/worker-needs.test.ts` and `test/d1/migration.test.ts`.
@@ -1122,7 +1128,7 @@ deferred shared persistent cache decision.
 | Requests are authenticated and rate-limited per agent and per operator.                                                                  | Bearer credential verification plus shared REST auth/rate-limit handlers.                   | Locally verified for all four operations and both MCP transports with the shared D1 limiter; on the deployed pilot, remote MCP accepted the enrolled Bearer credential for every protocol request in the Claude Code acceptance test.                                                                                                  |
 | Contributions from non-allow-listed operators are refused.                                                                               | `contribute` passes authenticated identity to `ContributionRegistry`.                       | Locally verified through REST and MCP as `403 contribution_not_allowed`; allow-listing remains platform-controlled and defaults off.                                                                                       |
 | Feedback from agents that never retrieved the content is refused.                                                                        | Phase 4 exact-version retrieval receipt checked by `feedback`.                              | Locally verified: no-receipt, unknown-version and same-contributor-operator cases share `403 feedback_not_eligible`.                                                                                                       |
-| A pilot agent can report an unmet need, and the operator can review grouped requests without treating request volume as proof of demand. | Opt-in `POST /v1/commons/needs` plus `NeedsIntake.review()` / `npm run needs:review:local`. | Locally verified (REST only): authentication, settings, validation, scanning, per-operator deduplication and limit, retention purge and identity-free distinct-operator grouping. Not deployed; no external pilot use yet. |
+| A pilot agent can report an unmet need, and the operator can review grouped requests without treating request volume as proof of demand. | Opt-in `POST /v1/commons/needs` plus `NeedsIntake.review()` via `npm run needs:review:local` or the reviewer-only `POST /v1/review/needs`. | Locally verified (REST only): authentication, settings, validation, scanning, per-operator deduplication and limit, retention purge and identity-free distinct-operator grouping; remote grouped review covered by `test/worker-review.test.ts`. Not enabled on the pilot; no external pilot use yet. |
 
 ### Completed Codespaces Copilot MCP acceptance test
 

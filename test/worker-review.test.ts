@@ -6,8 +6,9 @@ import { getPlatformProxy, type PlatformProxy } from "wrangler";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { CredentialService } from "../src/identity/credentials";
 import { IdentityRepository } from "../src/identity/repository";
-import type { AgentId } from "../src/identity/types";
+import type { AgentId, OperatorId } from "../src/identity/types";
 import { ContributionRegistry, type RegistryEnv } from "../src/registry/creation";
+import { NeedsIntake, type NeedsReport } from "../src/registry/needs";
 import { contentObjectKey } from "../src/storage/content-objects";
 import { HTTPBIN_EXECUTION_SEED, HTTPBIN_KNOWLEDGE_SEED } from "../src/seed/httpbin";
 import { runRemoteReview } from "../src/review/client";
@@ -148,7 +149,7 @@ const decisionCount = async (id: string) =>
 const decide = (id: string, decision: string, reason: unknown = "reviewed", version = 1) =>
   review("decide", { contributionId: id, version, decision, reason });
 
-const OPS = ["queue", "inspect", "decide", "capacity"];
+const OPS = ["queue", "inspect", "decide", "capacity", "needs"];
 
 describe("remote review: enablement and configuration", () => {
   it("is disabled by default and when off: 404 for every op, no storage access", async () => {
@@ -587,6 +588,53 @@ describe("remote review: capacity", () => {
   });
 });
 
+describe("remote review: needs reports", () => {
+  const report: NeedsReport = {
+    category: "missing_information",
+    summary: "No record documents the httpbin GET /headers response",
+    desiredOutcome: "A listed Knowledge record for the headers contract",
+    searchTerms: ["httpbin", "headers"],
+  };
+
+  it("returns identity-free groups counted by distinct operators", async () => {
+    const identity = new IdentityRepository(db);
+    const intake = new NeedsIntake(db, { now: () => clock });
+    const actors: { agentId: AgentId; operatorId: OperatorId }[] = [];
+    for (const name of ["Needs Op A", "Needs Op B"]) {
+      const op = await identity.createOperator({ kind: "organization", displayName: name });
+      const agent = await identity.registerAgent(op.id, { displayName: `${name} agent` });
+      actors.push({ agentId: agent.id, operatorId: op.id });
+    }
+    for (const actor of actors) expect((await intake.submit(actor, report)).ok).toBe(true);
+    expect(await intake.submit(actors[0]!, report)).toEqual({ ok: true, duplicate: true });
+
+    const r = await review("needs");
+    expect(r.status).toBe(200);
+    expect(r.cache).toBe("no-store");
+    expect(r.body.schemaVersion).toBe("needs-review/v1");
+    expect(r.body.groups).toHaveLength(1);
+    expect(r.body.groups[0]).toMatchObject({
+      category: "missing_information",
+      distinctOperators: 2,
+      totalReports: 3,
+    });
+    expect(r.body.groups[0].untrusted.summary).toBe(report.summary);
+    for (const actor of actors) {
+      expect(r.text).not.toContain(actor.agentId);
+      expect(r.text).not.toContain(actor.operatorId);
+    }
+  });
+
+  it("validates the needs limit and fields", async () => {
+    for (const body of [{ limit: 0 }, { limit: 201 }, { limit: 1.5 }, { limit: "5" }, { x: 1 }]) {
+      const r = await review("needs", body);
+      expect(r.status).toBe(400);
+      expect(r.body.error.code).toBe("invalid_request");
+    }
+    expect((await review("needs", { limit: 1 })).status).toBe(200);
+  });
+});
+
 describe("remote review: headless operator client", () => {
   const viaWorker = (env: Env = baseEnv()) =>
     (async (input: URL | RequestInfo, init?: RequestInit) =>
@@ -600,6 +648,7 @@ describe("remote review: headless operator client", () => {
       await runRemoteReview(["queue", "2"], config, viaWorker()),
       await runRemoteReview(["inspect", c.id, "1"], config, viaWorker()),
       await runRemoteReview(["decide", c.id, "1", "reject", "not useful"], config, viaWorker()),
+      await runRemoteReview(["needs", "5"], config, viaWorker()),
     ];
     for (const o of outs) {
       expect(o.exitCode).toBe(0);
@@ -629,6 +678,8 @@ describe("remote review: headless operator client", () => {
       [["inspect", "id"], config],
       [["decide", "id", "1", "approve"], config],
       [["capacity", "extra"], config],
+      [["needs", "many"], config],
+      [["needs", "1", "2"], config],
       [["capacity"], { ...config, token: undefined }],
       [["capacity"], { ...config, baseUrl: undefined }],
       [["capacity"], { ...config, baseUrl: "http://commons.example.com" }],
