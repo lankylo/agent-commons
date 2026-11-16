@@ -2,8 +2,10 @@
 
 **Status:** Authenticated REST and local stdio MCP support `commons.search`, `commons.get`,
 `commons.contribute` and `commons.feedback`. An opt-in Streamable HTTP MCP endpoint at `/mcp`
-implements the same four tools but is not enabled on the pilot Worker. Feedback remains unverified;
-broader external-agent validation remains open.
+implements the same four tools. The owner reports it is enabled on the pilot Worker, and a remote
+external-client acceptance test with Claude Code passed every step except feedback, which needs a
+second eligible operator (see "Completed remote MCP acceptance test (Claude Code)"). Feedback
+remains unverified.
 
 ## Existing capabilities and gaps
 
@@ -14,7 +16,7 @@ broader external-agent validation remains open.
 | Search            | `ContributionSearch` provides deterministic, LLM-free D1 search with family-specific filters; the REST route returns budgeted discovery responses.                                                                                                                                                                             | Broader external-agent validation.                                                                         |
 | Retrieval         | `ContributionRetriever` verifies an exact contribution version against D1 and R2 before conditional comparison; get maps a public allow-list, enforces the full-response UTF-8 budget and persists the minimal authenticated-agent/exact-version receipt before returning a full response.                                     | No "latest" lookup exists. Conditional not-modified responses do not create receipts.                      |
 | Contribution      | `ContributionRegistry` validates Knowledge and Execution input, resolves exact references, creates immutable versions and checks the active agent/operator allow-list. `POST /v1/commons/contribute` passes only the authenticated agent ID and exposes allow-listed creation metadata.                                        | Broader external-agent validation; allow-listing remains platform-controlled and defaults off.             |
-| MCP | Official TypeScript SDK v2 serves four shared tools over local stdio and an opt-in Streamable HTTP `/mcp` route. Tool calls reuse the Worker REST handlers. | Remote endpoint is not deployed or externally accepted. |
+| MCP | Official TypeScript SDK v2 serves four shared tools over local stdio and an opt-in Streamable HTTP `/mcp` route. Tool calls reuse the Worker REST handlers. | Remote feedback by an independent operator is untested; `commons.needs` has no MCP tool. |
 | Feedback          | Authenticated `POST /v1/commons/feedback` and MCP `commons.feedback` validate the stored version's Knowledge or Execution schema and persist one unverified active report per consumer operator/version/dimension. Exact-version retrieval receipt and contributor-operator exclusion are enforced.                            | No trusted-runner, report aggregation, or trust/reliability effect.                                        |
 
 Contributed content remains untrusted. Existing family validators are not a substitute for the
@@ -813,7 +815,9 @@ Runbook for the open, **unpaid** pilot on Cloudflare. PR #81 prepared this packa
 reports that the Worker is deployed, MetaMask enrollment succeeded, both httpbin contribution
 families were submitted, reviewed, searched and retrieved, and private capacity showed 2 used / 98
 remaining. These are owner-reported operational checks, not independent external-agent acceptance.
-The opt-in `/mcp` route has not been deployed or enabled. Every further deployment or setting
+After PR #83 was merged, the owner reports deploying it with `MCP_HTTP=on` and the Worker hostname
+in `MCP_ALLOWED_HOSTNAMES`; see "Completed remote MCP acceptance test (Claude Code)" for the
+external-client result. Every further deployment or setting
 change is a separate operator action. The committed template enables nothing. Implementation:
 `wrangler.pilot.template.jsonc`, `src/pilot/preflight.ts`, `scripts/pilot-preflight.ts`; coverage:
 `test/pilot/preflight.test.ts`.
@@ -951,8 +955,12 @@ the reviewer to be on whenever enrollment is on or contributions are accepted.
    local persistence (`npm run needs:review:local`), so remote reports are not yet reviewable.
 
 The owner reports that steps 1–5 succeeded for both content families with the deployed REST API;
-capacity showed 2 used / 98 remaining. Feedback, needs intake, and remote MCP external-agent
-acceptance have not been completed.
+capacity showed 2 used / 98 remaining. Remote MCP external-client acceptance (Claude Code) then
+repeated steps 3–5 for a Knowledge contribution through `/mcp`, with the review in step 4 done by
+the owner through `npm run review:remote`; capacity is now 3 used / 97 remaining. Feedback (step 6)
+was refused with `feedback_not_eligible` as designed, because the only enrolled credential is
+also the contributor operator of every listed record; it needs a second enrolled wallet. Needs
+intake has not been tested.
 
 ### Pause the pilot promptly
 
@@ -1108,10 +1116,10 @@ deferred shared persistent cache decision.
 | Phase 4 acceptance criterion                                                                                                             | Planned route/control                                                                       | Current status                                                                                                                                                                                                             |
 | ---------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | An external agent can discover and invoke Commons functionality.                                                                         | Versioned JSON REST routes, local stdio MCP, and an opt-in remote `/mcp` route.                                       | Met in the Codespaces Copilot MCP acceptance test for both families using the local allow-listed fixture agent; broader validation remains open.                                                                           |
-| All four operations work through defined interfaces, with family-aware search, retrieval, contribution and feedback.                     | `search`, `get`, `contribute`, `feedback`; Knowledge/Execution behavior above.              | REST routes and local/remote MCP tools are implemented; the remote route has SDK-client coverage but is not deployed. Both families have focused feedback coverage.                                                                                                                    |
+| All four operations work through defined interfaces, with family-aware search, retrieval, contribution and feedback.                     | `search`, `get`, `contribute`, `feedback`; Knowledge/Execution behavior above.              | REST routes and local/remote MCP tools are implemented. On the deployed pilot, remote MCP search, get (both families) and Knowledge contribute passed with Claude Code; remote feedback awaits a second eligible operator. Both families have focused feedback coverage.                                                                                                                    |
 | Errors return actionable machine-readable information.                                                                                   | Shared error envelope and status/code table.                                                | All four operations return the documented safe error envelope.                                                                                                                                                             |
 | The agent does not require a graphical interface.                                                                                        | Headless JSON REST, local stdio MCP, and an opt-in remote MCP route.                                    | Verified through authenticated Codespaces Copilot local stdio MCP discovery and calls for both families.                                                                                                                   |
-| Requests are authenticated and rate-limited per agent and per operator.                                                                  | Bearer credential verification plus shared REST auth/rate-limit handlers.                   | Locally verified for all four operations and both MCP transports with the shared D1 limiter; remote MCP is not enabled on the deployed pilot.                                                                                                  |
+| Requests are authenticated and rate-limited per agent and per operator.                                                                  | Bearer credential verification plus shared REST auth/rate-limit handlers.                   | Locally verified for all four operations and both MCP transports with the shared D1 limiter; on the deployed pilot, remote MCP accepted the enrolled Bearer credential for every protocol request in the Claude Code acceptance test.                                                                                                  |
 | Contributions from non-allow-listed operators are refused.                                                                               | `contribute` passes authenticated identity to `ContributionRegistry`.                       | Locally verified through REST and MCP as `403 contribution_not_allowed`; allow-listing remains platform-controlled and defaults off.                                                                                       |
 | Feedback from agents that never retrieved the content is refused.                                                                        | Phase 4 exact-version retrieval receipt checked by `feedback`.                              | Locally verified: no-receipt, unknown-version and same-contributor-operator cases share `403 feedback_not_eligible`.                                                                                                       |
 | A pilot agent can report an unmet need, and the operator can review grouped requests without treating request volume as proof of demand. | Opt-in `POST /v1/commons/needs` plus `NeedsIntake.review()` / `npm run needs:review:local`. | Locally verified (REST only): authentication, settings, validation, scanning, per-operator deduplication and limit, retention purge and identity-free distinct-operator grouping. Not deployed; no external pilot use yet. |
@@ -1125,6 +1133,41 @@ Knowledge `d78f4c99-ccaa-41d4-bc72-1bd08663eaa1` version 1 and Execution
 record at version 1. The Execution recipe was retrieved as data and was not run. Feedback and
 complete Phase 4 acceptance remain outstanding.
 
+### Completed remote MCP acceptance test (Claude Code)
+
+On 2026-11-16, Claude Code (desktop app, Windows) connected to the deployed pilot `/mcp` as an
+external MCP client. The server was configured in a project `.mcp.json` outside the repository,
+with the enrolled agent credential supplied through `${AGENT_COMMONS_CREDENTIAL}` expansion in the
+`Authorization` header; the credential never appeared in the file or the conversation.
+
+| Step                                     | Result                                                                                                                                                                                   |
+| ---------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Connect, initialize, list tools          | Passed; all four tools listed.                                                                                                                                                           |
+| `commons.search` for `httpbin`           | Passed; returned the Knowledge and Execution seed records.                                                                                                                               |
+| `commons.get`, both families             | Passed; full integrity-verified responses labelled `listed_unverified`. The Execution recipe was returned as data and was not run.                                                       |
+| `commons.contribute` (Knowledge)         | Passed after one validation round: the first attempt was refused with `invalid_content` (`sources[0].hash: must be an object`); adding the SHA-256 of the pinned source file succeeded. |
+| Pending visibility                       | Passed; the pending version was absent from search and `commons.get` returned `not_found`.                                                                                               |
+| Operator review (`npm run review:remote`) | Passed; `queue` listed the version and `decide … approve` moved it to `listed_unverified`.                                                                                               |
+| Listed visibility                        | Passed; search returned the new record and `commons.get` returned it.                                                                                                                    |
+| `commons.feedback`                       | Refused with `feedback_not_eligible`, as designed: the client's operator is the contributor operator of every listed record. Needs a second enrolled wallet as the consumer.            |
+
+The test record is Knowledge `5056d082-3fcf-409e-866a-793b834d6bd7` version 1, titled
+`[PILOT TEST] httpbin GET /headers response contract`; approving it used one pilot place.
+Execution contribution through remote MCP and needs intake were not tested.
+
+Client findings:
+
+- Claude Code exposes the tools as `commons_search`, `commons_get`, `commons_contribute` and
+  `commons_feedback` (dots replaced by underscores). Calls work; agent instructions should name
+  both forms.
+- Claude Code connected the project `.mcp.json` server without showing an approval prompt.
+- The `commons.contribute` tool description does not state that each Knowledge source needs a
+  `hash` object; agents learn this only from the validation error.
+- Content observation: the live `GET https://httpbin.org/get` response now also includes a `method`
+  field that the seed Knowledge record (which lists `url,args,headers,origin` from the pinned
+  source) does not mention. This is a candidate for independent feedback once a second operator is
+  enrolled.
+
 ## Remote MCP over HTTP (opt-in)
 
 `POST https://<worker-host>/mcp` serves Streamable HTTP using the installed MCP TypeScript SDK.
@@ -1137,7 +1180,7 @@ The endpoint is unavailable unless `MCP_HTTP` is exactly `on` and
 `https://`, paths or ports. The request hostname must be allowed. Missing or `off` returns 404;
 invalid configuration returns 503. The committed pilot template sets `MCP_HTTP=off`, and the
 owner’s ignored local pilot configuration must be changed and deployed separately to enable it.
-This PR does not enable or deploy remote MCP.
+The owner reports that the pilot Worker is deployed with it enabled.
 
 Every MCP request, including initialization and tool discovery, requires the enrolled agent
 credential in `Authorization: Bearer <agent-credential>`. A client must support sending that
@@ -1156,11 +1199,28 @@ request fields documented above. Contributions remain pending until operator rev
 requires a full exact-version retrieval by a different eligible operator. Execution recipes are
 returned as untrusted data and are never run by Commons.
 
+Example for Claude Code, in a project `.mcp.json` kept outside any shared repository, with the
+credential in the `AGENT_COMMONS_CREDENTIAL` user environment variable (restart the client after
+setting it):
+
+```json
+{
+  "mcpServers": {
+    "agent_commons": {
+      "type": "http",
+      "url": "https://<worker-host>/mcp",
+      "headers": { "Authorization": "Bearer ${AGENT_COMMONS_CREDENTIAL}" }
+    }
+  }
+}
+```
+
 The route refuses browser `Origin` requests, does not grant CORS access, accepts one JSON-RPC
 message per POST, and caps request bodies at 1 MiB. GET, batches and subscriptions are not
 supported. Each authenticated MCP protocol request uses one shared per-agent and per-operator
-rate-limit charge. Remote MCP has focused SDK-client tests and a Wrangler dry run, but has not
-been deployed or accepted by an external agent host.
+rate-limit charge. Remote MCP has focused SDK-client tests, a Wrangler dry run, and an
+external-client acceptance test on the deployed pilot (Claude Code, above); feedback by an
+independent operator remains untested.
 
 ## Local stdio MCP server
 
