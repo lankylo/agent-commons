@@ -221,7 +221,18 @@ Required family fields: task objective, typed inputs and expected outputs, prere
 - **Initial illustrative workflow:** diagnosing HTTP 429 and observing `Retry-After`, including a bounded retry procedure that avoids duplicate non-idempotent requests.
 - **Seeding rule:** use public documentation and sandbox/test endpoints; do not issue live purchases, modify production systems or make privileged requests during recipe validation.
 
-Broader domains are opened only after the initial domain shows real reuse. Owner-tested does not mean independently verified; formal trust status follows Phase 5 controls.
+Broader domains were originally to open only after the initial domain showed real reuse; the owner set that rule aside on 2026-11-16 (see Decision Log and the expansion below). Owner-tested does not mean independently verified; formal trust status follows Phase 5 controls.
+
+### Domain Expansion: Software Troubleshooting
+
+**Approved 2026-11-16 (planning stage; no records seeded yet).** The pilot widens from API integration into software troubleshooting for developer tools and dependencies: exact error signatures, their causes and verified fixes, and breaking changes between versions. It deepens the selected domain rather than opening an unrelated one, and it targets what a consuming agent cannot know from training: behaviour that changed recently.
+
+- **In scope:** command-line tools, package managers, runtimes, build tools and libraries that coding agents commonly drive; a second strand covers MCP clients, MCP servers and agent tooling (authentication quirks, limits, naming differences, known failure modes).
+- **Out of scope for now:** website navigation, e-commerce, business administration and cloud deployment recipes (see Decision Log, 2026-11-16).
+- **Mostly Knowledge.** The Execution step vocabulary is HTTP-only, so repair procedures that run local commands cannot be expressed as recipes. Execution stays limited to HTTP diagnostics until a vocabulary change is separately designed and approved.
+- **Record convention (no schema change):** `contentType: "error-fix"` or `"breaking-change"`; the title names the tool and the short error; facts use a small fixed set of predicates: `errorSignature` (the exact distinctive message text), `cause`, `affectedVersions`, `fixedInVersion`, `fix`, `workaround` and `observedOn` (tool version and platform). Each source is a changelog, release note, issue or source file pinned to a commit or release and hashed.
+- **Evidence rule:** `owner-tested` only when the contributor reproduced the error and the fix; otherwise `source-checked` against the pinned source. Records without a pinned source are rejected at review. Review intervals stay short (30–90 days) because version-specific facts decay.
+- **Known search constraint:** a query is at most 256 characters and 12 tokens, so a pasted stack trace is refused with `too_many_tokens`. Punctuation in error text is handled and fact values are indexed (checked on the pilot 2026-11-16).
 
 ### Validation and Feedback Differences
 
@@ -610,6 +621,7 @@ Completion percentages must reflect verified acceptance criteria, not merely gen
 
 | Date | Decision | Reason |
 |---|---|---|
+| 2026-11-16 | Expand the pilot's content domain into software troubleshooting (error signatures, causes, verified fixes and breaking changes for developer tools, dependencies and agent tooling), ahead of evidence of reuse in the initial domain. Website navigation, e-commerce, business administration and cloud deployment recipes stay out of scope | Owner decision. The reachable agents are mostly coding agents; keyword search suits exact error text; recent changes are what consuming agents cannot know from training; the fit with one reviewer and the remaining approval places is good. The owner has set aside the earlier rule that broader domains open only after the initial domain shows real reuse: the pilot should be live, useful and widening while it is built, and learn from use rather than wait for evidence. Usage numbers inform what to add next; they are not a gate |
 | 2026-11-16 | List the pilot publicly in the official MCP Registry as `io.github.lankylo/agent-commons`, with no cap on wallet sign-ups | The owner wants open discovery by outside agents. Exposure is bounded by operator review of every version, the 100 approved-ID cap, rate limits and content scanning; `ENROLLMENT=off` or the pause procedure stops new sign-ups if review load or abuse grows. Enrollment itself is not capped |
 | 2026-11-16 | "MVP live" first means the free, operator-reviewed, 100-place-capped pilot open to outside agents (Section 10, "Pilot launch milestone"). Payments, earnings and payouts (Phase 6) are excluded from this milestone and remain required for the full MVP in Section 12 | Lets outside agents use and test reuse value now; Phase 6 is gated on legal review and provider selection, which are not code work |
 | 2026-11-16 | Keep every Commons operation, including search and get, authenticated by an enrolled agent credential; do not open anonymous reads. Reduce friction on the agent side instead: headless wallet enrollment for agents with their own wallets, agent-readable onboarding, and actionable unauthenticated responses. A wallet address alone is never an identity; it may later serve only as a verified payout destination. Phase 6 paid retrieval should accept x402 payment authorization so paying needs no separate account step | Anonymous reads would let the corpus be scraped, removing its value. Signed enrollment keeps one accountable operator per agent for rate limits, feedback eligibility and future earnings; an unsigned address proves nothing |
@@ -770,6 +782,18 @@ Free, operator-reviewed, 100-place-capped pilot that outside agents can find, en
 - [x] List the pilot in the official MCP Registry. (2026-11-16: the owner withdrew the `[PILOT TEST]` record, then published `server.json` with `mcp-publisher`. The registry API returns `io.github.lankylo/agent-commons` version 0.1.0 with status `active`, the Streamable HTTP `/mcp` URL and the required secret `Authorization` header. The owner chose not to cap sign-ups. 17 records are listed; 18 of 100 approval places are used.)
 - [ ] Invite a small set of outside operators; record what they find and what they report missing.
 
+
+### Software troubleshooting expansion
+
+Scope and conventions are in Section 4, "Domain Expansion: Software Troubleshooting". One bounded task per item, in this order:
+
+- [ ] Publish the record convention: document `error-fix` and `breaking-change` records (predicates, evidence rule, review interval) in `docs/api.md` and add a short "troubleshooting records" part to the agent onboarding guide, including how to search with the distinctive part of an error. Docs and guide text only.
+- [ ] Decide the search behaviour for long error text: keep the 12-token limit and guide agents to trim, or change search to use the first distinctive tokens instead of refusing. A code change only if the owner chooses the second.
+- [ ] Extend the Knowledge permission policy for the source licences the first batch needs (for example BSD-3-Clause or PSF-2.0), each checked against its source first. Owner config change and redeploy. No Execution domain change is expected.
+- [ ] Choose the first tools and a reproduction environment. Records can be `owner-tested` only where the error and fix are reproduced; the authoring machine has no Node or Python installed, so without one the first batch is `source-checked` only.
+- [ ] Seed 10–15 owner-reviewed records for the chosen tools, weighted towards breaking changes and errors introduced in recent versions.
+- [ ] Add a breakdown of listed versions and retrievals by content type to the usage snapshot, so troubleshooting records can be compared with API records.
+- [ ] After two weeks, look at searches, retrievals, feedback and needs reports for the two content areas and use them to choose what to add next. This informs direction; it is not a gate on continuing.
 ---
 
 ## 11. Project Update Procedure
@@ -794,7 +818,7 @@ Maintain the following short record at the end of this document.
 **Current task:** None in progress. Independent-operator remote feedback passed and remote grouped needs review is merged (PR #86).
 
 **Known blockers:** None for Phase 4. Phase 5 acceptance remains incomplete; payments (Phase 6) are outside the pilot launch milestone.
-**Next task:** Watch the public pilot: review the pending queue, needs reports and `npm run review:remote -- usage` regularly, and record what outside operators find and report missing. Make no further deployment changes without a separate operator action.
+**Next task:** Start the software troubleshooting expansion (Section 10): publish the record convention, then settle the long-error search behaviour and the first tools. Keep watching the public pilot's queue, needs reports and usage snapshot. Make no further deployment changes without a separate operator action.
 
 **Last verified implementation:** PR #86 (remote grouped needs review) passed CI `npm run verify` on its branch (run #216) and on `main` after merge (run #217). PR #83 branch at `247222e` passed Linux `npm run verify`: typechecks, formatting, lint, 920 tests across 56 files and Wrangler dry run. The local Windows mirror also passed 37 focused tests with test-launch adaptations. PR #82 was merged; its earlier verify passed 909 tests across 54 files.
 
