@@ -1,9 +1,19 @@
 /**
  * Operator-only pilot usage snapshot. Aggregate counts over existing tables: no identifiers, no
- * contribution or report text, and no new storage. Counts are operational signals, not proof of
- * demand or value. Searches and repeat retrievals are not recorded anywhere, so they are listed
- * under `notMeasured` rather than estimated.
+ * contribution or report text. Counts are operational signals, not proof of
+ * demand or value. Successful searches and full retrievals are counted per UTC day in
+ * `usage_daily_counts` (migration 0012); activity before that migration is not measured.
  */
+export type UsageOperation = "search" | "retrieval";
+
+export const USAGE_RECENT_DAYS = 30;
+
+export interface PilotUsageDay {
+  readonly day: string;
+  readonly searches: number;
+  readonly retrievals: number;
+}
+
 export interface PilotUsageSnapshot {
   readonly schemaVersion: "pilot-usage/v1";
   readonly notice: string;
@@ -32,6 +42,11 @@ export interface PilotUsageSnapshot {
     readonly distinctReports: number;
     readonly totalSubmissions: number;
     readonly reportingOperators: number;
+  };
+  readonly activity: {
+    readonly searches: number;
+    readonly retrievals: number;
+    readonly recentDays: readonly PilotUsageDay[];
   };
   readonly notMeasured: readonly string[];
 }
@@ -77,6 +92,39 @@ const STATES_SQL = `SELECT s.state AS state, v.family AS family, COUNT(*) AS n
     ON v.contribution_id = s.contribution_id AND v.version = s.version
  GROUP BY s.state, v.family`;
 
+const ACTIVITY_TOTALS_SQL = `SELECT
+  COALESCE(SUM(CASE WHEN operation = 'search' THEN count ELSE 0 END), 0) AS searches,
+  COALESCE(SUM(CASE WHEN operation = 'retrieval' THEN count ELSE 0 END), 0) AS retrievals
+  FROM usage_daily_counts`;
+
+const ACTIVITY_DAYS_SQL = `SELECT day,
+  SUM(CASE WHEN operation = 'search' THEN count ELSE 0 END) AS searches,
+  SUM(CASE WHEN operation = 'retrieval' THEN count ELSE 0 END) AS retrievals
+  FROM usage_daily_counts
+ GROUP BY day
+ ORDER BY day DESC
+ LIMIT ?`;
+
+const RECORD_SQL = `INSERT INTO usage_daily_counts (day, operation, count) VALUES (?, ?, 1)
+  ON CONFLICT (day, operation) DO UPDATE SET count = count + 1`;
+
+/**
+ * Adds one to today's counter for a successful search or full retrieval. Stores no identity or
+ * request content. Counting is best effort: a failure here must never fail the agent's request.
+ */
+export async function recordUsage(
+  db: D1Database,
+  operation: UsageOperation,
+  now: Date,
+): Promise<void> {
+  try {
+    const statement = db.prepare(RECORD_SQL);
+    await statement.bind(now.toISOString().slice(0, 10), operation).run();
+  } catch {
+    // Best effort only.
+  }
+}
+
 export class PilotUsage {
   constructor(
     private readonly db: D1Database,
@@ -89,6 +137,13 @@ export class PilotUsage {
     const states = await this.db
       .prepare(STATES_SQL)
       .all<{ state: string; family: string; n: number }>();
+    const activity = await this.db
+      .prepare(ACTIVITY_TOTALS_SQL)
+      .first<{ searches: number; retrievals: number }>();
+    const days = await this.db
+      .prepare(ACTIVITY_DAYS_SQL)
+      .bind(USAGE_RECENT_DAYS)
+      .all<PilotUsageDay>();
 
     const versionsByState: Record<string, number> = {};
     const listedVersionsByFamily: Record<string, number> = {};
@@ -130,7 +185,12 @@ export class PilotUsage {
         totalSubmissions: totals.needs_submissions,
         reportingOperators: totals.needs_operators,
       },
-      notMeasured: ["searches", "repeat retrievals of the same version by the same agent"],
+      activity: {
+        searches: activity?.searches ?? 0,
+        retrievals: activity?.retrievals ?? 0,
+        recentDays: days.results,
+      },
+      notMeasured: ["searches and retrievals made before the usage counter was deployed"],
     };
   }
 }

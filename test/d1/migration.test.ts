@@ -134,6 +134,7 @@ describe("clean migration", () => {
         "pilot_capacity_places",
         "rate_limit_windows",
         "retrieval_receipts",
+        "usage_daily_counts",
         "version_platform_state",
         "version_quality_decisions",
         "version_quality_states",

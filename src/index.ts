@@ -8,6 +8,7 @@ import type { ConditionalRetrievalResponse } from "./registry/retrieval-conditio
 import type { RetrievalResponse } from "./registry/retrieval-response";
 import { ContributionRegistry, type CreationError, type VersionError } from "./registry/creation";
 import { FeedbackRegistry } from "./registry/feedback";
+import { recordUsage } from "./registry/usage";
 import { RateLimitService, DEFAULT_RATE_LIMITS } from "./rate-limit";
 import {
   DEFAULT_NEEDS_OPERATOR_DAILY_LIMIT,
@@ -245,6 +246,8 @@ async function handleSearch(request: Request, env: WorkerEnv): Promise<Response>
       const status = budgeted.error.code === "budget_too_small" ? 413 : 400;
       return httpError(status, budgeted.error.code, budgeted.error.message);
     }
+
+    await recordUsage(env.DB, "search", (env.NOW ?? (() => new Date()))());
 
     return Response.json(
       {
@@ -486,6 +489,7 @@ async function handleGet(request: Request, env: WorkerEnv): Promise<Response> {
       )
         .bind(authorization.actor.agentId, record.contributionId, record.version)
         .run();
+      await recordUsage(env.DB, "retrieval", (env.NOW ?? (() => new Date()))());
     }
 
     return Response.json({
