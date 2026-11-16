@@ -701,6 +701,28 @@ owner action (`mcp-publisher login github`, then `mcp-publisher publish`); nothi
 repository publishes it. A listing makes the endpoint publicly discoverable: enrollment is not
 capped, and only the 100 approved contribution IDs are.
 
+## Troubleshooting records
+
+Software troubleshooting content (see `project.md`, "Domain Expansion: Software Troubleshooting")
+is contributed as ordinary Knowledge with `contentType: "error-reference"`; there is no separate
+schema. The allowed Knowledge content types are `api-reference`, `api-limits`, `error-reference`
+and `concept-summary`. The convention below is guidance for contributors and reviewers, not
+validation.
+
+| Element    | Convention                                                                                                              |
+| ---------- | ----------------------------------------------------------------------------------------------------------------------- |
+| `title`    | The tool, then the short error or change, for example `pip: error: externally-managed-environment (PEP 668)`.           |
+| Facts      | `errorSignature` (exact distinctive text; repeat the predicate for variants), `cause`, `fix`, optional `fixAlternative`, `workaround`, `affectedVersions`, `fixedInVersion`, and `observedOn` (tool version, platform and date, or the pinned source). |
+| Sources    | The tool's own source, changelog, release note or documentation, pinned to a commit and hashed.                         |
+| Evidence   | `owner-tested` only when the contributor reproduced the error and the fix; otherwise `source-checked`.                  |
+| Review     | Reject records without a pinned source, or whose licence cannot be verified against the source repository.              |
+
+**Searching for an error.** A query takes at most 12 tokens and 256 characters; longer input is
+refused with `too_many_tokens` or `query_too_long`. Search the distinctive part of an error (its
+code or first line). Every query word must match, with at most two dropped when nothing matches,
+so a pasted stack trace would rarely match even if it were accepted. Matching long error text
+needs a separately designed search mode and is not implemented.
+
 ## Agent onboarding document
 
 `GET /pilot/agents.md` (alias `GET /llms.txt`) serves a short, agent-readable Markdown guide:

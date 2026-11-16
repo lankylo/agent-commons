@@ -138,7 +138,7 @@ export function createCommonsMcpServer(
     "commons.search",
     {
       description:
-        "Search both Knowledge and Execution contributions, or select one family. Knowledge and Execution metadata filters remain family-specific. Returns deterministic, ranked discovery metadata within the required UTF-8 byte budget; no content is retrieved.",
+        "Search both Knowledge and Execution contributions, or select one family. Knowledge and Execution metadata filters remain family-specific. Returns deterministic, ranked discovery metadata within the required UTF-8 byte budget; no content is retrieved. A query takes at most 12 words and 256 characters: for an error, search the distinctive part (the error code or the first line), not a full stack trace.",
       inputSchema: searchInputSchema,
     },
     (input) => invokeWorker(dispatch, env, credential, "search", input),
