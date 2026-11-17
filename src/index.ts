@@ -3,7 +3,13 @@ import type { AgentId, OperatorId } from "./identity/types";
 import { ContributionSearch } from "./registry/search";
 import { budgetDiscoveryResponse } from "./registry/discovery-budget";
 import { ContributionRetriever } from "./registry/retrieval";
-import { CONSUMER_QUALITY_LABEL, QualityStateStore } from "./registry/quality-state";
+import {
+  QualityStateStore,
+  searchQualityLabel,
+  versionQualityLabel,
+} from "./registry/quality-state";
+import { refreshTrustBestEffort, toTrustSummary, trustKey, TrustStore } from "./registry/trust";
+import { SourceChecker, type SourceFetcher } from "./registry/source-check";
 import type { ConditionalRetrievalResponse } from "./registry/retrieval-conditional";
 import type { RetrievalResponse } from "./registry/retrieval-response";
 import { ContributionRegistry, type CreationError, type VersionError } from "./registry/creation";
@@ -47,6 +53,8 @@ interface WorkerEnv extends ReviewEnv, EnrollmentEnv, McpHttpEnv {
   readonly RATE_LIMIT_AGENT_LIMIT?: number | string;
   readonly RATE_LIMIT_OPERATOR_LIMIT?: number | string;
   readonly RATE_LIMIT_WINDOW_SECONDS?: number | string;
+  /** Test injection for scheduled source re-checks; never set from configuration. */
+  readonly SOURCE_FETCHER?: SourceFetcher;
 }
 
 function httpError(
@@ -247,7 +255,18 @@ async function handleSearch(request: Request, env: WorkerEnv): Promise<Response>
       return httpError(status, budgeted.error.code, budgeted.error.message);
     }
 
-    await recordUsage(env.DB, "search", (env.NOW ?? (() => new Date()))());
+    const now = env.NOW ?? (() => new Date());
+    await recordUsage(env.DB, "search", now());
+
+    // Platform trust for the returned results, in result order. It sits beside `data`, like
+    // `quality`, so the discovery response and its byte budget are unchanged.
+    const returned = budgeted.response.results;
+    const refs = returned.map((r) => ({ id: r.contributionId, version: r.version }));
+    const trustByKey = await new TrustStore(env.DB, now).read(refs);
+    const trust = refs.flatMap((ref) => {
+      const found = trustByKey.get(trustKey(ref.id, ref.version));
+      return found ? [toTrustSummary(found)] : [];
+    });
 
     return Response.json(
       {
@@ -257,7 +276,8 @@ async function handleSearch(request: Request, env: WorkerEnv): Promise<Response>
           usedUtf8Bytes: budgeted.budget.usedUtf8Bytes,
           omittedResultCount: budgeted.budget.omittedResultCount,
         },
-        quality: CONSUMER_QUALITY_LABEL,
+        quality: searchQualityLabel(trust.some((t) => t.verified)),
+        trust,
       },
       { status: 200 },
     );
@@ -481,6 +501,12 @@ async function handleGet(request: Request, env: WorkerEnv): Promise<Response> {
       );
     }
 
+    // Platform trust is read before this request's own receipt is counted.
+    const now = env.NOW ?? (() => new Date());
+    const target = { id: record.contributionId, version: record.version };
+    const trustByKey = await new TrustStore(env.DB, now).read([target]);
+    const trust = trustByKey.get(trustKey(target.id, target.version));
+
     if (data.schemaVersion === "retrieval-response/v1") {
       await env.DB.prepare(
         `INSERT INTO retrieval_receipts (agent_id, contribution_id, version)
@@ -489,7 +515,8 @@ async function handleGet(request: Request, env: WorkerEnv): Promise<Response> {
       )
         .bind(authorization.actor.agentId, record.contributionId, record.version)
         .run();
-      await recordUsage(env.DB, "retrieval", (env.NOW ?? (() => new Date()))());
+      await recordUsage(env.DB, "retrieval", now());
+      await refreshTrustBestEffort(env.DB, now, target, "consumers");
     }
 
     return Response.json({
@@ -498,7 +525,8 @@ async function handleGet(request: Request, env: WorkerEnv): Promise<Response> {
         maxUtf8Bytes: record.maxUtf8Bytes,
         usedUtf8Bytes,
       },
-      quality: CONSUMER_QUALITY_LABEL,
+      quality: versionQualityLabel(trust?.verified ?? false),
+      ...(trust ? { trust } : {}),
     });
   } catch {
     return httpError(500, "internal_error", "Retrieval is unavailable.");
@@ -881,6 +909,10 @@ async function handleFeedback(request: Request, env: WorkerEnv): Promise<Respons
       }
     }
 
+    // Derived trust follows the stored reports; a failure here never fails the saved feedback.
+    const reported = { id: record.contributionId, version: record.version };
+    await refreshTrustBestEffort(env.DB, env.NOW ?? (() => new Date()), reported, "all");
+
     return Response.json({
       schemaVersion: "feedback-response/v1",
       accepted: true,
@@ -1053,6 +1085,23 @@ const worker = {
     const response = await router.fetch(request, env);
     if (pathname !== MCP_PATH && !pathname.startsWith("/v1/commons/")) return response;
     return withOnboardingHint(response, (env ?? {}) as WorkerEnv);
+  },
+
+  /**
+   * Cron entry point: one bounded batch of Knowledge source re-checks. It runs only when the
+   * deployment configures a cron trigger; with none configured nothing is ever fetched.
+   */
+  async scheduled(_controller: unknown, env?: unknown): Promise<void> {
+    const workerEnv = (env ?? {}) as WorkerEnv;
+    if (!workerEnv.DB) return;
+    try {
+      await new SourceChecker(workerEnv.DB, {
+        now: workerEnv.NOW,
+        fetcher: workerEnv.SOURCE_FETCHER,
+      }).run();
+    } catch {
+      // A failed run records nothing; the sources stay due for the next run.
+    }
   },
 } satisfies ExportedHandler;
 

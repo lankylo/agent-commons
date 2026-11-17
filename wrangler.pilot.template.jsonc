@@ -21,6 +21,9 @@
       "bucket_name": "<R2_BUCKET_NAME>",
     },
   ],
+  // Knowledge source re-checks: off until a cron trigger is added in the git-ignored local copy,
+  // for example "triggers": { "crons": ["17 3 * * *"] }. Each run checks at most 15 sources that
+  // are due (7 days after their latest check), so a daily trigger re-checks every source weekly.
   "vars": {
     // Initial deployment: contributions and feedback closed; enrollment, review, needs closed.
     "PILOT_MODE": "read-only",

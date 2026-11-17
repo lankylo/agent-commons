@@ -47,19 +47,23 @@
  *
  * Ranking contract (baseline, deterministic, applied in SQL before LIMIT; lexicographic keys):
  *   1. freshness: current before stale (stale is demoted below every current match);
+ *   1a. platform caution: versions whose source changed since it last matched, or that at least
+ *      two independent operators dispute, rank below the rest (`version_trust`);
+ *   1b. platform verification: verified versions before unverified ones (`version_trust`);
  *   2. evidence tier, descending, family-aware on a common 0–2 scale ({@link EVIDENCE_TIERS}):
  *      Knowledge cross-source 2, source-checked 1, owner-tested 1, unverified 0;
  *      Execution owner-tested 2, simulated 1, unverified 0;
- *   3. platform `reliabilityScore` descending, null after any score (no Phase 5 data exists yet);
+ *   3. platform `reliabilityScore` descending, null after any score;
  *   4. Knowledge corroboration descending: distinct source URIs beyond the first, capped at
  *      {@link SEARCH_RANKING.maxCorroboration}; Execution is always 0 (it has no persisted
  *      equivalent);
  *   5. latest-version creation time descending;
  *   6. contribution ID ascending (final, unique tie-break).
  * Every key is defined for both families, so the order is total and transitive across mixed
- * results. Ranking never reads indexed text, Knowledge `explanation`, steps or R2 content. Not
- * implemented (Phase 5): recent Execution outcomes, consumer feedback, trust or source re-checks;
- * `consumerCount` is not a ranking input.
+ * results. Ranking never reads indexed text, Knowledge `explanation`, steps or R2 content. Source
+ * re-checks and independent-operator feedback reach ranking only through `version_trust`,
+ * `reliabilityScore` and `lastVerifiedAt` (see `trust.ts`); `consumerCount` is not a ranking
+ * input. A version with no trust row ranks exactly as before.
  *
  * Results carry only typed metadata from `contribution_versions` and `version_platform_state` plus
  * the derived freshness state and review-due time; no indexed text, facts, summary, explanation,
@@ -638,7 +642,7 @@ const tierCase = (column: string, tiers: Readonly<Record<string, number>>): stri
     .join(" ")} ELSE 0 END`;
 
 /** Exact integer epoch milliseconds of an ISO timestamp column (NULL if unparseable). */
-const epochMs = (expr: string): string =>
+export const epochMs = (expr: string): string =>
   `CAST(ROUND((julianday(${expr}) - 2440587.5) * ${SEARCH_RANKING.msPerDay}) AS INTEGER)`;
 
 export class ContributionSearch {
@@ -769,7 +773,10 @@ export class ContributionSearch {
                  MIN(MAX((SELECT COUNT(DISTINCT ks.uri) FROM knowledge_sources ks
                            WHERE ks.contribution_id = v.contribution_id AND ks.version = v.version)
                          - 1, 0), ${SEARCH_RANKING.maxCorroboration})
-               ELSE 0 END AS corroboration
+               ELSE 0 END AS corroboration,
+               COALESCE(t.verified, 0) AS verified,
+               CASE WHEN t.source_status = 'changed' OR COALESCE(t.disputing_operators, 0) >= 2
+                    THEN 1 ELSE 0 END AS cautioned
           FROM matched m
           JOIN latest l ON l.contribution_id = m.contribution_id AND l.version = m.version
           JOIN contribution_versions v
@@ -780,12 +787,15 @@ export class ContributionSearch {
             ON k.contribution_id = v.contribution_id AND k.version = v.version
           LEFT JOIN execution_versions e
             ON e.contribution_id = v.contribution_id AND e.version = v.version
+          LEFT JOIN version_trust t
+            ON t.contribution_id = v.contribution_id AND t.version = v.version
          ${where.length > 0 ? `WHERE ${where.join(" AND ")}` : ""}
       )
       SELECT c.*, CASE WHEN c.review_due_ms IS NULL OR ? >= c.review_due_ms THEN 1 ELSE 0 END
                     AS stale
         FROM candidates c
-       ORDER BY stale ASC, c.evidence_tier DESC, c.reliability_score IS NULL ASC,
+       ORDER BY stale ASC, c.cautioned ASC, c.verified DESC, c.evidence_tier DESC,
+                c.reliability_score IS NULL ASC,
                 c.reliability_score DESC, c.corroboration DESC, c.created_at DESC, c.id ASC
        LIMIT ?`;
 

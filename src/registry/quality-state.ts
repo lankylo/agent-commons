@@ -17,6 +17,26 @@ export const CONSUMER_QUALITY_LABEL = Object.freeze({
   note: "Listed by the platform; content has not been independently verified.",
 } as const);
 
+/** Label for one exact version: verified only when the platform's own checks say so. */
+export function versionQualityLabel(verified: boolean) {
+  if (!verified) return CONSUMER_QUALITY_LABEL;
+  return Object.freeze({
+    state: "listed_verified",
+    independentlyVerified: true,
+    note: "Listed by the platform; verified by the platform checks named in trust.checks.",
+  } as const);
+}
+
+/** Label for a search response, whose results may differ: per-result detail is in `trust`. */
+export function searchQualityLabel(anyVerified: boolean) {
+  if (!anyVerified) return CONSUMER_QUALITY_LABEL;
+  return Object.freeze({
+    state: "listed",
+    independentlyVerified: false,
+    note: "Results are listed by the platform. Only results marked verified in trust passed a platform check; the rest are not independently verified.",
+  } as const);
+}
+
 export interface VersionQualityState {
   readonly contributionId: string;
   readonly version: number;
