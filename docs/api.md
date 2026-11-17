@@ -113,7 +113,8 @@ makes it the searched version). Pending, rejected, withdrawn and missing-state v
 returned. Related references to versions that are not listed are omitted. `listed_unverified` means
 only "allowed to list"; it does not mean independently verified, and every successful response
 carries a top-level `quality` label (`state: "listed_unverified"`, `independentlyVerified: false`)
-beside `data` and `budget`. The gate lives in the shared Worker handler, so REST and local MCP
+beside `data` and `budget`, unless a platform check has verified a result: see "Trust and
+verification" for the per-result `trust` field and the labels used then. The gate lives in the shared Worker handler, so REST and local MCP
 behave identically.
 
 `maxUtf8Bytes` is required by this contract. The response wraps the existing discovery shape and
@@ -184,8 +185,8 @@ state. A pending, rejected, withdrawn, unknown or missing-state version returns 
 before any content or validator comparison), with no content, no R2 read and no retrieval receipt.
 In successful responses, `related` and `content.related` omit references to versions that are not
 listed, and `previousVersion` is `null` unless that exact earlier version is listed. Successful full
-and not-modified responses carry the same top-level `quality` label as search; `listed_unverified`
-is not independent verification. Private platform review (`QualityReviewer.inspect`) is unaffected.
+and not-modified responses carry a top-level `quality` label and a `trust` object for that exact
+version (see "Trust and verification"); `listed_unverified` is not independent verification. Private platform review (`QualityReviewer.inspect`) is unaffected.
 
 The full response is all-or-nothing: if it exceeds `maxUtf8Bytes`, return `413 response_too_large`
 with required and maximum UTF-8 byte counts and no partial content. A conditional response is
@@ -620,6 +621,14 @@ carry `Cache-Control: no-store`.
 | `/v1/review/capacity` | `{}`                                                                               | `review-capacity/v1`: `{limit, used, remaining}`.                                                                               |
 | `/v1/review/needs`    | `{limit?: 1–200 (default 50)}`                                                     | `needs-review/v1`: purges expired needs reports, then returns identity-free groups (see "Agent needs intake").                  |
 | `/v1/review/usage`    | `{}`                                                                               | `pilot-usage/v1`: aggregate, identity-free pilot counts (see "Pilot usage snapshot").                                           |
+| `/v1/review/recheck`  | `{limit?: 1–15 (default 15)}`                                                      | `source-recheck/v1`: runs one batch of Knowledge source re-checks now: `{checked, match, mismatch, unreachable, remainingDue}`. |
+
+`inspect` also returns the version's `provenance` (the immutable contributor and author operator
+and agent IDs, creation times, content hash and previous version recorded at creation), its
+derived `trust` and `sourceChecks` (the latest platform check of each source, with the recorded
+and observed digests), so every trust status can be traced to the checks behind it. See "Trust
+and verification". `npm run review:remote -- recheck [limit]` runs a re-check batch; repeat it
+until `remainingDue` is `0`.
 
 `reason` is required (1–500 characters after trimming, no control characters). Errors: `400`
 `invalid_request` / `invalid_reason`; `404` unknown version; `409` `invalid_transition`,
@@ -706,6 +715,87 @@ required, secret `Authorization` header. It contains no credential. The name
 owner action (`mcp-publisher login github`, then `mcp-publisher publish`); nothing in the
 repository publishes it. A listing makes the endpoint publicly discoverable: enrollment is not
 capped, and only the 100 approved contribution IDs are.
+
+## Trust and verification
+
+Every search and get response carries platform-computed trust beside `data`. None of it can be
+supplied by a contributor: contribution input has no trust fields, and the values are derived only
+from the platform's own source re-checks, retrieval receipts and feedback from **other** operators.
+Implementation: `src/registry/trust.ts`, `src/registry/source-check.ts`, migration
+`0013_trust_signals.sql`; coverage: `test/worker-trust.test.ts`.
+
+**Search** adds a top-level `trust` array, one entry per returned result in result order:
+`{contributionId, version, verified, checks, flags}`. It sits outside `data`, so
+`discovery-response/v1` and its byte budget are unchanged. **Get** adds a top-level `trust` object
+with the same fields plus `sourceStatus`, `sourceCheckedAt`, `confirmingOperators`,
+`disputingOperators` and `reportingOperators`.
+
+The top-level `quality` label follows the trust result. A get of a verified version returns
+`state: "listed_verified"`, `independentlyVerified: true`. A search with at least one verified
+result returns `state: "listed"` with `independentlyVerified: false` and a note pointing to the
+per-result `trust`. In every other case the label is the unchanged `listed_unverified` label.
+
+### What makes a version verified
+
+A version is `verified` only while at least one check in `checks` passes:
+
+| Check                            | Families  | Passes when                                                                                                                          |
+| -------------------------------- | --------- | ------------------------------------------------------------------------------------------------------------------------------------ |
+| `source_hash_match`              | Knowledge | Every recorded source matched its stored SHA-256 at its latest platform re-check.                                                    |
+| `independent_operator_agreement` | Both      | At least two independent operators reported `accuracy.finding: "accurate"` (Knowledge) or `outcome.finding: "success"` (Execution). |
+
+It is never verified while a source that matched before no longer matches, or while at least two
+independent operators report it `inaccurate` or `failure`. The platform never runs Execution
+recipes, so Execution verification rests on operator reports alone.
+
+**One operator, one vote.** A report counts once per operator however many agents that operator
+runs, and the contributor's own operator never counts: the feedback API refuses it, and the
+aggregation excludes it again when it reads the stored reports.
+
+`flags` are reasons for caution. A flag never hides a version.
+
+| Flag                      | Meaning                                                                                     |
+| ------------------------- | ------------------------------------------------------------------------------------------- |
+| `source_changed`          | A source that matched its recorded hash before no longer does.                              |
+| `source_unreachable`      | A source did not return a complete `200` body at its latest check.                          |
+| `source_hash_unconfirmed` | A recorded hash has never been reproduced by the platform.                                  |
+| `disputed`                | At least two independent operators report the content inaccurate or the outcome a failure.  |
+| `reported_stale`          | At least two independent operators report `staleness.finding: "appears_stale"`.             |
+| `review_overdue`          | The version is past its review-due time (`freshness: "stale"`).                             |
+| `dependency_unavailable`  | A version it references is no longer listed (for example withdrawn).                        |
+| `dependency_stale`        | A listed version it references is past its review-due time.                                 |
+
+### Platform state
+
+- `reliabilityScore`: confirming operators divided by reporting operators on the core dimension
+  (accuracy or outcome; `mixed` and `partial` count as reporting but not confirming). It stays
+  `null` until two independent operators have reported.
+- `consumerCount`: independent operators holding a retrieval receipt for the exact version.
+- `lastVerifiedAt`: the time of the latest re-check at which every source matched. It keeps its
+  value if a source later changes. A successful re-check therefore also renews `freshness`.
+
+### Source re-checks
+
+For each source of a listed Knowledge version the platform fetches the recorded URI, hashes the
+complete response body with SHA-256 and compares it with the hash stored on the immutable version.
+Each result (`match`, `mismatch` or `unreachable`) is appended to `source_checks`; the log cannot
+be updated or deleted. Nothing is fetched on an agent's request, and a check never changes a
+version's listing state.
+
+- HTTPS only; redirects are not followed; the body is limited to 2 MB and the request to 10
+  seconds. Anything other than a complete `200` body is `unreachable`.
+- A GitHub `blob` URL is fetched as its raw file at the same pinned commit, because the page HTML
+  is not stable between requests. Record the hash of the raw file for such sources.
+- A source is due again 7 days after its latest check. One run checks at most 15 due sources.
+
+Runs start from a cron trigger in the deployment configuration (none is configured by default, so
+nothing is fetched until the operator adds one) or from the operator command below.
+
+### Ranking
+
+Search ranks cautioned versions (`source_changed` or `disputed`) below the rest and verified
+versions above unverified ones, directly after the freshness key and before the evidence tier. A
+version with no trust data ranks exactly as before.
 
 ## Troubleshooting records
 
@@ -944,7 +1034,7 @@ invalid `PILOT_MODE`/`ENROLLMENT`/`REVIEW_INTERFACE`/`NEEDS_INTAKE`/`MCP_HTTP`, 
 state in `initial`, invalid enrollment domain/URI/chain ID, `ENROLLMENT=on` without
 `REVIEW_INTERFACE=on` or `PILOT_MODE=off`, a missing/invalid `REVIEWER_ID`, secret-like variable
 names or values (reviewer-token shape, `ac1_` credentials, 32-byte hex keys, PEM keys, bearer
-values), and migrations that are not contiguous through 0012. It cannot see Worker secrets; the
+values), and migrations that are not contiguous through 0013. It cannot see Worker secrets; the
 reviewer token is checked only when you set it.
 
 ### Manual sequence: create and deploy closed

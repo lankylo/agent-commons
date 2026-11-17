@@ -10,7 +10,9 @@
  * The token is never logged or echoed. Inspected contribution content is untrusted data.
  * `needs` returns the identity-free grouped needs review (`NeedsIntake.review`), so a deployed
  * pilot can enable needs intake with a remote operator review path. `usage` returns aggregate,
- * identity-free pilot counts (`PilotUsage.snapshot`).
+ * identity-free pilot counts (`PilotUsage.snapshot`). `recheck` runs one bounded batch of
+ * Knowledge source re-checks (`SourceChecker.run`), and `inspect` also returns the version's
+ * provenance, derived trust and latest source checks.
  */
 import type { RegistryEnv } from "../registry/creation";
 import { NEEDS_REVIEW_MAX_GROUPS, NeedsIntake } from "../registry/needs";
@@ -24,6 +26,8 @@ import {
 } from "../registry/quality-review";
 import type { QualityState } from "../registry/quality-state";
 import type { RetrievalErrorCode } from "../registry/retrieval";
+import { SOURCE_CHECK_LIMITS, SourceChecker, type SourceFetcher } from "../registry/source-check";
+import { trustKey, TrustStore } from "../registry/trust";
 
 export const REVIEW_PATH_PREFIX = "/v1/review/";
 export const MIN_REVIEWER_TOKEN_LENGTH = 43; // 256 bits of base64url
@@ -44,6 +48,8 @@ export interface ReviewEnv {
   readonly REVIEW_INTERFACE?: string;
   readonly REVIEWER_ID?: string;
   readonly REVIEWER_TOKEN?: string;
+  /** Test injection for source re-checks; never set from configuration. */
+  readonly SOURCE_FETCHER?: SourceFetcher;
 }
 
 const DECISIONS: Readonly<Record<string, QualityState>> = Object.freeze({
@@ -199,7 +205,83 @@ async function queue(reviewer: QualityReviewer, body: Record<string, unknown>) {
   });
 }
 
-async function inspect(reviewer: QualityReviewer, body: Record<string, unknown>) {
+const PROVENANCE_SQL = `SELECT c.contributor_operator_id, c.contributor_agent_id, c.created_at,
+       v.author_operator_id, v.author_agent_id, v.created_at AS version_created_at,
+       v.content_hash, v.previous_version
+  FROM contribution_versions v
+  JOIN contributions c ON c.id = v.contribution_id
+ WHERE v.contribution_id = ? AND v.version = ?`;
+
+const SOURCE_CHECKS_SQL = `SELECT ks.ordinal, ks.uri, ks.hash_digest AS recorded_digest,
+       sc.checked_at, sc.outcome, sc.http_status, sc.observed_digest
+  FROM knowledge_sources ks
+  LEFT JOIN source_checks sc
+    ON sc.check_id = (SELECT MAX(x.check_id) FROM source_checks x
+                       WHERE x.contribution_id = ks.contribution_id
+                         AND x.version = ks.version AND x.ordinal = ks.ordinal)
+ WHERE ks.contribution_id = ? AND ks.version = ?
+ ORDER BY ks.ordinal`;
+
+interface ProvenanceRow {
+  contributor_operator_id: string;
+  contributor_agent_id: string;
+  created_at: string;
+  author_operator_id: string;
+  author_agent_id: string;
+  version_created_at: string;
+  content_hash: string;
+  previous_version: number | null;
+}
+
+interface SourceCheckRow {
+  ordinal: number;
+  uri: string;
+  recorded_digest: string;
+  checked_at: string | null;
+  outcome: string | null;
+  http_status: number | null;
+  observed_digest: string | null;
+}
+
+/**
+ * Operator-only trace of where a version came from and why it has its trust status: the
+ * immutable contributor and author identities and content hash recorded at creation, the derived
+ * trust summary and the latest platform check of each source.
+ */
+async function trace(db: D1Database, now: () => Date, id: string, version: number) {
+  const provenance = await db.prepare(PROVENANCE_SQL).bind(id, version).first<ProvenanceRow>();
+  const checks = await db.prepare(SOURCE_CHECKS_SQL).bind(id, version).all<SourceCheckRow>();
+  const trust = await new TrustStore(db, now).read([{ id, version }]);
+  return {
+    provenance: provenance && {
+      contributorOperatorId: provenance.contributor_operator_id,
+      contributorAgentId: provenance.contributor_agent_id,
+      contributionCreatedAt: provenance.created_at,
+      authorOperatorId: provenance.author_operator_id,
+      authorAgentId: provenance.author_agent_id,
+      versionCreatedAt: provenance.version_created_at,
+      contentHash: provenance.content_hash,
+      previousVersion: provenance.previous_version,
+    },
+    trust: trust.get(trustKey(id, version)) ?? null,
+    sourceChecks: checks.results.map((c) => ({
+      ordinal: c.ordinal,
+      uri: c.uri,
+      recordedDigest: c.recorded_digest,
+      checkedAt: c.checked_at,
+      outcome: c.outcome,
+      httpStatus: c.http_status,
+      observedDigest: c.observed_digest,
+    })),
+  };
+}
+
+async function inspect(
+  reviewer: QualityReviewer,
+  db: D1Database,
+  now: () => Date,
+  body: Record<string, unknown>,
+) {
   const t = target(body);
   if (!t || unknownFields(body, ["contributionId", "version"])) {
     return fail(400, "invalid_request", "contributionId and exact version are required.");
@@ -213,8 +295,27 @@ async function inspect(reviewer: QualityReviewer, body: Record<string, unknown>)
     state: result.state,
     stateUpdatedAt: result.stateUpdatedAt,
     decisions: result.decisions,
+    ...(await trace(db, now, t.id, t.version)),
     untrusted: { notice: UNTRUSTED_NOTICE, contribution: result.contribution },
   });
+}
+
+/** Runs one bounded batch of Knowledge source re-checks now, instead of waiting for the cron. */
+async function recheck(
+  db: D1Database,
+  now: () => Date,
+  fetcher: SourceFetcher | undefined,
+  body: Record<string, unknown>,
+) {
+  if (unknownFields(body, ["limit"])) {
+    return fail(400, "invalid_request", "Unsupported recheck request field.");
+  }
+  const max = SOURCE_CHECK_LIMITS.maxPerRun;
+  const limit = body.limit ?? max;
+  if (!Number.isSafeInteger(limit) || (limit as number) < 1 || (limit as number) > max) {
+    return fail(400, "invalid_request", `limit must be an integer from 1 to ${max}.`);
+  }
+  return reply(200, await new SourceChecker(db, { now, fetcher }).run(limit as number));
 }
 
 async function decide(reviewer: QualityReviewer, body: Record<string, unknown>) {
@@ -289,7 +390,7 @@ export async function handleReview(request: Request, env: ReviewEnv): Promise<Re
   }
   if (request.method !== "POST") return fail(405, "method_not_allowed", "Use POST.");
   const op = new URL(request.url).pathname.slice(REVIEW_PATH_PREFIX.length);
-  if (!["queue", "inspect", "decide", "capacity", "needs", "usage"].includes(op)) {
+  if (!["queue", "inspect", "decide", "capacity", "needs", "usage", "recheck"].includes(op)) {
     return fail(404, "not_found", "Not found.");
   }
   if (!env.DB || !env.CONTENT_BUCKET) {
@@ -307,7 +408,8 @@ export async function handleReview(request: Request, env: ReviewEnv): Promise<Re
       return reply(200, await new PilotUsage(env.DB, now).snapshot());
     }
     if (op === "queue") return await queue(reviewer, body);
-    if (op === "inspect") return await inspect(reviewer, body);
+    if (op === "inspect") return await inspect(reviewer, env.DB, now, body);
+    if (op === "recheck") return await recheck(env.DB, now, env.SOURCE_FETCHER, body);
     if (op === "decide") return await decide(reviewer, body);
     if (unknownFields(body, [])) return fail(400, "invalid_request", "No fields are accepted.");
     return reply(200, { schemaVersion: "review-capacity/v1", ...(await reviewer.capacity()) });
