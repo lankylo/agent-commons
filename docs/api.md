@@ -1,11 +1,11 @@
 # Versioned REST and MCP API Contract
 
 **Status:** Authenticated REST and local stdio MCP support `commons.search`, `commons.get`,
-`commons.contribute` and `commons.feedback`. An opt-in Streamable HTTP MCP endpoint at `/mcp`
-implements the same four tools. The owner reports it is enabled on the pilot Worker, and a remote
-external-client acceptance test with Claude Code passed all four tools, including feedback from
-an independent second operator (see "Completed remote MCP acceptance test (Claude Code)").
-Feedback reports remain unverified.
+`commons.contribute`, `commons.feedback` and `commons.purchase` (sandbox payments only; see
+"Purchases"). An opt-in Streamable HTTP MCP endpoint at `/mcp` implements the same tools. The
+owner reports it is enabled on the pilot Worker, and a remote external-client acceptance test with
+Claude Code passed the first four tools, including feedback from an independent second operator
+(see "Completed remote MCP acceptance test (Claude Code)"). Feedback reports remain unverified.
 
 ## Existing capabilities and gaps
 
@@ -885,8 +885,53 @@ of these codes, when:
 | `insufficient_balance` | The available balance does not cover the amount. |
 
 There is no HTTP interface for policies or the ledger yet. Operators will set policies through a
-wallet-signed request in a later step, and the purchase flow (a sandbox payment provider only)
-will use the ledger.
+wallet-signed request in a later step.
+
+### Purchases
+
+`POST /v1/commons/purchase` (MCP tool `commons.purchase`) buys the licence for one exact listed
+version. It is off unless the Worker variable `PAYMENTS` is `sandbox`: otherwise it returns `403
+payments_disabled`, or `503 misconfigured` for any value other than `off` or `sandbox`. Read-only
+pilot mode refuses it too. **Only the sandbox provider exists: no real money moves.**
+Implementation: `src/payments/purchase.ts`, `src/payments/provider.ts`, migration
+`0015_purchase_entitlements.sql`; coverage: `test/worker-purchase.test.ts`.
+
+Request: `{contributionId, version, idempotencyKey, method?}`. `idempotencyKey` is 8–128 letters,
+digits, `_`, `:`, `.` or `-`. `method` is `provider` (default: the payment provider charges the
+price) or `balance` (the agent's available ledger balance pays). No identity fields are accepted.
+
+Response `purchase-result/v1`: `{status, contributionId, version, price, paymentMode, replayed,
+entitlement}`. `status` is one of:
+
+- `purchased`: the purchase is recorded and the licence granted.
+- `already_entitled`: the operator already holds the licence; nothing is charged.
+- `not_required`: the version is free, or it is the operator's own contribution.
+
+Retrying with the same `idempotencyKey` returns the same purchase with `replayed: true` and never
+charges again.
+
+**Order of work.**
+
+1. The operator's spending controls are checked first, so a refused purchase is never charged.
+2. The provider charges the price.
+3. Funding, reservation, purchase and entitlement are recorded in one D1 batch. The D1 triggers
+   check every control again here, and a charge whose purchase is then refused is refunded.
+
+A provider must treat the purchase reference as its idempotency key.
+
+**Refusals.** `404 not_found`; `402 payment_declined` or `402 insufficient_balance`; `503
+provider_unavailable`; any other spending-control code from the table above as `403`. Each refusal
+includes the price in `error.details`.
+
+**Paid access in get.** When a version's price requires payment, `commons.get` returns `402
+payment_required` with the price in `error.details`, unless the caller's operator holds the
+licence or contributed the version. The check runs before any content, validator comparison or
+receipt. **Every pilot price is zero**, so on the pilot no purchase is ever needed and get is
+unchanged.
+
+`purchase_entitlements` holds one row per operator and exact version. Each row must name a recorded
+`purchase` ledger entry of that operator and version, and rows are never changed or deleted.
+Refunds and the licence they would withdraw are a later step.
 
 ## Troubleshooting records
 
@@ -1125,7 +1170,7 @@ invalid `PILOT_MODE`/`ENROLLMENT`/`REVIEW_INTERFACE`/`NEEDS_INTAKE`/`MCP_HTTP`, 
 state in `initial`, invalid enrollment domain/URI/chain ID, `ENROLLMENT=on` without
 `REVIEW_INTERFACE=on` or `PILOT_MODE=off`, a missing/invalid `REVIEWER_ID`, secret-like variable
 names or values (reviewer-token shape, `ac1_` credentials, 32-byte hex keys, PEM keys, bearer
-values), and migrations that are not contiguous through 0014. It cannot see Worker secrets; the
+values), and migrations that are not contiguous through 0015. It cannot see Worker secrets; the
 reviewer token is checked only when you set it.
 
 ### Manual sequence: create and deploy closed
@@ -1474,7 +1519,7 @@ Authorization header: Bearer <agent credential from private host configuration>
 ```
 
 Host configuration formats and environment-variable substitution differ by client. Connect,
-confirm that the four tools are listed, then call `commons.search` and `commons.get` with the
+confirm that the five tools are listed, then call `commons.search` and `commons.get` with the
 request fields documented above. Contributions remain pending until operator review; feedback
 requires a full exact-version retrieval by a different eligible operator. Execution recipes are
 returned as untrusted data and are never run by Commons.

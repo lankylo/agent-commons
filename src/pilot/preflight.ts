@@ -64,6 +64,7 @@ const ALLOWED_VARS = new Set([
   "RATE_LIMIT_WINDOW_SECONDS",
   "EXECUTION_DOMAIN_POLICY_JSON",
   "KNOWLEDGE_PERMISSION_POLICY_JSON",
+  "PAYMENTS",
 ]);
 const SECRET_KEY =
   /token|secret|password|passwd|private|api[_-]?key|credential|signature|mnemonic|seed/i;
@@ -74,7 +75,7 @@ const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const BUCKET = /^[a-z0-9][a-z0-9-]{1,61}[a-z0-9]$/;
 const ON_OFF = new Set(["on", "off"]);
 const MIGRATION_FILE = /^(\d{4})_[a-z0-9_]+\.sql$/;
-const REQUIRED_MIGRATIONS = 14;
+const REQUIRED_MIGRATIONS = 15;
 
 function dropTrailingCommas(text: string): string {
   let out = "";
@@ -260,10 +261,16 @@ function checkSettings(vars: Record<string, unknown>, phase: PilotPhase, errors:
   if (mcp !== undefined && (typeof mcp !== "string" || !ON_OFF.has(mcp))) {
     errors.push('vars.MCP_HTTP: must be explicitly "on" or "off" when present');
   }
+  // Purchases are optional (absent means off); only sandbox payments exist.
+  const payments = vars["PAYMENTS"];
+  if (payments !== undefined && payments !== "off" && payments !== "sandbox") {
+    errors.push('vars.PAYMENTS: must be "off" or "sandbox" when present');
+  }
   const on = (k: string) => vars[k] === "on";
 
   if (phase === "initial") {
     if (mode !== "read-only") errors.push('initial phase: PILOT_MODE must be "read-only"');
+    if (payments === "sandbox") errors.push('initial phase: PAYMENTS must be "off"');
     for (const key of ["ENROLLMENT", "REVIEW_INTERFACE", "NEEDS_INTAKE", "MCP_HTTP"]) {
       if (on(key)) errors.push(`initial phase: ${key} must be "off"`);
     }

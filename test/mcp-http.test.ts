@@ -202,6 +202,7 @@ describe("remote Streamable HTTP MCP endpoint", () => {
         "commons.contribute",
         "commons.feedback",
         "commons.get",
+        "commons.purchase",
         "commons.search",
       ]);
 
@@ -326,7 +327,7 @@ describe("remote Streamable HTTP MCP endpoint", () => {
     const client = await connect(agent.token, env(), { modern: true });
     try {
       const { tools } = await client.listTools();
-      expect(tools).toHaveLength(4);
+      expect(tools).toHaveLength(5);
       const search = await call(client, "commons.search", {
         query: "httpbin",
         maxUtf8Bytes: 16_000,

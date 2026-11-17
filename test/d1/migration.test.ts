@@ -134,6 +134,7 @@ describe("clean migration", () => {
         "operator_spending_policies",
         "operators",
         "pilot_capacity_places",
+        "purchase_entitlements",
         "rate_limit_windows",
         "retrieval_receipts",
         "source_checks",
