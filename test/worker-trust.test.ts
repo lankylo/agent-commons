@@ -10,7 +10,7 @@ import type { AgentId, OperatorId } from "../src/identity/types";
 import type { RegistryEnv } from "../src/registry/creation";
 import { ContributionRegistry } from "../src/registry/creation";
 import { QualityReviewer } from "../src/registry/quality-review";
-import { sourceFetchUrl } from "../src/registry/source-check";
+import { selectLines, sourceFetchTarget, sourceFetchUrl } from "../src/registry/source-check";
 import { TrustStore, trustKey } from "../src/registry/trust";
 import { HTTPBIN_EXECUTION_SEED, HTTPBIN_KNOWLEDGE_SEED } from "../src/seed/httpbin";
 import worker from "../src/index";
@@ -252,6 +252,26 @@ describe("source fetch URL", () => {
     expect(sourceFetchUrl("https://user:secret@docs.acme-widgets.io/page")).toBeNull();
     expect(sourceFetchUrl("not a url")).toBeNull();
   });
+
+  it("hashes only the anchored lines of a GitHub blob, as sed prints them", () => {
+    const blob = `https://github.com/acme/widgets/blob/${COMMIT}/src/app.py`;
+    const raw = `https://raw.githubusercontent.com/acme/widgets/${COMMIT}/src/app.py`;
+    expect(sourceFetchTarget(`${blob}#L3-L5`)).toEqual({ url: raw, lines: [3, 5] });
+    expect(sourceFetchTarget(`${blob}#L7`)).toEqual({ url: raw, lines: [7, 7] });
+    expect(sourceFetchTarget(blob)).toEqual({ url: raw, lines: null });
+    // A malformed or reversed anchor hashes the whole file; other hosts ignore anchors.
+    expect(sourceFetchTarget(`${blob}#L5-L3`)?.lines).toBeNull();
+    expect(sourceFetchTarget(`${blob}#section`)?.lines).toBeNull();
+    expect(sourceFetchTarget("https://docs.acme-widgets.io/page#L3-L5")?.lines).toBeNull();
+
+    const text = (bytes: Uint8Array) => new TextDecoder().decode(bytes);
+    const body = new TextEncoder().encode("one\ntwo\r\nthree\nfour");
+    expect(text(selectLines(body, 2, 3))).toBe("two\r\nthree\n");
+    expect(text(selectLines(body, 4, 4))).toBe("four\n");
+    expect(text(selectLines(body, 3, 9))).toBe("three\nfour\n");
+    expect(text(selectLines(body, 9, 9))).toBe("");
+    expect(text(selectLines(new TextEncoder().encode("a\nb\n"), 1, 5))).toBe("a\nb\n");
+  });
 });
 
 describe("unverified by default", () => {
@@ -395,6 +415,31 @@ describe("source re-checks", () => {
     expect((await review("recheck", { extra: true })).status).toBe(400);
     const none = await post("/v1/review/recheck", {}, opA.token);
     expect(none.status).toBe(401);
+  });
+
+  it("verifies a line-anchored GitHub source and re-checks one version on demand", async () => {
+    const raw = `https://raw.githubusercontent.com/acme/widgets/${COMMIT}/src/view.py`;
+    const file = "import x\n\ndef view():\n    return x\n\n# end\n";
+    pages.set(raw, { status: 200, body: file });
+    const id = await createKnowledge("anchorword", {
+      uri: `https://github.com/acme/widgets/blob/${COMMIT}/src/view.py#L3-L4`,
+      body: "def view():\n    return x\n",
+    });
+    const at = START + 80 * DAY;
+    await recheckAll(at);
+    expect(await trustOf(id, at)).toMatchObject({ verified: true, sourceStatus: "matched" });
+
+    // Not due again for 7 days, but a targeted re-check runs now and only for that version.
+    pages.set(raw, { status: 200, body: file.replace("return x", "return y") });
+    const targeted = await review("recheck", { contributionId: id, version: 1 }, at + DAY);
+    expect(targeted.status).toBe(200);
+    expect(targeted.body).toMatchObject({ checked: 1, mismatch: 1 });
+    expect((await trustOf(id, at + DAY)).flags).toContain("source_changed");
+
+    expect((await review("recheck", { contributionId: id })).status).toBe(400);
+    expect((await review("recheck", { version: 1 })).status).toBe(400);
+    const unknown = await review("recheck", { contributionId: "unknown-id", version: 1 });
+    expect(unknown.body).toMatchObject({ checked: 0 });
   });
 
   it("keeps the check log append-only", async () => {

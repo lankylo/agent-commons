@@ -23,6 +23,7 @@ export const REMOTE_REVIEW_USAGE = `Usage (environment: COMMONS_REVIEW_URL, COMM
   needs [limit]
   usage
   recheck [limit]
+  recheck <contributionId> <version>
 `;
 
 const LOCAL_HOSTS = new Set(["localhost", "127.0.0.1", "[::1]"]);
@@ -49,8 +50,14 @@ function parse(argv: readonly string[]): ParsedCommand | null {
       if (b !== undefined) body.cursor = b;
       return { op: "queue", body };
     }
-    case "needs":
-    case "recheck": {
+    case "recheck":
+      if (a !== undefined && b !== undefined) {
+        return !Number.isSafeInteger(Number(a)) && Number.isSafeInteger(version) && c === undefined
+          ? { op: "recheck", body: { contributionId: a, version } }
+          : null;
+      }
+    // falls through: `recheck [limit]` is parsed like `needs [limit]`
+    case "needs": {
       if (b !== undefined) return null;
       if (a === undefined) return { op: command, body: {} };
       const limit = Number(a);

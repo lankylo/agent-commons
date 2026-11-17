@@ -621,14 +621,16 @@ carry `Cache-Control: no-store`.
 | `/v1/review/capacity` | `{}`                                                                               | `review-capacity/v1`: `{limit, used, remaining}`.                                                                               |
 | `/v1/review/needs`    | `{limit?: 1–200 (default 50)}`                                                     | `needs-review/v1`: purges expired needs reports, then returns identity-free groups (see "Agent needs intake").                  |
 | `/v1/review/usage`    | `{}`                                                                               | `pilot-usage/v1`: aggregate, identity-free pilot counts (see "Pilot usage snapshot").                                           |
-| `/v1/review/recheck`  | `{limit?: 1–15 (default 15)}`                                                      | `source-recheck/v1`: runs one batch of Knowledge source re-checks now: `{checked, match, mismatch, unreachable, remainingDue}`. |
+| `/v1/review/recheck`  | `{limit?: 1–15 (default 15), contributionId?, version?}`                           | `source-recheck/v1`: runs one batch of Knowledge source re-checks now: `{checked, match, mismatch, unreachable, remainingDue}`. |
 
 `inspect` also returns the version's `provenance` (the immutable contributor and author operator
 and agent IDs, creation times, content hash and previous version recorded at creation), its
 derived `trust` and `sourceChecks` (the latest platform check of each source, with the recorded
 and observed digests), so every trust status can be traced to the checks behind it. See "Trust
-and verification". `npm run review:remote -- recheck [limit]` runs a re-check batch; repeat it
-until `remainingDue` is `0`.
+and verification". `npm run review:remote -- recheck [limit]` runs a re-check batch of due
+sources; repeat it until `remainingDue` is `0`. `recheck <contributionId> <version>` re-checks
+every source of that exact listed version now, even if none is due (for example after a checker
+change); `contributionId` and `version` must be given together.
 
 `reason` is required (1–500 characters after trimming, no control characters). Errors: `400`
 `invalid_request` / `invalid_reason`; `404` unknown version; `409` `invalid_transition`,
@@ -786,6 +788,10 @@ version's listing state.
   seconds. Anything other than a complete `200` body is `unreachable`.
 - A GitHub `blob` URL is fetched as its raw file at the same pinned commit, because the page HTML
   is not stable between requests. Record the hash of the raw file for such sources.
+- When that GitHub `blob` URL ends in a line anchor, `#L10` or `#L10-L20`, only those lines are
+  hashed: each line with its newline, exactly as `sed -n '10,20p' file | sha256sum` computes it.
+  The recorded hash must then be the hash of those lines, not of the whole file. Other hosts
+  ignore anchors and hash the whole body.
 - A source is due again 7 days after its latest check. One run checks at most 15 due sources.
 
 Runs start from a cron trigger in the deployment configuration (none is configured by default, so
