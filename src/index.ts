@@ -10,6 +10,7 @@ import {
 } from "./registry/quality-state";
 import { refreshTrustBestEffort, toTrustSummary, trustKey, TrustStore } from "./registry/trust";
 import { SourceChecker, type SourceFetcher } from "./registry/source-check";
+import { priceFor, versionPrice } from "./payments/pricing";
 import type { ConditionalRetrievalResponse } from "./registry/retrieval-conditional";
 import type { RetrievalResponse } from "./registry/retrieval-response";
 import { ContributionRegistry, type CreationError, type VersionError } from "./registry/creation";
@@ -278,6 +279,10 @@ async function handleSearch(request: Request, env: WorkerEnv): Promise<Response>
         },
         quality: searchQualityLabel(trust.some((t) => t.verified)),
         trust,
+        // Platform prices for the returned results, in result order (free during the pilot).
+        pricing: returned.map((r) =>
+          versionPrice({ contributionId: r.contributionId, version: r.version, family: r.family }),
+        ),
       },
       { status: 200 },
     );
@@ -527,6 +532,7 @@ async function handleGet(request: Request, env: WorkerEnv): Promise<Response> {
       },
       quality: versionQualityLabel(trust?.verified ?? false),
       ...(trust ? { trust } : {}),
+      ...(data.schemaVersion === "retrieval-response/v1" ? { price: priceFor(data.family) } : {}),
     });
   } catch {
     return httpError(500, "internal_error", "Retrieval is unavailable.");
