@@ -382,25 +382,45 @@ describe("contributor earnings", () => {
       .bind(id, verified, new Date(START).toISOString())
       .run();
 
-  it("pays the contributor half of a verified Knowledge purchase, pending", async () => {
+  /** Independent purchases of a version: each should end with exactly one earning. */
+  const purchases = async (id: string) =>
+    Number(
+      (
+        await db
+          .prepare(
+            `SELECT count(*) AS c FROM ledger_entries
+             WHERE entry_type = 'purchase' AND contribution_id = ? AND operator_id <> ?`,
+          )
+          .bind(id, owner.operatorId)
+          .first<{ c: number }>()
+      )?.c,
+    );
+
+  it("pays the contributor half of every verified Knowledge purchase, pending", async () => {
+    // Earlier tests bought this record while it was unverified: those earnings are issued with the
+    // next purchase once it is verified.
+    expect(await earnings(knowledgeId)).toHaveLength(0);
+    expect(await purchases(knowledgeId)).toBeGreaterThan(0);
     await setVerified(knowledgeId, 1);
-    const before = (await earnings(knowledgeId)).length;
     const actor = await buyerWithPolicy("Verified Knowledge Buyer");
     expect((await buy(actor)).body.status).toBe("purchased");
     const after = await earnings(knowledgeId);
-    expect(after).toHaveLength(before + 1);
-    expect(after.at(-1)).toEqual({
-      amount_minor: PRICE / 2,
-      currency: "USDC",
-      to_bucket: "pending",
-      operator_id: owner.operatorId,
-    });
+    expect(after).toHaveLength(await purchases(knowledgeId));
+    for (const earning of after) {
+      expect(earning).toEqual({
+        amount_minor: PRICE / 2,
+        currency: "USDC",
+        to_bucket: "pending",
+        operator_id: owner.operatorId,
+      });
+    }
     // A retry never pays twice.
     const idempotencyKey = key("retry-earning");
     const other = await buyerWithPolicy("Verified Knowledge Retry");
     await buy(other, { idempotencyKey });
     await buy(other, { idempotencyKey });
-    expect(await earnings(knowledgeId)).toHaveLength(before + 2);
+    expect(await earnings(knowledgeId)).toHaveLength(after.length + 1);
+    expect(await purchases(knowledgeId)).toBe(after.length + 1);
   });
 
   it("pays nothing for an unverified Knowledge purchase until it is verified", async () => {
