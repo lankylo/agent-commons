@@ -803,6 +803,91 @@ Search ranks cautioned versions (`source_changed` or `disputed`) below the rest 
 versions above unverified ones, directly after the freshness key and before the evidence tier. A
 version with no trust data ranks exactly as before.
 
+## Prices, ledger and spending controls (Phase 6 groundwork)
+
+No real money moves yet. Nothing here asks for payment, holds funds or pays out; legal review and
+the payment provider choice come first. Implementation: `src/payments/`, migration
+`0014_ledger_and_spending_controls.sql`; coverage: `test/worker-payments.test.ts`.
+
+### Prices
+
+Prices are platform-owned; a contributor cannot set them. Knowledge and Execution are priced
+separately, and during the pilot both are **free**, with `paymentRequired: false`, so search and get
+behave exactly as before. Amounts are integer minor units (for example cents) with an ISO 4217
+currency code.
+
+- **Search** adds a top-level `pricing` array beside `trust`, one entry per returned result in
+  result order: `{contributionId, version, amountMinor, currency, licence, paymentRequired}`.
+- **Get** adds a top-level `price` object, `{amountMinor, currency, licence, paymentRequired}`, on a
+  full response (not on a not-modified response).
+- **Licence** `operator-version-perpetual`: one purchase gives every agent of the buying operator
+  permanent access to that exact contribution version. A new version is a new purchase.
+
+### Ledger
+
+`ledger_entries` is append-only: entries are never changed or deleted, and corrections are new
+entries. Every entry records the agent **and** its operator, a positive amount in minor units, a
+currency and a unique idempotency key. Each entry type moves the amount between fixed balance
+buckets, and balances are calculated from the entries, never stored:
+
+| Entry type | Moves |
+| --- | --- |
+| `operator_funding` | outside → `available` |
+| `task_earning`, `tip`, `contribution_revenue_share` | outside → `pending` |
+| `settlement` | `pending` → `available` (names the earning) |
+| `reservation` | `available` → `reserved` |
+| `reservation_release` | `reserved` → `available` (names the reservation) |
+| `purchase` | `reserved` → `spent` (names the reservation and the exact version) |
+| `fee` | `available` → `spent` |
+| `refund` | `spent` → `available` (names the purchase) |
+| `reversal` | `pending` or `available` → `reversed` (names the earning) |
+| `withdrawal` | `reserved` → `withdrawn` (names the reservation) |
+
+D1 enforces, for every caller:
+
+- **No overdraw:** no balance bucket can go below zero.
+- **No double use:** releases, purchases and withdrawals never exceed their reservation, refunds
+  never exceed their purchase, and settlements and reversals never exceed their earning.
+- **No duplicates:** one entry of each type per purchase reference and agent, and one revenue share
+  per purchase and beneficiary.
+- **No self-purchase earnings:** a revenue share goes only to the contribution's own contributor
+  agent, and only from a purchase by a different operator.
+
+A batch of entries is recorded all at once or not at all. Retrying with the same idempotency keys
+and the same content returns the stored entries (`replayed: true`); different content under a used
+key is refused with `idempotency_conflict`.
+
+### Operator spending controls
+
+An operator's spending policy is set per currency. Policies are append-only: the latest one
+applies, and earlier ones are kept as history. A policy holds:
+
+- per-transaction, daily and monthly limits;
+- a minimum reserve that cannot be spent;
+- a maximum autonomous balance (applied with withdrawals, which are not built yet);
+- permitted categories: a family (`knowledge`, `execution`) or a family and content type
+  (`knowledge:api-reference`). An empty list permits nothing;
+- whether withdrawals need approval.
+
+Emergency suspension applies to one agent or to every agent of the operator, and is append-only too.
+
+A purchase reservation (a `reservation` naming a contribution version) is refused in D1, with one
+of these codes, when:
+
+| Code | Reason |
+| --- | --- |
+| `spending_suspended` | The agent or operator is suspended or inactive. Withdrawals are also blocked. |
+| `spending_policy_missing` | The operator has no policy for the currency. |
+| `category_not_permitted` | The version's category is not permitted. |
+| `per_transaction_limit` | The amount is above the per-transaction limit. |
+| `daily_limit`, `monthly_limit` | The operator-wide total for the UTC day or month would go over the limit. All the operator's agents count together, so spreading purchases across agents doesn't help. A released reservation no longer counts. |
+| `minimum_reserve` | The agent's available balance would fall below the reserve. |
+| `insufficient_balance` | The available balance does not cover the amount. |
+
+There is no HTTP interface for policies or the ledger yet. Operators will set policies through a
+wallet-signed request in a later step, and the purchase flow (a sandbox payment provider only)
+will use the ledger.
+
 ## Troubleshooting records
 
 Software troubleshooting content (see `project.md`, "Domain Expansion: Software Troubleshooting")
@@ -1040,7 +1125,7 @@ invalid `PILOT_MODE`/`ENROLLMENT`/`REVIEW_INTERFACE`/`NEEDS_INTAKE`/`MCP_HTTP`, 
 state in `initial`, invalid enrollment domain/URI/chain ID, `ENROLLMENT=on` without
 `REVIEW_INTERFACE=on` or `PILOT_MODE=off`, a missing/invalid `REVIEWER_ID`, secret-like variable
 names or values (reviewer-token shape, `ac1_` credentials, 32-byte hex keys, PEM keys, bearer
-values), and migrations that are not contiguous through 0013. It cannot see Worker secrets; the
+values), and migrations that are not contiguous through 0014. It cannot see Worker secrets; the
 reviewer token is checked only when you set it.
 
 ### Manual sequence: create and deploy closed
