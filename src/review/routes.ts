@@ -300,14 +300,18 @@ async function inspect(
   });
 }
 
-/** Runs one bounded batch of Knowledge source re-checks now, instead of waiting for the cron. */
+/**
+ * Runs one bounded batch of Knowledge source re-checks now, instead of waiting for the cron. With
+ * `contributionId` and `version`, re-checks every source of that exact listed version even if
+ * none is due, for example after a checker change.
+ */
 async function recheck(
   db: D1Database,
   now: () => Date,
   fetcher: SourceFetcher | undefined,
   body: Record<string, unknown>,
 ) {
-  if (unknownFields(body, ["limit"])) {
+  if (unknownFields(body, ["limit", "contributionId", "version"])) {
     return fail(400, "invalid_request", "Unsupported recheck request field.");
   }
   const max = SOURCE_CHECK_LIMITS.maxPerRun;
@@ -315,7 +319,13 @@ async function recheck(
   if (!Number.isSafeInteger(limit) || (limit as number) < 1 || (limit as number) > max) {
     return fail(400, "invalid_request", `limit must be an integer from 1 to ${max}.`);
   }
-  return reply(200, await new SourceChecker(db, { now, fetcher }).run(limit as number));
+  const targeted = body.contributionId !== undefined || body.version !== undefined;
+  const t = targeted ? target(body) : null;
+  if (targeted && !t) {
+    return fail(400, "invalid_request", "contributionId and exact version must be given together.");
+  }
+  const checker = new SourceChecker(db, { now, fetcher });
+  return reply(200, await checker.run(limit as number, t ?? undefined));
 }
 
 async function decide(reviewer: QualityReviewer, body: Record<string, unknown>) {
