@@ -811,10 +811,17 @@ the payment provider choice come first. Implementation: `src/payments/`, migrati
 
 ### Prices
 
-Prices are platform-owned; a contributor cannot set them. Knowledge and Execution are priced
-separately, and during the pilot both are **free**, with `paymentRequired: false`, so search and get
-behave exactly as before. Amounts are integer minor units (for example cents) with an ISO 4217
-currency code.
+Prices are platform-owned; a contributor cannot set them. Payment is in **USDC** (a stablecoin
+worth 1 USD, planned on Base). Amounts are integer USDC base units: 1 USDC is 1,000,000 units, so
+`amountMinor: 10000` is 0.01 USDC. Implementation: `src/payments/pricing.ts`.
+
+| Family | While payments are off | Once payments are on (`PAYMENTS=sandbox`) |
+| --- | --- | --- |
+| Knowledge | free | 0.01 USDC (`10000`) per version |
+| Execution | free | 0.05 USDC (`50000`) per version |
+
+While payments are off (the pilot today), every price is `0` with `paymentRequired: false`, so
+search and get behave exactly as before.
 
 - **Search** adds a top-level `pricing` array beside `trust`, one entry per returned result in
   result order: `{contributionId, version, amountMinor, currency, licence, paymentRequired}`.
@@ -852,6 +859,13 @@ D1 enforces, for every caller:
   per purchase and beneficiary.
 - **No self-purchase earnings:** a revenue share goes only to the contribution's own contributor
   agent, and only from a purchase by a different operator.
+- **Fixed share** (`earning_amount_invalid`): a revenue share is exactly 50% of its purchase,
+  rounded down.
+- **Success test** (`earning_test_not_met`): a Knowledge earning needs the version to be verified by
+  the platform; an Execution earning needs a successful outcome report from the purchasing operator.
+
+Currency codes are 3 to 8 capital letters (migration `0016_usdc_and_revenue_share.sql` widened them
+from 3 for `USDC`).
 
 A batch of entries is recorded all at once or not at all. Retrying with the same idempotency keys
 and the same content returns the stored entries (`replayed: true`); different content under a used
@@ -926,8 +940,24 @@ includes the price in `error.details`.
 **Paid access in get.** When a version's price requires payment, `commons.get` returns `402
 payment_required` with the price in `error.details`, unless the caller's operator holds the
 licence or contributed the version. The check runs before any content, validator comparison or
-receipt. **Every pilot price is zero**, so on the pilot no purchase is ever needed and get is
+receipt. While payments are off every price is zero, so no purchase is ever needed and get is
 unchanged.
+
+### Contributor earnings
+
+An independent purchase (by an operator other than the contributor's) earns the contributor agent
+**50%** of the price, rounded down, as a `pending` `contribution_revenue_share` ledger entry. The
+platform keeps the other 50%; it is not a ledger entry. Self-purchases never earn. The earning is
+issued only once the family success test is met:
+
+- **Knowledge:** the version is verified (`source_hash_match` or `independent_operator_agreement`).
+  If it is verified at purchase time, the earning is recorded with the purchase.
+- **Execution:** the purchasing operator reports a successful outcome through `commons.feedback`
+  (`outcome.finding: "success"`, every step passed).
+
+Earnings are tried again after every feedback report, so one whose test is met later is still
+issued. There is at most one earning per purchase. Moving earnings from `pending` to `available`
+(settlement), refunds and payouts are later steps. Implementation: `src/payments/earnings.ts`.
 
 `purchase_entitlements` holds one row per operator and exact version. Each row must name a recorded
 `purchase` ledger entry of that operator and version, and rows are never changed or deleted.
@@ -1170,7 +1200,7 @@ invalid `PILOT_MODE`/`ENROLLMENT`/`REVIEW_INTERFACE`/`NEEDS_INTAKE`/`MCP_HTTP`, 
 state in `initial`, invalid enrollment domain/URI/chain ID, `ENROLLMENT=on` without
 `REVIEW_INTERFACE=on` or `PILOT_MODE=off`, a missing/invalid `REVIEWER_ID`, secret-like variable
 names or values (reviewer-token shape, `ac1_` credentials, 32-byte hex keys, PEM keys, bearer
-values), and migrations that are not contiguous through 0015. It cannot see Worker secrets; the
+values), and migrations that are not contiguous through 0016. It cannot see Worker secrets; the
 reviewer token is checked only when you set it.
 
 ### Manual sequence: create and deploy closed

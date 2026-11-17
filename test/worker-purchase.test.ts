@@ -41,7 +41,7 @@ let counter = 0;
 
 /** Knowledge is priced for these tests; Execution stays free. */
 const PRICES: PriceList = (family) =>
-  family === "knowledge" ? quote(PRICE, "USD") : quote(0, "USD");
+  family === "knowledge" ? quote(PRICE, "USDC") : quote(0, "USDC");
 
 /** A stand-in provider that records calls and can decline or run a side effect. */
 const provider = {
@@ -169,7 +169,7 @@ async function buyerWithPolicy(name: string, overrides: Partial<SpendingPolicyIn
   const actor = await createOperatorActor(name);
   const set = await new SpendingControls(db, () => new Date(START)).setPolicy({
     operatorId: actor.operatorId,
-    currency: "USD",
+    currency: "USDC",
     perTransactionLimitMinor: 1000,
     dailyLimitMinor: 5000,
     monthlyLimitMinor: 20000,
@@ -228,7 +228,10 @@ describe("paid access", () => {
     const refused = await get(actor);
     expect(refused.status).toBe(402);
     expect(refused.body.error.code).toBe("payment_required");
-    expect(refused.body.error.details.price).toMatchObject({ amountMinor: PRICE, currency: "USD" });
+    expect(refused.body.error.details.price).toMatchObject({
+      amountMinor: PRICE,
+      currency: "USDC",
+    });
     expect(JSON.stringify(refused.body)).not.toContain("httpbin");
     expect(await receipts(actor)).toBe(0);
     // Free versions and the contributor's own versions need no purchase.
@@ -249,7 +252,7 @@ describe("paid access", () => {
       status: "purchased",
       paymentMode: "sandbox",
       replayed: false,
-      price: { amountMinor: PRICE, currency: "USD", licence: "operator-version-perpetual" },
+      price: { amountMinor: PRICE, currency: "USDC", licence: "operator-version-perpetual" },
       entitlement: { licence: "operator-version-perpetual" },
     });
     const again = await buy(actor, { idempotencyKey });
@@ -262,7 +265,7 @@ describe("paid access", () => {
     expect((await get(sibling)).status).toBe(200);
     // The charge was recorded as funding and spent at once: nothing is left over.
     expect(await new Ledger(db).balances(actor.agentId)).toEqual({
-      USD: { pending: 0, available: 0, reserved: 0, spent: PRICE, withdrawn: 0, reversed: 0 },
+      USDC: { pending: 0, available: 0, reserved: 0, spent: PRICE, withdrawn: 0, reversed: 0 },
     });
   });
 
@@ -326,13 +329,13 @@ describe("paid access", () => {
         operatorId: actor.operatorId,
         entryType: "operator_funding",
         amountMinor: 1000,
-        currency: "USD",
+        currency: "USDC",
       },
     ]);
     expect(funded.ok).toBe(true);
     expect((await buy(actor, { method: "balance" })).body.status).toBe("purchased");
     expect(provider.charges.filter((c) => c.agentId === actor.agentId)).toHaveLength(0);
-    expect((await ledger.balances(actor.agentId)).USD).toMatchObject({
+    expect((await ledger.balances(actor.agentId)).USDC).toMatchObject({
       available: 1000 - PRICE,
       spent: PRICE,
     });
@@ -354,5 +357,105 @@ describe("paid access", () => {
     await expect(db.prepare("DELETE FROM purchase_entitlements").run()).rejects.toThrow(
       /append-only/,
     );
+  });
+});
+
+describe("contributor earnings", () => {
+  const earnings = async (id: string) =>
+    (
+      await db
+        .prepare(
+          `SELECT amount_minor, currency, to_bucket, operator_id FROM ledger_entries
+           WHERE agent_id = ? AND entry_type = 'contribution_revenue_share' AND contribution_id = ?`,
+        )
+        .bind(owner.agentId, id)
+        .all<{ amount_minor: number; currency: string; to_bucket: string; operator_id: string }>()
+    ).results;
+
+  const setVerified = (id: string, verified: 0 | 1) =>
+    db
+      .prepare(
+        `INSERT INTO version_trust (contribution_id, version, source_status, verified, updated_at)
+         VALUES (?, 1, 'matched', ?, ?)
+         ON CONFLICT (contribution_id, version) DO UPDATE SET verified = excluded.verified`,
+      )
+      .bind(id, verified, new Date(START).toISOString())
+      .run();
+
+  it("pays the contributor half of a verified Knowledge purchase, pending", async () => {
+    await setVerified(knowledgeId, 1);
+    const before = (await earnings(knowledgeId)).length;
+    const actor = await buyerWithPolicy("Verified Knowledge Buyer");
+    expect((await buy(actor)).body.status).toBe("purchased");
+    const after = await earnings(knowledgeId);
+    expect(after).toHaveLength(before + 1);
+    expect(after.at(-1)).toEqual({
+      amount_minor: PRICE / 2,
+      currency: "USDC",
+      to_bucket: "pending",
+      operator_id: owner.operatorId,
+    });
+    // A retry never pays twice.
+    const idempotencyKey = key("retry-earning");
+    const other = await buyerWithPolicy("Verified Knowledge Retry");
+    await buy(other, { idempotencyKey });
+    await buy(other, { idempotencyKey });
+    expect(await earnings(knowledgeId)).toHaveLength(before + 2);
+  });
+
+  it("pays nothing for an unverified Knowledge purchase until it is verified", async () => {
+    await setVerified(knowledgeId, 0);
+    const before = (await earnings(knowledgeId)).length;
+    const actor = await buyerWithPolicy("Unverified Knowledge Buyer");
+    expect((await buy(actor)).body.status).toBe("purchased");
+    expect(await earnings(knowledgeId)).toHaveLength(before);
+  });
+
+  it("pays for an Execution purchase only after the buyer reports a successful outcome", async () => {
+    const EXECUTION_PRICE = 1000;
+    const prices: PriceList = (family) =>
+      quote(family === "execution" ? EXECUTION_PRICE : PRICE, "USDC");
+    const actor = await buyerWithPolicy("Execution Buyer");
+    const bought = await buy(actor, { contributionId: executionId }, { PRICE_LIST: prices });
+    expect(bought.body.status).toBe("purchased");
+    expect(await earnings(executionId)).toHaveLength(0);
+
+    const got = await post(
+      "/v1/commons/get",
+      { contributionId: executionId, version: 1, maxUtf8Bytes: 64000 },
+      actor.token,
+      { PRICE_LIST: prices },
+    );
+    expect(got.status).toBe(200);
+    const report = (finding: string, result: string) =>
+      post(
+        "/v1/commons/feedback",
+        {
+          contributionId: executionId,
+          version: 1,
+          assessment: {
+            outcome: {
+              finding,
+              observedAt: new Date(START).toISOString(),
+              steps: ["fetch", "extract", "check_echo"].map((stepId) => ({ stepId, result })),
+            },
+          },
+        },
+        actor.token,
+      );
+    expect((await report("failure", "failed")).status).toBe(200);
+    expect(await earnings(executionId)).toHaveLength(0);
+    expect((await report("success", "passed")).status).toBe(200);
+    expect(await earnings(executionId)).toEqual([
+      {
+        amount_minor: EXECUTION_PRICE / 2,
+        currency: "USDC",
+        to_bucket: "pending",
+        operator_id: owner.operatorId,
+      },
+    ]);
+    // Reporting success again never pays twice.
+    expect((await report("success", "passed")).status).toBe(200);
+    expect(await earnings(executionId)).toHaveLength(1);
   });
 });

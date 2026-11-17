@@ -11,13 +11,20 @@ const { DatabaseSync } = createRequire(import.meta.url)("node:sqlite") as {
 const MIGRATIONS_DIR = new URL("../../migrations/", import.meta.url);
 const TS = "2026-11-11T00:00:00Z";
 
-function freshDb(): DatabaseSyncType {
-  const db = new DatabaseSync(":memory:");
-  db.exec("PRAGMA foreign_keys = ON");
-  const files = readdirSync(MIGRATIONS_DIR)
+const migrationFiles = () =>
+  readdirSync(MIGRATIONS_DIR)
     .filter((f) => f.endsWith(".sql"))
     .sort();
-  for (const f of files) db.exec(readFileSync(new URL(f, MIGRATIONS_DIR), "utf8"));
+const migrationSql = (f: string) => readFileSync(new URL(f, MIGRATIONS_DIR), "utf8");
+
+/** Applies every migration, or only those before the one whose name starts with `before`. */
+function freshDb(before?: string): DatabaseSyncType {
+  const db = new DatabaseSync(":memory:");
+  db.exec("PRAGMA foreign_keys = ON");
+  for (const f of migrationFiles()) {
+    if (before && f >= before) break;
+    db.exec(migrationSql(f));
+  }
   return db;
 }
 
@@ -651,5 +658,45 @@ describe("pilot capacity migration 0010", () => {
       TS,
     );
     expect(count("SELECT count(*) AS c FROM pilot_capacity_places")).toBe(100);
+  });
+});
+
+describe("migration 0016 (USDC and revenue share)", () => {
+  const fund = (currency: string) =>
+    run(
+      `INSERT INTO ledger_entries (idempotency_key, agent_id, operator_id, entry_type, from_bucket,
+         to_bucket, amount_minor, currency, created_at)
+       VALUES (?, ?, ?, 'operator_funding', 'external', 'available', 10000, ?, ?)`,
+      `fund-${++n}-key`,
+      AG,
+      OP,
+      currency,
+      TS,
+    );
+
+  it("accepts USDC in the rebuilt ledger and spending policies", () => {
+    fund("USDC");
+    expect(count("SELECT count(*) AS c FROM ledger_entries WHERE currency = 'USDC'")).toBe(1);
+    expect(() => fund("usdc")).toThrow(/CHECK/);
+    expect(() => fund("TOOLONGCODE")).toThrow(/CHECK/);
+    run(
+      `INSERT INTO operator_spending_policies (operator_id, currency, per_transaction_limit_minor,
+         daily_limit_minor, monthly_limit_minor, minimum_reserve_minor,
+         max_autonomous_balance_minor, permitted_categories_json, set_by, effective_at)
+       VALUES (?, 'USDC', 1, 2, 3, 0, 0, '[]', 'r', ?)`,
+      OP,
+      TS,
+    );
+    expect(count("SELECT count(*) AS c FROM operator_spending_policies")).toBe(1);
+  });
+
+  it("stops before dropping anything when the ledger already holds entries", () => {
+    db = freshDb("0016");
+    addOperator(OP);
+    addAgent(AG, OP);
+    fund("USD");
+    const sql = migrationSql(migrationFiles().find((f) => f.startsWith("0016"))!);
+    expect(() => db.exec(sql)).toThrow(/CHECK/);
+    expect(count("SELECT count(*) AS c FROM ledger_entries")).toBe(1);
   });
 });

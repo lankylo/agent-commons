@@ -10,7 +10,14 @@ import {
 } from "./registry/quality-state";
 import { refreshTrustBestEffort, toTrustSummary, trustKey, TrustStore } from "./registry/trust";
 import { SourceChecker, type SourceFetcher } from "./registry/source-check";
-import { PILOT_PRICE_LIST, priceFor, versionPrice, type PriceList } from "./payments/pricing";
+import { issueEarnings } from "./payments/earnings";
+import {
+  PAID_PRICE_LIST,
+  PILOT_PRICE_LIST,
+  priceFor,
+  versionPrice,
+  type PriceList,
+} from "./payments/pricing";
 import { resolvePaymentsMode, SANDBOX_PROVIDER, type PaymentProvider } from "./payments/provider";
 import { PurchaseService, type PaymentMethod } from "./payments/purchase";
 import type { ConditionalRetrievalResponse } from "./registry/retrieval-conditional";
@@ -62,11 +69,14 @@ interface WorkerEnv extends ReviewEnv, EnrollmentEnv, McpHttpEnv {
   readonly PAYMENTS?: string;
   /** Test injection for the payment provider; never set from configuration. */
   readonly PAYMENT_PROVIDER?: PaymentProvider;
-  /** Test injection for prices; never set from configuration. The pilot prices are all zero. */
+  /** Test injection for prices; never set from configuration. */
   readonly PRICE_LIST?: PriceList;
 }
 
-const pricesOf = (env: WorkerEnv): PriceList => env.PRICE_LIST ?? PILOT_PRICE_LIST;
+/** Paid prices apply only while payments are on; otherwise everything is free. */
+const pricesOf = (env: WorkerEnv): PriceList =>
+  env.PRICE_LIST ??
+  (resolvePaymentsMode(env.PAYMENTS) === "sandbox" ? PAID_PRICE_LIST : PILOT_PRICE_LIST);
 
 function httpError(
   status: number,
@@ -1045,6 +1055,8 @@ async function handleFeedback(request: Request, env: WorkerEnv): Promise<Respons
     // Derived trust follows the stored reports; a failure here never fails the saved feedback.
     const reported = { id: record.contributionId, version: record.version };
     await refreshTrustBestEffort(env.DB, env.NOW ?? (() => new Date()), reported, "all");
+    // A report can meet an earning's success test (an Execution outcome, or Knowledge agreement).
+    await issueEarnings(env.DB, reported.id, reported.version, env.NOW ?? (() => new Date()));
 
     return Response.json({
       schemaVersion: "feedback-response/v1",
