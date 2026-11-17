@@ -231,12 +231,12 @@ describe("pilot preflight", () => {
     expect(run(config({ vars: { REVIEWER_TOKEN: TOKEN } })).errors.join("\n")).toMatch(/secret/);
   });
 
-  it("requires contiguous migrations through 0014", () => {
+  it("requires contiguous migrations through 0015", () => {
     const text = config({});
     const base = { configText: text, phase: "initial" as const, forbiddenPolicies };
     expect(preflight({ ...base, migrationFiles }).ok).toBe(true);
     expect(
-      preflight({ ...base, migrationFiles: migrationFiles.filter((f) => !f.startsWith("0014")) })
+      preflight({ ...base, migrationFiles: migrationFiles.filter((f) => !f.startsWith("0015")) })
         .ok,
     ).toBe(false);
     expect(preflight({ ...base, migrationFiles: migrationFiles.slice(0, 10) }).ok).toBe(false);
@@ -244,6 +244,17 @@ describe("pilot preflight", () => {
       preflight({ ...base, migrationFiles: migrationFiles.filter((f) => !f.startsWith("0005")) })
         .ok,
     ).toBe(false);
+  });
+
+  it("accepts sandbox payments only after the initial phase and rejects other values", () => {
+    expect(run(config({ vars: { ...OPEN, PAYMENTS: "sandbox" } }), "pilot").ok).toBe(true);
+    expect(run(config({ vars: { ...OPEN, PAYMENTS: "off" } }), "pilot").ok).toBe(true);
+    expect(run(config({ vars: { ...OPEN, PAYMENTS: "live" } }), "pilot").errors.join("\n")).toMatch(
+      /PAYMENTS/,
+    );
+    expect(run(config({ vars: { PAYMENTS: "sandbox" } })).errors.join("\n")).toMatch(
+      /initial phase: PAYMENTS/,
+    );
   });
 
   it("rejects unparseable configuration", () => {

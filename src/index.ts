@@ -10,7 +10,9 @@ import {
 } from "./registry/quality-state";
 import { refreshTrustBestEffort, toTrustSummary, trustKey, TrustStore } from "./registry/trust";
 import { SourceChecker, type SourceFetcher } from "./registry/source-check";
-import { priceFor, versionPrice } from "./payments/pricing";
+import { PILOT_PRICE_LIST, priceFor, versionPrice, type PriceList } from "./payments/pricing";
+import { resolvePaymentsMode, SANDBOX_PROVIDER, type PaymentProvider } from "./payments/provider";
+import { PurchaseService, type PaymentMethod } from "./payments/purchase";
 import type { ConditionalRetrievalResponse } from "./registry/retrieval-conditional";
 import type { RetrievalResponse } from "./registry/retrieval-response";
 import { ContributionRegistry, type CreationError, type VersionError } from "./registry/creation";
@@ -56,7 +58,15 @@ interface WorkerEnv extends ReviewEnv, EnrollmentEnv, McpHttpEnv {
   readonly RATE_LIMIT_WINDOW_SECONDS?: number | string;
   /** Test injection for scheduled source re-checks; never set from configuration. */
   readonly SOURCE_FETCHER?: SourceFetcher;
+  /** Purchases: off unless exactly "sandbox". No real payment provider exists yet. */
+  readonly PAYMENTS?: string;
+  /** Test injection for the payment provider; never set from configuration. */
+  readonly PAYMENT_PROVIDER?: PaymentProvider;
+  /** Test injection for prices; never set from configuration. The pilot prices are all zero. */
+  readonly PRICE_LIST?: PriceList;
 }
+
+const pricesOf = (env: WorkerEnv): PriceList => env.PRICE_LIST ?? PILOT_PRICE_LIST;
 
 function httpError(
   status: number,
@@ -131,6 +141,7 @@ async function authenticateAndRateLimit(
     | "Feedback"
     | "Needs intake"
     | "Preview"
+    | "Purchase"
     | "MCP access",
 ): Promise<AuthorizationResult> {
   if (!env.DB) {
@@ -281,7 +292,10 @@ async function handleSearch(request: Request, env: WorkerEnv): Promise<Response>
         trust,
         // Platform prices for the returned results, in result order (free during the pilot).
         pricing: returned.map((r) =>
-          versionPrice({ contributionId: r.contributionId, version: r.version, family: r.family }),
+          versionPrice(
+            { contributionId: r.contributionId, version: r.version, family: r.family },
+            pricesOf(env),
+          ),
         ),
       },
       { status: 200 },
@@ -470,6 +484,22 @@ async function handleGet(request: Request, env: WorkerEnv): Promise<Response> {
       return httpError(404, "not_found", "The requested contribution version was not found.");
     }
 
+    // Paid access: a priced version needs the operator's purchase before any content, validator
+    // comparison or receipt. Every pilot price is zero, so this never applies on the pilot.
+    const access = await new PurchaseService(env.DB, pricesOf(env), SANDBOX_PROVIDER).access(
+      authorization.actor.operatorId,
+      record.contributionId,
+      record.version,
+    );
+    if (access.required && !access.entitled) {
+      return httpError(
+        402,
+        "payment_required",
+        "This contribution version must be purchased before it can be retrieved.",
+        { price: access.price },
+      );
+    }
+
     const result = await new ContributionRetriever({
       DB: env.DB,
       CONTENT_BUCKET: env.CONTENT_BUCKET,
@@ -532,10 +562,107 @@ async function handleGet(request: Request, env: WorkerEnv): Promise<Response> {
       },
       quality: versionQualityLabel(trust?.verified ?? false),
       ...(trust ? { trust } : {}),
-      ...(data.schemaVersion === "retrieval-response/v1" ? { price: priceFor(data.family) } : {}),
+      ...(data.schemaVersion === "retrieval-response/v1"
+        ? { price: priceFor(data.family, pricesOf(env)) }
+        : {}),
     });
   } catch {
     return httpError(500, "internal_error", "Retrieval is unavailable.");
+  }
+}
+
+const PURCHASE_FIELDS = new Set(["contributionId", "version", "idempotencyKey", "method"]);
+const IDEMPOTENCY_KEY = /^[\w:.-]{8,128}$/;
+
+const PURCHASE_REFUSAL_STATUS: Readonly<Record<string, number>> = {
+  not_found: 404,
+  payment_declined: 402,
+  insufficient_balance: 402,
+  provider_unavailable: 503,
+};
+
+/**
+ * Buys the licence for one exact listed version (sandbox payments only). Off unless
+ * `PAYMENTS=sandbox`. A version that is free, or the operator's own, needs no purchase.
+ */
+async function handlePurchase(request: Request, env: WorkerEnv): Promise<Response> {
+  try {
+    const mode = resolvePaymentsMode(env.PAYMENTS);
+    if (mode === undefined) {
+      return httpError(503, "misconfigured", "Service configuration is invalid.");
+    }
+    if (mode === "off") {
+      return httpError(403, "payments_disabled", "Purchases are not enabled.");
+    }
+    const authorization = await authenticateAndRateLimit(request, env, "Purchase");
+    if (!authorization.ok) return authorization.response;
+    if (!env.DB) return httpError(500, "internal_error", "Purchase is unavailable.");
+
+    const parsed = await parseJsonBody(request);
+    if (!parsed.ok) return parsed.response;
+    const body = parsed.value;
+    if (typeof body !== "object" || body === null || Array.isArray(body)) {
+      return httpError(400, "invalid_request", "Purchase request body must be an object.");
+    }
+    const record = body as Record<string, unknown>;
+    if (record.agentId !== undefined || record.operatorId !== undefined) {
+      return httpError(400, "invalid_request", "Identity fields are resolved from the credential.");
+    }
+    if (!Object.keys(record).every((field) => PURCHASE_FIELDS.has(field))) {
+      return httpError(400, "invalid_request", "Purchase request contains unsupported fields.");
+    }
+    const method = record.method ?? "provider";
+    if (
+      typeof record.contributionId !== "string" ||
+      record.contributionId.length === 0 ||
+      !requirePositiveSafeInteger(record.version) ||
+      typeof record.idempotencyKey !== "string" ||
+      !IDEMPOTENCY_KEY.test(record.idempotencyKey) ||
+      (method !== "provider" && method !== "balance")
+    ) {
+      return httpError(
+        400,
+        "invalid_request",
+        "contributionId, a positive version and an idempotencyKey (8-128 letters, digits, _ : . -) are required; method is provider or balance.",
+      );
+    }
+
+    const outcome = await new PurchaseService(
+      env.DB,
+      pricesOf(env),
+      env.PAYMENT_PROVIDER ?? SANDBOX_PROVIDER,
+      env.NOW ?? (() => new Date()),
+    ).purchase({
+      agentId: authorization.actor.agentId,
+      operatorId: authorization.actor.operatorId,
+      contributionId: record.contributionId,
+      version: record.version,
+      idempotencyKey: record.idempotencyKey,
+      method: method as PaymentMethod,
+    });
+    if (!outcome.ok) {
+      if (outcome.code === "not_found") {
+        return httpError(404, "not_found", "The requested contribution version was not found.");
+      }
+      return httpError(
+        PURCHASE_REFUSAL_STATUS[outcome.code] ?? 403,
+        outcome.code,
+        "The purchase was not completed.",
+        { price: outcome.price },
+      );
+    }
+    return Response.json({
+      schemaVersion: "purchase-result/v1",
+      status: outcome.status,
+      contributionId: record.contributionId,
+      version: record.version,
+      price: outcome.price,
+      paymentMode: mode,
+      replayed: outcome.replayed,
+      entitlement: outcome.entitlement,
+    });
+  } catch {
+    return httpError(500, "internal_error", "Purchase is unavailable.");
   }
 }
 
@@ -1050,7 +1177,9 @@ const router = {
       if (
         mode === "read-only" &&
         request.method === "POST" &&
-        (pathname === "/v1/commons/contribute" || pathname === "/v1/commons/feedback")
+        (pathname === "/v1/commons/contribute" ||
+          pathname === "/v1/commons/feedback" ||
+          pathname === "/v1/commons/purchase")
       ) {
         return httpError(
           403,
@@ -1079,6 +1208,9 @@ const router = {
     }
     if (pathname === "/v1/commons/feedback" && request.method === "POST") {
       return handleFeedback(request, workerEnv);
+    }
+    if (pathname === "/v1/commons/purchase" && request.method === "POST") {
+      return handlePurchase(request, workerEnv);
     }
     return new Response("Not Found", { status: 404 });
   },

@@ -63,7 +63,7 @@ afterAll(() => {
 });
 
 describe("local stdio MCP process", () => {
-  it("still serves the four tools over stdio with the process credential", async () => {
+  it("still serves the five tools over stdio with the process credential", async () => {
     const transport = new StdioClientTransport({
       command: process.execPath,
       args: [
@@ -83,6 +83,7 @@ describe("local stdio MCP process", () => {
         "commons.contribute",
         "commons.feedback",
         "commons.get",
+        "commons.purchase",
         "commons.search",
       ]);
       const search = (await client.callTool({

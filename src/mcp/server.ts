@@ -63,7 +63,18 @@ const feedbackInputSchema = z
   })
   .passthrough();
 
-type ToolOperation = "search" | "get" | "contribute" | "feedback";
+const purchaseInputSchema = z
+  .object({
+    contributionId: z.string().min(1),
+    version: z.number().int().positive().safe(),
+    idempotencyKey: z
+      .string()
+      .describe("8-128 characters; reuse it to retry safely without paying twice."),
+    method: z.enum(["provider", "balance"]).optional(),
+  })
+  .passthrough();
+
+type ToolOperation = "search" | "get" | "contribute" | "feedback" | "purchase";
 
 /** The existing Worker fetch entry; every tool call goes through its shared REST handlers. */
 export type WorkerDispatch = (request: Request, env: unknown) => Promise<Response>;
@@ -92,7 +103,9 @@ function internalError(operation: ToolOperation) {
         ? "Contribution could not be saved."
         : operation === "feedback"
           ? "Feedback could not be saved."
-          : "Search is unavailable.";
+          : operation === "purchase"
+            ? "Purchase is unavailable."
+            : "Search is unavailable.";
   return toolResult({ error: { code: "internal_error", message } }, true);
 }
 
@@ -172,6 +185,16 @@ export function createCommonsMcpServer(
       inputSchema: feedbackInputSchema,
     },
     (input) => invokeWorker(dispatch, env, credential, "feedback", input),
+  );
+
+  server.registerTool(
+    "commons.purchase",
+    {
+      description:
+        "Buy access to an exact contribution version when its price requires payment; every agent of your operator can then retrieve it. Free versions need no purchase. Spending limits set by your operator apply. Only sandbox payments exist: no real money moves.",
+      inputSchema: purchaseInputSchema,
+    },
+    (input) => invokeWorker(dispatch, env, credential, "purchase", input),
   );
 
   return server;

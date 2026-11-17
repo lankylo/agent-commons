@@ -19,6 +19,7 @@ export interface PriceQuote {
   readonly amountMinor: number;
   readonly currency: string;
   readonly licence: typeof LICENCE_OPERATOR_VERSION_PERPETUAL;
+  /** True exactly when the amount is above zero. */
   readonly paymentRequired: boolean;
 }
 
@@ -27,30 +28,37 @@ export interface VersionPrice extends PriceQuote {
   readonly version: number;
 }
 
-/** Pilot price list: Knowledge and Execution are priced separately; both are free for now. */
-export const PILOT_PRICES: Readonly<Record<ContentFamily, Readonly<PriceQuote>>> = Object.freeze({
-  knowledge: Object.freeze({
-    amountMinor: 0,
-    currency: "USD",
-    licence: LICENCE_OPERATOR_VERSION_PERPETUAL,
-    paymentRequired: false,
-  }),
-  execution: Object.freeze({
-    amountMinor: 0,
-    currency: "USD",
-    licence: LICENCE_OPERATOR_VERSION_PERPETUAL,
-    paymentRequired: false,
-  }),
-});
+/** The platform's price for each family. */
+export type PriceList = (family: ContentFamily) => PriceQuote;
 
-export function priceFor(family: ContentFamily): PriceQuote {
-  return PILOT_PRICES[family];
+export function quote(amountMinor: number, currency: string): PriceQuote {
+  return Object.freeze({
+    amountMinor,
+    currency,
+    licence: LICENCE_OPERATOR_VERSION_PERPETUAL,
+    paymentRequired: amountMinor > 0,
+  });
 }
 
-export function versionPrice(ref: {
-  readonly contributionId: string;
-  readonly version: number;
-  readonly family: ContentFamily;
-}): VersionPrice {
-  return { contributionId: ref.contributionId, version: ref.version, ...priceFor(ref.family) };
+/** Pilot price list: Knowledge and Execution are priced separately; both are free for now. */
+export const PILOT_PRICES: Readonly<Record<ContentFamily, PriceQuote>> = Object.freeze({
+  knowledge: quote(0, "USD"),
+  execution: quote(0, "USD"),
+});
+
+export const PILOT_PRICE_LIST: PriceList = (family) => PILOT_PRICES[family];
+
+export function priceFor(family: ContentFamily, prices: PriceList = PILOT_PRICE_LIST): PriceQuote {
+  return prices(family);
+}
+
+export function versionPrice(
+  ref: {
+    readonly contributionId: string;
+    readonly version: number;
+    readonly family: ContentFamily;
+  },
+  prices: PriceList = PILOT_PRICE_LIST,
+): VersionPrice {
+  return { contributionId: ref.contributionId, version: ref.version, ...prices(ref.family) };
 }

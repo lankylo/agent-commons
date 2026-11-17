@@ -161,7 +161,7 @@ function expectSafeOutput(value: unknown, secret: string) {
 }
 
 describe("local stdio MCP server", () => {
-  it("discovers four tools and calls Knowledge and Execution search/get/contribute", async () => {
+  it("discovers five tools and calls Knowledge and Execution search/get/contribute", async () => {
     const connection = await connectMcp();
     try {
       const { tools } = await connection.client.listTools();
@@ -169,6 +169,7 @@ describe("local stdio MCP server", () => {
         "commons.contribute",
         "commons.feedback",
         "commons.get",
+        "commons.purchase",
         "commons.search",
       ]);
       expect(tools.find((tool) => tool.name === "commons.search")?.description).toContain(
