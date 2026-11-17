@@ -10,7 +10,7 @@ import type { AgentId, OperatorId } from "../src/identity/types";
 import type { RegistryEnv } from "../src/registry/creation";
 import { ContributionRegistry } from "../src/registry/creation";
 import { Ledger, type LedgerEntryInput } from "../src/payments/ledger";
-import { PILOT_PRICES } from "../src/payments/pricing";
+import { contributorShare, PAID_PRICES, PILOT_PRICES, USDC_UNITS } from "../src/payments/pricing";
 import { SpendingControls, type SpendingPolicyInput } from "../src/payments/spending-controls";
 import { HTTPBIN_EXECUTION_SEED, HTTPBIN_KNOWLEDGE_SEED } from "../src/seed/httpbin";
 import worker from "../src/index";
@@ -109,7 +109,7 @@ async function createAgent(operatorId: OperatorId, name: string): Promise<Actor>
   return { agentId: agent.id, operatorId, token: issued.token };
 }
 
-async function post(path: string, body: unknown, token: string) {
+async function post(path: string, body: unknown, token: string, extra: Json = {}) {
   const response = await worker.fetch(
     new Request(`https://example.com${path}`, {
       method: "POST",
@@ -123,6 +123,7 @@ async function post(path: string, body: unknown, token: string) {
       RATE_LIMIT_OPERATOR_LIMIT: 100000,
       RATE_LIMIT_WINDOW_SECONDS: 60,
       NOW: () => new Date(START),
+      ...extra,
     } as never,
   );
   return { status: response.status, body: (await response.json()) as Json };
@@ -132,7 +133,7 @@ const key = (label: string) => `test-${label}-${++counter}`;
 const ledgerAt = (atMs = START) => new Ledger(db, () => new Date(atMs));
 const controlsAt = (atMs = START) => new SpendingControls(db, () => new Date(atMs));
 
-/** A fresh operator with one agent, funded with `amount` USD minor units. */
+/** A fresh operator with one agent, funded with `amount` USDC base units. */
 async function fundedActor(name: string, amount: number): Promise<Actor> {
   const actor = await createOperatorActor(name);
   const funded = await ledgerAt().append([
@@ -154,7 +155,7 @@ function entry(
     operatorId: actor.operatorId,
     entryType,
     amountMinor,
-    currency: "USD",
+    currency: "USDC",
     ...extra,
   };
 }
@@ -162,7 +163,7 @@ function entry(
 function policy(actor: Actor, overrides: Partial<SpendingPolicyInput> = {}): SpendingPolicyInput {
   return {
     operatorId: actor.operatorId,
-    currency: "USD",
+    currency: "USDC",
     perTransactionLimitMinor: 500,
     dailyLimitMinor: 1000,
     monthlyLimitMinor: 5000,
@@ -199,7 +200,7 @@ describe("prices", () => {
         contributionId: r.contributionId,
         version: 1,
         amountMinor: 0,
-        currency: "USD",
+        currency: "USDC",
         licence: "operator-version-perpetual",
         paymentRequired: false,
       })),
@@ -219,11 +220,37 @@ describe("prices", () => {
     }
   });
 
-  it("prices Knowledge and Execution separately, both free during the pilot", () => {
+  it("prices Knowledge and Execution separately, both free while payments are off", () => {
     expect(PILOT_PRICES.knowledge.amountMinor).toBe(0);
     expect(PILOT_PRICES.execution.amountMinor).toBe(0);
     expect(PILOT_PRICES.knowledge.paymentRequired).toBe(false);
     expect(PILOT_PRICES.execution.paymentRequired).toBe(false);
+  });
+
+  it("charges 0.01 USDC for Knowledge and 0.05 USDC for Execution once payments are on", async () => {
+    // 1 USDC is 1,000,000 base units.
+    expect(USDC_UNITS).toBe(1_000_000);
+    expect(PAID_PRICES.knowledge).toMatchObject({ amountMinor: 10_000, currency: "USDC" });
+    expect(PAID_PRICES.execution).toMatchObject({ amountMinor: 50_000, currency: "USDC" });
+    expect(contributorShare(PAID_PRICES.knowledge.amountMinor)).toBe(5_000);
+    expect(contributorShare(PAID_PRICES.execution.amountMinor)).toBe(25_000);
+    expect(contributorShare(7)).toBe(3);
+
+    const found = await post(
+      "/v1/commons/search",
+      { query: "pricingword", maxUtf8Bytes: 64000 },
+      buyer.token,
+      { PAYMENTS: "sandbox" },
+    );
+    expect(found.status).toBe(200);
+    const results = found.body.data.results as { contributionId: string; family: string }[];
+    expect(found.body.pricing).toEqual(
+      results.map((r) => ({
+        contributionId: r.contributionId,
+        version: 1,
+        ...PAID_PRICES[r.family as "knowledge" | "execution"],
+      })),
+    );
   });
 });
 
@@ -248,7 +275,7 @@ describe("ledger", () => {
       ),
     ).toBe("ok");
     expect(await ledger.balances(actor.agentId)).toEqual({
-      USD: { pending: 0, available: 800, reserved: 0, spent: 200, withdrawn: 0, reversed: 0 },
+      USDC: { pending: 0, available: 800, reserved: 0, spent: 200, withdrawn: 0, reversed: 0 },
     });
     for (const e of await ledger.entries(actor.agentId)) {
       expect(e.agentId).toBe(actor.agentId);
@@ -265,7 +292,7 @@ describe("ledger", () => {
     expect(refusal(await ledger.append([entry(actor, "fee", 60), entry(actor, "fee", 60)]))).toBe(
       "insufficient_balance",
     );
-    expect((await ledger.balances(actor.agentId)).USD?.available).toBe(100);
+    expect((await ledger.balances(actor.agentId)).USDC?.available).toBe(100);
   });
 
   it("replays a retry with the same key and refuses a different request under that key", async () => {
@@ -280,7 +307,7 @@ describe("ledger", () => {
     expect(refusal(await ledger.append([{ ...request, amountMinor: 51 }]))).toBe(
       "idempotency_conflict",
     );
-    expect((await ledger.balances(actor.agentId)).USD?.spent).toBe(50);
+    expect((await ledger.balances(actor.agentId)).USDC?.spent).toBe(50);
   });
 
   it("never draws more from a reservation, earning or purchase than it holds", async () => {
@@ -340,18 +367,30 @@ describe("ledger", () => {
 });
 
 describe("earnings", () => {
-  /** An independent purchase of the Knowledge record by a funded buyer. */
-  async function independentPurchase(amount: number) {
+  beforeAll(async () => {
+    // The Knowledge record passes its success test (platform verified); Execution has no reports.
+    await db
+      .prepare(
+        `INSERT INTO version_trust (contribution_id, version, source_status, verified, updated_at)
+         VALUES (?, 1, 'matched', 1, ?)
+         ON CONFLICT (contribution_id, version) DO UPDATE SET verified = 1`,
+      )
+      .bind(knowledgeId, new Date(START).toISOString())
+      .run();
+  });
+
+  /** An independent purchase of one record by a funded buyer. */
+  async function independentPurchase(amount: number, id = knowledgeId) {
     const purchaser = await fundedActor("Earning Buyer", 10000);
     expect(
       (await controlsAt().setPolicy(policy(purchaser, { perTransactionLimitMinor: 1000 }))).ok,
     ).toBe(true);
-    const held = await reserve(purchaser, amount);
+    const held = await reserve(purchaser, amount, id);
     if (!held.ok) throw new Error(refusal(held));
     const bought = await ledgerAt().append([
       entry(purchaser, "purchase", amount, {
         relatedEntryId: held.entries[0]!.entryId,
-        contribution: { id: knowledgeId, version: 1 },
+        contribution: { id, version: 1 },
         purchaseRef: key("purchase"),
       }),
     ]);
@@ -359,10 +398,10 @@ describe("earnings", () => {
     return bought.entries[0]!;
   }
 
-  const share = (purchaseId: number, amount: number, beneficiary = owner) =>
+  const share = (purchaseId: number, amount: number, beneficiary = owner, id = knowledgeId) =>
     entry(beneficiary, "contribution_revenue_share", amount, {
       relatedEntryId: purchaseId,
-      contribution: { id: knowledgeId, version: 1 },
+      contribution: { id, version: 1 },
     });
 
   it("creates one pending earning per independent purchase, which settles or reverses", async () => {
@@ -370,18 +409,18 @@ describe("earnings", () => {
     // Spare balances, so that only the per-earning bounds can refuse below.
     expect(refusal(await ledger.append([entry(owner, "operator_funding", 1000)]))).toBe("ok");
     const spare = await independentPurchase(400);
-    expect(refusal(await ledger.append([share(spare.entryId, 300)]))).toBe("ok");
+    expect(refusal(await ledger.append([share(spare.entryId, 200)]))).toBe("ok");
 
     const purchase = await independentPurchase(400);
-    const earned = await ledger.append([share(purchase.entryId, 300)]);
+    const earned = await ledger.append([share(purchase.entryId, 200)]);
     if (!earned.ok) throw new Error(refusal(earned));
     expect(earned.entries[0]!.toBucket).toBe("pending");
-    expect(refusal(await ledger.append([share(purchase.entryId, 300)]))).toBe("duplicate_entry");
+    expect(refusal(await ledger.append([share(purchase.entryId, 200)]))).toBe("duplicate_entry");
 
     const earningId = earned.entries[0]!.entryId;
     const settle = (amount: number) =>
       ledger.append([entry(owner, "settlement", amount, { relatedEntryId: earningId })]);
-    expect(refusal(await settle(200))).toBe("ok");
+    expect(refusal(await settle(100))).toBe("ok");
     expect(
       refusal(await ledger.append([entry(owner, "reversal", 100, { relatedEntryId: earningId })])),
     ).toBe("ok");
@@ -390,7 +429,7 @@ describe("earnings", () => {
     expect(
       refusal(
         await ledger.append([
-          entry(owner, "reversal", 200, { relatedEntryId: earningId, fromAvailable: true }),
+          entry(owner, "reversal", 100, { relatedEntryId: earningId, fromAvailable: true }),
         ]),
       ),
     ).toBe("ok");
@@ -425,6 +464,24 @@ describe("earnings", () => {
     expect(refusal(await ledgerAt().append([share(purchase.entryId, 50, sibling)]))).toBe(
       "earning_not_eligible",
     );
+  });
+
+  it("pays exactly half of the purchase, rounded down", async () => {
+    const purchase = await independentPurchase(101);
+    for (const amount of [49, 51, 101]) {
+      expect(refusal(await ledgerAt().append([share(purchase.entryId, amount)]))).toBe(
+        "earning_amount_invalid",
+      );
+    }
+    expect(refusal(await ledgerAt().append([share(purchase.entryId, 50)]))).toBe("ok");
+  });
+
+  it("pays nothing until the family success test is met", async () => {
+    // Execution: no successful outcome report from the purchasing operator.
+    const purchase = await independentPurchase(100, executionId);
+    expect(
+      refusal(await ledgerAt().append([share(purchase.entryId, 50, owner, executionId)])),
+    ).toBe("earning_test_not_met");
   });
 });
 
@@ -555,7 +612,7 @@ describe("operator spending controls", () => {
     expect(await bad({ setBy: " " })).toBe("setBy");
     expect(await bad({})).toBe("ok");
     expect(await bad({ perTransactionLimitMinor: 100 })).toBe("ok");
-    expect((await controls.currentPolicy(actor.operatorId, "USD"))?.perTransactionLimitMinor).toBe(
+    expect((await controls.currentPolicy(actor.operatorId, "USDC"))?.perTransactionLimitMinor).toBe(
       100,
     );
     await expect(

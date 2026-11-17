@@ -8,10 +8,12 @@
  * - `balance`: the agent's available ledger balance pays.
  *
  * Order: check the operator's spending controls first (so a refused purchase is never charged),
- * charge, then record funding, reservation, purchase and entitlement in one D1 batch. D1 triggers
+ * charge, then record funding, reservation, purchase, entitlement and (when already due) the
+ * contributor's earning in one D1 batch. D1 triggers
  * re-check every control in that batch; if the batch is refused after a charge, the charge is
  * refunded. Retrying with the same idempotency key never charges or records twice.
  */
+import { issueEarningsStatement } from "./earnings";
 import { ledgerRefusalOf, type LedgerRefusal } from "./ledger";
 import { LICENCE_OPERATOR_VERSION_PERPETUAL, type PriceList, type PriceQuote } from "./pricing";
 import type { ChargeRequest, PaymentProvider } from "./provider";
@@ -332,6 +334,8 @@ export class PurchaseService {
           LICENCE_OPERATOR_VERSION_PERPETUAL,
           at,
         ),
+      // The contributor's share, when the success test is already met (verified Knowledge).
+      issueEarningsStatement(this.db, request.contributionId, request.version, at),
     ];
   }
 }

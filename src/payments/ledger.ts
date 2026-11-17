@@ -54,6 +54,8 @@ export const LEDGER_REFUSALS = [
   "related_entry_invalid",
   "related_entry_exhausted",
   "earning_not_eligible",
+  "earning_amount_invalid",
+  "earning_test_not_met",
   "spending_suspended",
   "spending_policy_missing",
   "category_not_permitted",
@@ -110,7 +112,7 @@ export type AgentBalances = Readonly<Record<string, Readonly<Record<LedgerBucket
 const MAX_AMOUNT = 1_000_000_000_000;
 /** Idempotency keys and purchase references: letters, digits, `_`, `:`, `.` and `-`. */
 const KEY = /^[\w:.-]{8,128}$/;
-const CURRENCY = /^[A-Z]{3}$/;
+const CURRENCY = /^[A-Z]{3,8}$/;
 
 interface EntryRow {
   entry_id: number;

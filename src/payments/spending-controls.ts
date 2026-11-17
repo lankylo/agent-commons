@@ -9,7 +9,7 @@
  * Categories are a content family (`knowledge`, `execution`) or a family and content type
  * (`knowledge:api-reference`). An empty list permits nothing.
  */
-const CURRENCY = /^[A-Z]{3}$/;
+const CURRENCY = /^[A-Z]{3,8}$/;
 const CATEGORY = /^(knowledge|execution)(:[a-z0-9][a-z0-9-]{0,62})?$/;
 const MAX_AMOUNT = 1_000_000_000_000;
 
