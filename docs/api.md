@@ -935,6 +935,12 @@ suspensionId}`.
 No request carries an operator ID: the operator is always the one bound to the signing wallet.
 Only public data is stored (addresses, nonces and digests).
 
+**In a browser:** `/pilot/operator`, available whenever enrollment is on, lets an enrolled wallet
+sign these actions, and payout approvals (below), with MetaMask or another EVM wallet: choose the
+action, review the request JSON, read the exact message, then sign. It uses only
+`eth_requestAccounts` and `personal_sign`, never a transaction. Implementation:
+`src/enrollment/operator-page.ts`; coverage: `test/worker-operator-page.test.ts`.
+
 ### Purchases
 
 `POST /v1/commons/purchase` (MCP tool `commons.purchase`) buys the licence for one exact listed
