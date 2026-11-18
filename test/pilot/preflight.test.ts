@@ -231,12 +231,12 @@ describe("pilot preflight", () => {
     expect(run(config({ vars: { REVIEWER_TOKEN: TOKEN } })).errors.join("\n")).toMatch(/secret/);
   });
 
-  it("requires contiguous migrations through 0019", () => {
+  it("requires contiguous migrations through 0020", () => {
     const text = config({});
     const base = { configText: text, phase: "initial" as const, forbiddenPolicies };
     expect(preflight({ ...base, migrationFiles }).ok).toBe(true);
     expect(
-      preflight({ ...base, migrationFiles: migrationFiles.filter((f) => !f.startsWith("0019")) })
+      preflight({ ...base, migrationFiles: migrationFiles.filter((f) => !f.startsWith("0020")) })
         .ok,
     ).toBe(false);
     expect(preflight({ ...base, migrationFiles: migrationFiles.slice(0, 10) }).ok).toBe(false);
@@ -255,6 +255,23 @@ describe("pilot preflight", () => {
     expect(run(config({ vars: { PAYMENTS: "sandbox" } })).errors.join("\n")).toMatch(
       /initial phase: PAYMENTS/,
     );
+  });
+
+  it("accepts Base Sepolia deposits only with sandbox payments and a public address", () => {
+    const address = "0x1111111111111111111111111111111111111111";
+    const vars = {
+      ...OPEN,
+      PAYMENTS: "sandbox",
+      DEPOSITS: "base-sepolia",
+      DEPOSIT_ADDRESS: address,
+    };
+    expect(run(config({ vars }), "pilot").ok).toBe(true);
+    const errors = (v: Record<string, unknown>) =>
+      run(config({ vars: { ...vars, ...v } }), "pilot").errors.join("\n");
+    expect(errors({ DEPOSITS: "base" })).toMatch(/DEPOSITS/);
+    expect(errors({ PAYMENTS: "off" })).toMatch(/DEPOSITS: needs PAYMENTS/);
+    expect(errors({ DEPOSIT_ADDRESS: "not-an-address" })).toMatch(/DEPOSIT_ADDRESS/);
+    expect(errors({ BASE_RPC_URL: "http://example.com" })).toMatch(/BASE_RPC_URL/);
   });
 
   it("rejects unparseable configuration", () => {

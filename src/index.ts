@@ -12,6 +12,8 @@ import { refreshTrustBestEffort, toTrustSummary, trustKey, TrustStore } from "./
 import { SourceChecker, type SourceFetcher } from "./registry/source-check";
 import { issueEarnings } from "./payments/earnings";
 import { accountView } from "./payments/platform";
+import { ChainReader, httpRpc, NETWORKS, type NetworkConfig, type RpcCall } from "./payments/chain";
+import { DepositService, MIN_DEPOSIT_MINOR, TX_HASH } from "./payments/deposits";
 import {
   PAID_PRICE_LIST,
   PILOT_PRICE_LIST,
@@ -72,6 +74,47 @@ interface WorkerEnv extends ReviewEnv, EnrollmentEnv, McpHttpEnv {
   readonly PAYMENT_PROVIDER?: PaymentProvider;
   /** Test injection for prices; never set from configuration. */
   readonly PRICE_LIST?: PriceList;
+  /** USDC deposits: off unless "base-sepolia" (and PAYMENTS is "sandbox"). */
+  readonly DEPOSITS?: string;
+  /** The platform's public deposit address (never a key). */
+  readonly DEPOSIT_ADDRESS?: string;
+  /** Optional JSON-RPC endpoint for the deposit network; defaults to the public one. */
+  readonly BASE_RPC_URL?: string;
+  /** Test injection for the chain reader; never set from configuration. */
+  readonly CHAIN_RPC?: RpcCall;
+}
+
+type DepositConfig =
+  | { readonly mode: "off" }
+  | {
+      readonly mode: "on";
+      readonly network: NetworkConfig;
+      readonly address: string;
+      readonly rpcUrl: string;
+    }
+  | { readonly mode: "invalid" };
+
+/** Deposits run only on an enabled network, with sandbox payments and a valid address. */
+function depositConfigOf(env: WorkerEnv): DepositConfig {
+  const value = env.DEPOSITS;
+  if (value === undefined || value === "" || value === "off") return { mode: "off" };
+  const network = value === "base-sepolia" || value === "base" ? NETWORKS[value] : undefined;
+  const address =
+    typeof env.DEPOSIT_ADDRESS === "string" && /^0x[0-9a-fA-F]{40}$/.test(env.DEPOSIT_ADDRESS)
+      ? env.DEPOSIT_ADDRESS.toLowerCase()
+      : null;
+  const rpcUrl = env.BASE_RPC_URL ?? network?.defaultRpcUrl;
+  if (
+    !network?.enabled ||
+    resolvePaymentsMode(env.PAYMENTS) !== "sandbox" ||
+    address === null ||
+    address === `0x${"0".repeat(40)}` ||
+    typeof rpcUrl !== "string" ||
+    !rpcUrl.startsWith("https://")
+  ) {
+    return { mode: "invalid" };
+  }
+  return { mode: "on", network, address, rpcUrl };
 }
 
 /** Paid prices apply only while payments are on; otherwise everything is free. */
@@ -154,6 +197,7 @@ async function authenticateAndRateLimit(
     | "Preview"
     | "Purchase"
     | "Account"
+    | "Deposit"
     | "MCP access",
 ): Promise<AuthorizationResult> {
   if (!env.DB) {
@@ -681,6 +725,114 @@ async function handlePurchase(request: Request, env: WorkerEnv): Promise<Respons
     });
   } catch {
     return httpError(500, "internal_error", "Purchase is unavailable.");
+  }
+}
+
+const DEPOSIT_STATUS: Readonly<Record<string, number>> = {
+  not_enrolled: 403,
+  deposit_not_yours: 403,
+  deposit_not_found: 404,
+  deposit_failed: 422,
+  not_a_deposit: 422,
+  deposit_too_small: 422,
+  deposit_unconfirmed: 202,
+  wrong_network: 503,
+  chain_unavailable: 503,
+  payments_stopped: 503,
+};
+
+/**
+ * USDC deposits. `{}` returns where and how to deposit; `{txHash}` claims a transfer sent from the
+ * operator's enrolled wallet to the platform's deposit address and credits it once.
+ */
+async function handleDeposit(request: Request, env: WorkerEnv): Promise<Response> {
+  try {
+    const config = depositConfigOf(env);
+    if (config.mode === "invalid") {
+      return httpError(503, "misconfigured", "Service configuration is invalid.");
+    }
+    if (config.mode === "off")
+      return httpError(403, "deposits_disabled", "Deposits are not enabled.");
+    const authorization = await authenticateAndRateLimit(request, env, "Deposit");
+    if (!authorization.ok) return authorization.response;
+    if (!env.DB) return httpError(500, "internal_error", "Deposits are unavailable.");
+    const parsed = await parseJsonBody(request);
+    if (!parsed.ok) return parsed.response;
+    const body = parsed.value;
+    if (typeof body !== "object" || body === null || Array.isArray(body)) {
+      return httpError(400, "invalid_request", "The deposit request body must be an object.");
+    }
+    const record = body as Record<string, unknown>;
+    const keys = Object.keys(record);
+    const instructions = {
+      network: config.network.network,
+      chainId: config.network.chainId,
+      token: { symbol: "USDC", address: config.network.usdc, decimals: 6 },
+      depositAddress: config.address,
+      minimumMinor: MIN_DEPOSIT_MINOR,
+      confirmations: config.network.confirmations,
+    };
+    if (keys.length === 0) {
+      return Response.json({
+        schemaVersion: "deposit-instructions/v1",
+        ...instructions,
+        note: "Send USDC from your operator's enrolled wallet, then submit the transaction hash.",
+      });
+    }
+    if (
+      keys.some((k) => k !== "txHash") ||
+      typeof record.txHash !== "string" ||
+      !TX_HASH.test(record.txHash)
+    ) {
+      return httpError(
+        400,
+        "invalid_request",
+        "Send {} or {txHash} with a 0x-prefixed 32-byte hash.",
+      );
+    }
+    const chain = new ChainReader(env.CHAIN_RPC ?? httpRpc(config.rpcUrl));
+    const outcome = await new DepositService(
+      env.DB,
+      config.network,
+      config.address,
+      chain,
+      env.NOW ?? (() => new Date()),
+    ).claim({
+      agentId: authorization.actor.agentId,
+      operatorId: authorization.actor.operatorId,
+      txHash: record.txHash,
+    });
+    if (!outcome.ok) {
+      if (outcome.code === "deposit_unconfirmed") {
+        return Response.json(
+          {
+            schemaVersion: "deposit-result/v1",
+            status: "unconfirmed",
+            txHash: record.txHash.toLowerCase(),
+            confirmations: outcome.confirmations,
+          },
+          { status: 202 },
+        );
+      }
+      return httpError(
+        DEPOSIT_STATUS[outcome.code] ?? 422,
+        outcome.code,
+        "The deposit was not credited.",
+      );
+    }
+    return Response.json(
+      {
+        schemaVersion: "deposit-result/v1",
+        status: outcome.status,
+        txHash: record.txHash.toLowerCase(),
+        network: config.network.network,
+        amountMinor: outcome.amountMinor,
+        credited: outcome.credited,
+      },
+      { status: outcome.status === "credited" ? 201 : 200 },
+    );
+  } catch {
+    return httpError(500, "internal_error", "Deposits are unavailable.");
   }
 }
 
@@ -1237,7 +1389,8 @@ const router = {
         request.method === "POST" &&
         (pathname === "/v1/commons/contribute" ||
           pathname === "/v1/commons/feedback" ||
-          pathname === "/v1/commons/purchase")
+          pathname === "/v1/commons/purchase" ||
+          pathname === "/v1/commons/deposit")
       ) {
         return httpError(
           403,
@@ -1272,6 +1425,9 @@ const router = {
     }
     if (pathname === "/v1/commons/account" && request.method === "POST") {
       return handleAccount(request, workerEnv);
+    }
+    if (pathname === "/v1/commons/deposit" && request.method === "POST") {
+      return handleDeposit(request, workerEnv);
     }
     return new Response("Not Found", { status: 404 });
   },

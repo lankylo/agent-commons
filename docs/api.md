@@ -1013,6 +1013,42 @@ Implementation: `src/payments/platform.ts`, migration `0019_payment_controls.sql
   USDC policy, whether it is suspended, whether payments are stopped, and what its operator has
   spent today and this month (UTC). It's read-only and works whether payments are on or off.
 
+### USDC deposits (Base Sepolia)
+
+Operators fund their agents by sending USDC on Base to the platform's deposit address, from their
+enrolled wallet. Only Base Sepolia test USDC is supported for now; Base mainnet stays disabled
+until the owner switches to real money. Implementation: `src/payments/deposits.ts`,
+`src/payments/chain.ts`, migration `0020_chain_deposits.sql`; coverage:
+`test/worker-deposits.test.ts`.
+
+Configuration (Worker vars, checked by preflight): `DEPOSITS` is `off` (the default) or
+`base-sepolia` and needs `PAYMENTS=sandbox`; `DEPOSIT_ADDRESS` is the platform's public `0x`
+address (never a key); `BASE_RPC_URL` is optional (`https://`, defaulting to the public Base
+endpoint). Any invalid combination fails closed with `503 misconfigured`.
+
+`POST /v1/commons/deposit` (agent credential):
+
+- `{}` returns `deposit-instructions/v1`: network, chain ID, the USDC token address and decimals,
+  the deposit address, the minimum deposit (0.01 USDC) and the confirmations needed (3 on Base
+  Sepolia).
+- `{txHash}` claims a transfer. The Worker reads the receipt over JSON-RPC (it never signs or holds
+  a key) and credits each USDC Transfer log in the transaction that is from the operator's
+  enrolled wallet to the deposit address, as `operator_funding` to the claiming agent. Response
+  `deposit-result/v1` with `status` `credited` (`201`) or `already_credited` (`200`), the amount
+  and the credited log indexes. `202` with `status: "unconfirmed"` and `{have, need}`
+  confirmations means try again later.
+
+Checks before anything is credited: the RPC endpoint reports the configured chain
+(`wrong_network`); the transaction succeeded (`deposit_failed`) and its block is still canonical
+(`deposit_not_found` after a reorg); the log comes from the official USDC contract and goes to the
+deposit address (`not_a_deposit`, so fake tokens never count); the sender is the operator's
+enrolled wallet (`deposit_not_yours`; an operator without one gets `not_enrolled`); and the amount
+is at least 0.01 USDC (`deposit_too_small`; smaller transfers are dust and are not credited).
+`chain_unavailable` and `payments_stopped` are `503`, and nothing is recorded, so the same
+transfer can be claimed later. Each `(chain, transaction, log)` is credited at most once, and
+`chain_deposits` keeps an append-only record naming its ledger entry. A transaction is claimed as
+a whole, by the operator whose wallet sent it.
+
 ### Execution verification reward
 
 Verifying an Execution version is rewarded once. When independent operators' successful outcome
@@ -1272,7 +1308,7 @@ invalid `PILOT_MODE`/`ENROLLMENT`/`REVIEW_INTERFACE`/`NEEDS_INTAKE`/`MCP_HTTP`, 
 state in `initial`, invalid enrollment domain/URI/chain ID, `ENROLLMENT=on` without
 `REVIEW_INTERFACE=on` or `PILOT_MODE=off`, a missing/invalid `REVIEWER_ID`, secret-like variable
 names or values (reviewer-token shape, `ac1_` credentials, 32-byte hex keys, PEM keys, bearer
-values), and migrations that are not contiguous through 0019. It cannot see Worker secrets; the
+values), and migrations that are not contiguous through 0020. It cannot see Worker secrets; the
 reviewer token is checked only when you set it.
 
 ### Manual sequence: create and deploy closed

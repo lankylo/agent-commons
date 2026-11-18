@@ -125,6 +125,7 @@ describe("clean migration", () => {
     expect(names.sort()).toEqual(
       [
         "agent_credentials",
+        "chain_deposits",
         "agents",
         "contribution_evidence",
         "contribution_references",
@@ -168,7 +169,7 @@ describe("clean migration", () => {
       count(
         "SELECT count(*) AS c FROM sqlite_master WHERE type = 'index' AND name LIKE '%\\_idx' ESCAPE '\\'",
       ),
-    ).toBe(27);
+    ).toBe(28);
     expect(
       db
         .prepare("PRAGMA table_info(retrieval_receipts)")
