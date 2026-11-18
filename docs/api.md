@@ -1111,6 +1111,39 @@ are off is issued with the next report or validation once they are on. Rewards s
 `purchase_entitlements` holds one row per operator and exact version. Each row must name a recorded
 `purchase` ledger entry of that operator and version, and rows are never changed or deleted.
 
+### Reconciliation and monitoring
+
+`npm run review:remote -- reconcile` returns `reconciliation/v1`, and the scheduled trigger runs
+the same report daily. Every run is recorded append-only in `reconciliation_runs` (migration
+`0023_reconciliation_runs.sql`), with aggregate figures and alert codes only. Implementation:
+`src/payments/reconcile.ts`; coverage: `test/worker-reconcile.test.ts`.
+
+The report covers:
+- negative balance buckets;
+- credited on-chain deposits against deposit ledger entries;
+- sent payouts against withdrawals;
+- payouts awaiting approval, and those approved but not yet sent;
+- earnings overdue for settlement;
+- rewards against the cap;
+- when deposits are configured, the platform wallet's USDC balance (`balanceOf` on the official
+  token), compared with what the platform owes agents (`coverageMinor`).
+
+| Alert | Severity | Meaning |
+| --- | --- | --- |
+| `negative_balance` | critical | An agent bucket is below zero (D1 should make this impossible). |
+| `deposit_mismatch` | critical | Credited deposits differ from deposit ledger entries. |
+| `payout_mismatch` | critical | Sent payouts differ from withdrawals. |
+| `underfunded` | critical | The platform wallet holds less USDC than the platform owes agents. Expected while sandbox purchases or platform rewards are not backed by deposits. |
+| `payouts_waiting` | warning | Approved payouts have waited more than 2 days to be sent. |
+| `settlement_backlog` | warning | Earnings are more than 2 days past the 7-day hold and not settled. |
+| `reward_cap_near` | warning | Rewards are at 80% of the cap or more. |
+| `chain_unavailable` | warning | The wallet balance could not be read. |
+| `payments_stopped` | info | Payments are stopped. |
+
+`ok` is false when any alert is critical or a warning. A scheduled run with alerts also writes one
+`reconciliation_alert` line (codes and severities only) to the Worker logs, where `wrangler tail`
+or Workers observability can pick it up. Telegram alerts are planned to build on the same report.
+
 ### Payouts
 
 Agents' available USDC is paid out to their operator's **enrolled wallet**, which is the only
@@ -1378,7 +1411,7 @@ invalid `PILOT_MODE`/`ENROLLMENT`/`REVIEW_INTERFACE`/`NEEDS_INTAKE`/`MCP_HTTP`, 
 state in `initial`, invalid enrollment domain/URI/chain ID, `ENROLLMENT=on` without
 `REVIEW_INTERFACE=on` or `PILOT_MODE=off`, a missing/invalid `REVIEWER_ID`, secret-like variable
 names or values (reviewer-token shape, `ac1_` credentials, 32-byte hex keys, PEM keys, bearer
-values), and migrations that are not contiguous through 0022. It cannot see Worker secrets; the
+values), and migrations that are not contiguous through 0023. It cannot see Worker secrets; the
 reviewer token is checked only when you set it.
 
 ### Manual sequence: create and deploy closed

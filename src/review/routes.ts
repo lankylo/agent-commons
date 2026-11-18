@@ -24,6 +24,7 @@ import { ChainReader, httpRpc } from "../payments/chain";
 import { depositConfigOf, type ChainEnv } from "../payments/config";
 import { issueEarnings } from "../payments/earnings";
 import { PayoutService, type PayoutResult } from "../payments/payouts";
+import { reconcile, recordRun } from "../payments/reconcile";
 import { resolvePaymentsMode } from "../payments/provider";
 import {
   DEFAULT_QUEUE_PAGE,
@@ -651,6 +652,7 @@ export async function handleReview(request: Request, env: ReviewEnv): Promise<Re
       "payouts",
       "payout-sent",
       "payout-reject",
+      "reconcile",
     ].includes(op)
   ) {
     return fail(404, "not_found", "Not found.");
@@ -678,6 +680,23 @@ export async function handleReview(request: Request, env: ReviewEnv): Promise<Re
       return await adjust(op, env.DB, now, env.REVIEWER_ID, body);
     }
     if (op === "validate") return await validate(env, env.DB, now, env.REVIEWER_ID, body);
+    if (op === "reconcile") {
+      if (unknownFields(body, [])) return fail(400, "invalid_request", "No fields are accepted.");
+      const config = depositConfigOf(env);
+      const report = await reconcile(
+        env.DB,
+        now,
+        config.mode === "on"
+          ? {
+              network: config.network,
+              platformAddress: config.address,
+              reader: new ChainReader(env.CHAIN_RPC ?? httpRpc(config.rpcUrl)),
+            }
+          : undefined,
+      );
+      const runId = await recordRun(env.DB, report, "reviewer");
+      return reply(200, { ...report, runId });
+    }
     if (op === "payouts" || op === "payout-sent" || op === "payout-reject") {
       return await payoutOp(op, env, env.DB, now, env.REVIEWER_ID, body);
     }
