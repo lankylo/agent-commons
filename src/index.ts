@@ -300,10 +300,15 @@ async function handleSearch(request: Request, env: WorkerEnv): Promise<Response>
         },
         quality: searchQualityLabel(trust.some((t) => t.verified)),
         trust,
-        // Platform prices for the returned results, in result order (free during the pilot).
+        // Platform prices for the returned results, in result order (free while payments are off).
         pricing: returned.map((r) =>
           versionPrice(
-            { contributionId: r.contributionId, version: r.version, family: r.family },
+            {
+              contributionId: r.contributionId,
+              version: r.version,
+              family: r.family,
+              verified: trustByKey.get(trustKey(r.contributionId, r.version))?.verified ?? false,
+            },
             pricesOf(env),
           ),
         ),
@@ -573,7 +578,7 @@ async function handleGet(request: Request, env: WorkerEnv): Promise<Response> {
       quality: versionQualityLabel(trust?.verified ?? false),
       ...(trust ? { trust } : {}),
       ...(data.schemaVersion === "retrieval-response/v1"
-        ? { price: priceFor(data.family, pricesOf(env)) }
+        ? { price: priceFor(data.family, trust?.verified ?? false, pricesOf(env)) }
         : {}),
     });
   } catch {
@@ -1055,8 +1060,11 @@ async function handleFeedback(request: Request, env: WorkerEnv): Promise<Respons
     // Derived trust follows the stored reports; a failure here never fails the saved feedback.
     const reported = { id: record.contributionId, version: record.version };
     await refreshTrustBestEffort(env.DB, env.NOW ?? (() => new Date()), reported, "all");
-    // A report can meet an earning's success test (an Execution outcome, or Knowledge agreement).
-    await issueEarnings(env.DB, reported.id, reported.version, env.NOW ?? (() => new Date()));
+    // A report can make a version verified: earnings on its purchases become due, and (while
+    // payments are on) the operators who verified an Execution version earn their reward.
+    await issueEarnings(env.DB, reported.id, reported.version, env.NOW ?? (() => new Date()), {
+      rewards: resolvePaymentsMode(env.PAYMENTS) === "sandbox",
+    });
 
     return Response.json({
       schemaVersion: "feedback-response/v1",

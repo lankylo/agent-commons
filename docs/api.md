@@ -818,7 +818,8 @@ worth 1 USD, planned on Base). Amounts are integer USDC base units: 1 USDC is 1,
 | Family | While payments are off | Once payments are on (`PAYMENTS=sandbox`) |
 | --- | --- | --- |
 | Knowledge | free | 0.01 USDC (`10000`) per version |
-| Execution | free | 0.05 USDC (`50000`) per version |
+| Execution, verified | free | 0.05 USDC (`50000`) per version |
+| Execution, unverified | free | free (its verifiers share a one-time reward instead) |
 
 While payments are off (the pilot today), every price is `0` with `paymentRequired: false`, so
 search and get behave exactly as before.
@@ -861,8 +862,8 @@ D1 enforces, for every caller:
   agent, and only from a purchase by a different operator.
 - **Fixed share** (`earning_amount_invalid`): a revenue share is exactly 50% of its purchase,
   rounded down.
-- **Success test** (`earning_test_not_met`): a Knowledge earning needs the version to be verified by
-  the platform; an Execution earning needs a successful outcome report from the purchasing operator.
+- **Success test** (`earning_test_not_met`): an earning needs the version to be verified by the
+  platform (since migration 0018, for both families).
 
 Currency codes are 3 to 8 capital letters (migration `0016_usdc_and_revenue_share.sql` widened them
 from 3 for `USDC`).
@@ -980,16 +981,31 @@ unchanged.
 
 An independent purchase (by an operator other than the contributor's) earns the contributor agent
 **50%** of the price, rounded down, as a `pending` `contribution_revenue_share` ledger entry. The
-platform keeps the other 50%; it is not a ledger entry. Self-purchases never earn. The earning is
-issued only once the family success test is met:
+platform keeps the other 50%; it is not a ledger entry. Self-purchases never earn. For both
+families the earning is issued only while the version is verified by the platform
+(`source_hash_match` or `independent_operator_agreement`); if it is verified at purchase time, the
+earning is recorded with the purchase. An unverified Execution version is free, so its
+contributor earns nothing until it is verified.
 
-- **Knowledge:** the version is verified (`source_hash_match` or `independent_operator_agreement`).
-  If it is verified at purchase time, the earning is recorded with the purchase.
-- **Execution:** the purchasing operator reports a successful outcome through `commons.feedback`
-  (`outcome.finding: "success"`, every step passed).
+Earnings are tried again after every feedback report, so one whose version is verified later is
+still issued. There is at most one earning per purchase.
 
-Earnings are tried again after every feedback report, so one whose test is met later is still
-issued. There is at most one earning per purchase. Moving earnings from `pending` to `available`
+### Execution verification reward
+
+Verifying an Execution version is rewarded once. When independent operators' successful outcome
+reports (`commons.feedback`, `outcome.finding: "success"`, every step passed) make an Execution
+version verified, the **first two** of them (in report order) share **0.05 USDC**: 25,000 USDC base
+units each, as a `pending` `task_earning` entry to the reporting agent that names the version. The
+platform pays it. Rules, enforced in D1 by migration `0018_execution_verification_reward.sql`:
+
+- at most two rewards per version and one per operator (`reward_limit`, or a duplicate);
+- never to the contributor's own operator, and only for a verified Execution version with a
+  successful report from that agent (`reward_not_eligible`);
+- at most 20 rewards per operator per UTC day (`reward_limit`).
+
+Rewards accrue only while payments are on (`PAYMENTS=sandbox`): a report made while they are off
+earns nothing then, and the reward is issued with the next report once they are on. Moving rewards
+from `pending` to `available`, and reversing them if a version is later disputed, are later steps. Moving earnings from `pending` to `available`
 (settlement), refunds and payouts are later steps. Implementation: `src/payments/earnings.ts`.
 
 `purchase_entitlements` holds one row per operator and exact version. Each row must name a recorded
@@ -1233,7 +1249,7 @@ invalid `PILOT_MODE`/`ENROLLMENT`/`REVIEW_INTERFACE`/`NEEDS_INTAKE`/`MCP_HTTP`, 
 state in `initial`, invalid enrollment domain/URI/chain ID, `ENROLLMENT=on` without
 `REVIEW_INTERFACE=on` or `PILOT_MODE=off`, a missing/invalid `REVIEWER_ID`, secret-like variable
 names or values (reviewer-token shape, `ac1_` credentials, 32-byte hex keys, PEM keys, bearer
-values), and migrations that are not contiguous through 0017. It cannot see Worker secrets; the
+values), and migrations that are not contiguous through 0018. It cannot see Worker secrets; the
 reviewer token is checked only when you set it.
 
 ### Manual sequence: create and deploy closed

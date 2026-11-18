@@ -10,7 +10,14 @@ import type { AgentId, OperatorId } from "../src/identity/types";
 import type { RegistryEnv } from "../src/registry/creation";
 import { ContributionRegistry } from "../src/registry/creation";
 import { Ledger, type LedgerEntryInput } from "../src/payments/ledger";
-import { contributorShare, PAID_PRICES, PILOT_PRICES, USDC_UNITS } from "../src/payments/pricing";
+import {
+  contributorShare,
+  PAID_PRICE_LIST,
+  PAID_PRICES,
+  PILOT_PRICES,
+  USDC_UNITS,
+  VERIFICATION_REWARD,
+} from "../src/payments/pricing";
 import { SpendingControls, type SpendingPolicyInput } from "../src/payments/spending-controls";
 import { HTTPBIN_EXECUTION_SEED, HTTPBIN_KNOWLEDGE_SEED } from "../src/seed/httpbin";
 import worker from "../src/index";
@@ -227,15 +234,25 @@ describe("prices", () => {
     expect(PILOT_PRICES.execution.paymentRequired).toBe(false);
   });
 
-  it("charges 0.01 USDC for Knowledge and 0.05 USDC for Execution once payments are on", async () => {
+  it("charges 0.01 USDC for Knowledge and 0.05 USDC for verified Execution once payments are on", async () => {
     // 1 USDC is 1,000,000 base units.
     expect(USDC_UNITS).toBe(1_000_000);
-    expect(PAID_PRICES.knowledge).toMatchObject({ amountMinor: 10_000, currency: "USDC" });
-    expect(PAID_PRICES.execution).toMatchObject({ amountMinor: 50_000, currency: "USDC" });
+    expect(PAID_PRICE_LIST("knowledge", false)).toMatchObject({ amountMinor: 10_000 });
+    expect(PAID_PRICE_LIST("knowledge", true)).toMatchObject({ amountMinor: 10_000 });
+    expect(PAID_PRICE_LIST("execution", true)).toMatchObject({ amountMinor: 50_000 });
+    // Unverified Execution is free: its verifiers share a one-time reward instead.
+    expect(PAID_PRICE_LIST("execution", false)).toMatchObject({
+      amountMinor: 0,
+      paymentRequired: false,
+    });
+    expect(VERIFICATION_REWARD.perVerifierMinor * VERIFICATION_REWARD.verifiers).toBe(
+      VERIFICATION_REWARD.totalMinor,
+    );
     expect(contributorShare(PAID_PRICES.knowledge.amountMinor)).toBe(5_000);
     expect(contributorShare(PAID_PRICES.execution.amountMinor)).toBe(25_000);
     expect(contributorShare(7)).toBe(3);
 
+    // Neither fixture is verified here: Knowledge is priced, Execution is free.
     const found = await post(
       "/v1/commons/search",
       { query: "pricingword", maxUtf8Bytes: 64000 },
@@ -248,7 +265,7 @@ describe("prices", () => {
       results.map((r) => ({
         contributionId: r.contributionId,
         version: 1,
-        ...PAID_PRICES[r.family as "knowledge" | "execution"],
+        ...PAID_PRICE_LIST(r.family as "knowledge" | "execution", false),
       })),
     );
   });
@@ -477,7 +494,7 @@ describe("earnings", () => {
   });
 
   it("pays nothing until the family success test is met", async () => {
-    // Execution: no successful outcome report from the purchasing operator.
+    // Execution: not verified by the platform.
     const purchase = await independentPurchase(100, executionId);
     expect(
       refusal(await ledgerAt().append([share(purchase.entryId, 50, owner, executionId)])),

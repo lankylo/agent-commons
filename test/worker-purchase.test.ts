@@ -431,23 +431,35 @@ describe("contributor earnings", () => {
     expect(await earnings(knowledgeId)).toHaveLength(before);
   });
 
-  it("pays for an Execution purchase only after the buyer reports a successful outcome", async () => {
+  it("rewards the first two verifiers of a free Execution, then pays its contributor on use", async () => {
     const EXECUTION_PRICE = 1000;
-    const prices: PriceList = (family) =>
-      quote(family === "execution" ? EXECUTION_PRICE : PRICE, "USDC");
-    const actor = await buyerWithPolicy("Execution Buyer");
-    const bought = await buy(actor, { contributionId: executionId }, { PRICE_LIST: prices });
-    expect(bought.body.status).toBe("purchased");
-    expect(await earnings(executionId)).toHaveLength(0);
+    // Like the paid price list: unverified Execution is free, verified Execution is priced.
+    const prices: PriceList = (family, verified) =>
+      family === "execution" ? quote(verified ? EXECUTION_PRICE : 0, "USDC") : quote(PRICE, "USDC");
+    const withPrices = { PRICE_LIST: prices };
 
-    const got = await post(
-      "/v1/commons/get",
-      { contributionId: executionId, version: 1, maxUtf8Bytes: 64000 },
-      actor.token,
-      { PRICE_LIST: prices },
-    );
-    expect(got.status).toBe(200);
-    const report = (finding: string, result: string) =>
+    const rewards = async () =>
+      (
+        await db
+          .prepare(
+            `SELECT agent_id, operator_id, amount_minor, currency, to_bucket FROM ledger_entries
+             WHERE entry_type = 'task_earning' AND contribution_id = ? ORDER BY entry_id`,
+          )
+          .bind(executionId)
+          .all<Json>()
+      ).results;
+    const verifier = async (name: string) => {
+      const actor = await createOperatorActor(name);
+      const got = await post(
+        "/v1/commons/get",
+        { contributionId: executionId, version: 1, maxUtf8Bytes: 64000 },
+        actor.token,
+        withPrices,
+      );
+      expect(got.status, name).toBe(200);
+      return actor;
+    };
+    const reportSuccess = (actor: Actor, extra: Json = {}) =>
       post(
         "/v1/commons/feedback",
         {
@@ -455,17 +467,53 @@ describe("contributor earnings", () => {
           version: 1,
           assessment: {
             outcome: {
-              finding,
+              finding: "success",
               observedAt: new Date(START).toISOString(),
-              steps: ["fetch", "extract", "check_echo"].map((stepId) => ({ stepId, result })),
+              steps: ["fetch", "extract", "check_echo"].map((stepId) => ({
+                stepId,
+                result: "passed",
+              })),
             },
           },
         },
         actor.token,
+        { ...withPrices, ...extra },
       );
-    expect((await report("failure", "failed")).status).toBe(200);
-    expect(await earnings(executionId)).toHaveLength(0);
-    expect((await report("success", "passed")).status).toBe(200);
+
+    // Unverified: free, so nothing to buy and nothing earned.
+    const early = await buyerWithPolicy("Unverified Execution Buyer");
+    expect((await buy(early, { contributionId: executionId }, withPrices)).body.status).toBe(
+      "not_required",
+    );
+
+    const first = await verifier("Execution Verifier One");
+    const second = await verifier("Execution Verifier Two");
+    const third = await verifier("Execution Verifier Three");
+    expect((await reportSuccess(first)).status).toBe(200);
+    expect(await rewards()).toEqual([]);
+    // The second success makes it verified, but no reward accrues while payments are off.
+    expect((await reportSuccess(second, { PAYMENTS: undefined })).status).toBe(200);
+    expect(await rewards()).toEqual([]);
+    // With payments on, the first two verifiers share the reward; the third gets nothing.
+    expect((await reportSuccess(third)).status).toBe(200);
+    const reward = (actor: Actor) => ({
+      agent_id: actor.agentId,
+      operator_id: actor.operatorId,
+      amount_minor: 25_000,
+      currency: "USDC",
+      to_bucket: "pending",
+    });
+    expect(await rewards()).toEqual([reward(first), reward(second)]);
+    expect((await reportSuccess(first)).status).toBe(200);
+    expect(await rewards()).toHaveLength(2);
+
+    // Verified: now priced, and each independent purchase pays the contributor half.
+    const buyer = await buyerWithPolicy("Verified Execution Buyer");
+    const bought = await buy(buyer, { contributionId: executionId }, withPrices);
+    expect(bought.body).toMatchObject({
+      status: "purchased",
+      price: { amountMinor: EXECUTION_PRICE },
+    });
     expect(await earnings(executionId)).toEqual([
       {
         amount_minor: EXECUTION_PRICE / 2,
@@ -474,8 +522,68 @@ describe("contributor earnings", () => {
         operator_id: owner.operatorId,
       },
     ]);
-    // Reporting success again never pays twice.
-    expect((await report("success", "passed")).status).toBe(200);
-    expect(await earnings(executionId)).toHaveLength(1);
+  });
+
+  it("refuses rewards that break the rules, in D1", async () => {
+    const ledger = new Ledger(db, () => new Date(START));
+    const forged = (actor: Actor, amountMinor: number, id: string) =>
+      ledger.append([
+        {
+          idempotencyKey: key("reward"),
+          agentId: actor.agentId,
+          operatorId: actor.operatorId,
+          entryType: "task_earning",
+          amountMinor,
+          currency: "USDC",
+          contribution: { id, version: 1 },
+        },
+      ]);
+    const code = (r: Awaited<ReturnType<typeof forged>>) => (r.ok ? "ok" : r.error.code);
+
+    // A fresh verified Execution version with one successful report and no rewards yet.
+    const created = await new ContributionRegistry(proxy.env, {
+      now: () => new Date(START),
+    }).createContribution(owner.agentId, {
+      ...HTTPBIN_EXECUTION_SEED,
+      title: "purchaseword execution reward rules",
+    } as never);
+    if (!created.ok) throw new Error(created.error.code);
+    const id = created.contribution.id;
+    await listVersion(proxy.env, id);
+    const reporter = await createOperatorActor("Reward Reporter");
+    const bystander = await createOperatorActor("Reward Bystander");
+    await db.batch([
+      db
+        .prepare(
+          `INSERT INTO version_trust (contribution_id, version, source_status, verified, updated_at)
+           VALUES (?, 1, 'none', 1, ?)`,
+        )
+        .bind(id, new Date(START).toISOString()),
+      db
+        .prepare(
+          `INSERT INTO feedback_reports (consumer_operator_id, agent_id, contribution_id, version,
+             dimension, assessment_json)
+           VALUES (?, ?, ?, 1, 'outcome', '{"finding":"success"}')`,
+        )
+        .bind(reporter.operatorId, reporter.agentId, id),
+    ]);
+    expect(code(await forged(reporter, 50_000, id))).toBe("reward_not_eligible");
+    expect(code(await forged(bystander, 25_000, id))).toBe("reward_not_eligible");
+    expect(code(await forged(owner, 25_000, id))).toBe("reward_not_eligible");
+    expect(code(await forged(reporter, 25_000, id))).toBe("ok");
+
+    // The first record already paid its two verifiers: a third verifier is over the limit.
+    const third = await db
+      .prepare(
+        `SELECT f.agent_id, f.consumer_operator_id FROM feedback_reports f
+         WHERE f.contribution_id = ? AND f.dimension = 'outcome'
+           AND NOT EXISTS (SELECT 1 FROM ledger_entries r WHERE r.entry_type = 'task_earning'
+                           AND r.operator_id = f.consumer_operator_id)
+         LIMIT 1`,
+      )
+      .bind(executionId)
+      .first<{ agent_id: string; consumer_operator_id: string }>();
+    const verifier = { agentId: third!.agent_id, operatorId: third!.consumer_operator_id } as Actor;
+    expect(code(await forged(verifier, 25_000, executionId))).toBe("reward_limit");
   });
 });

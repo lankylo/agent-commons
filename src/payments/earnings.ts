@@ -1,21 +1,29 @@
 /**
- * Contribution revenue share (Phase 6). An independent purchase (by an operator other than the
- * contributor's) earns the contributor agent {@link CONTRIBUTOR_SHARE_PERCENT}% of the price,
- * rounded down, as a `pending` ledger entry; the platform keeps the rest. Self-purchases never earn.
+ * Contribution revenue share and Execution verification rewards (Phase 6).
  *
- * The earning is issued only once the family success test is met:
- *   - Knowledge: the version is verified by the platform (its sources match their recorded hashes,
- *     or independent operators agree it is accurate);
- *   - Execution: the purchasing operator reported a successful outcome, with every step passed.
- * Earnings are tried right after a purchase and again after each feedback report, so an earning
- * whose test is met later is still issued. One earning per purchase at most: the statement skips a
- * purchase that already has one, and D1 triggers (migrations 0014 and 0016) re-check the amount,
- * the beneficiary and the success test.
+ * Revenue share: an independent purchase (by an operator other than the contributor's) earns the
+ * contributor agent {@link CONTRIBUTOR_SHARE_PERCENT}% of the price, rounded down, as a `pending`
+ * ledger entry; the platform keeps the rest. Self-purchases never earn. The earning is issued
+ * only while the version is verified by the platform (both families). An unverified Execution
+ * version is free, so it is never bought and its contributor earns nothing until it is verified.
+ *
+ * Verification reward: the first two independent operators whose successful outcome reports make
+ * an Execution version verified share a one-time, platform-paid {@link VERIFICATION_REWARD}
+ * (0.025 USDC each), as `pending` `task_earning` entries that name the version. Rewards are
+ * issued only while payments are on.
+ *
+ * Both are tried right after a purchase and after each feedback report, so anything due later is
+ * still issued. The statements skip what already exists, and D1 triggers (migrations 0014, 0016
+ * and 0018) re-check amounts, beneficiaries, verification and limits.
  */
-import { CONTRIBUTOR_SHARE_PERCENT } from "./pricing";
+import { CONTRIBUTOR_SHARE_PERCENT, VERIFICATION_REWARD } from "./pricing";
 
 /** Contributor share of `p.amount_minor`, rounded down, in SQL. */
 const SHARE = `(p.amount_minor * ${CONTRIBUTOR_SHARE_PERCENT}) / 100`;
+
+const VERIFIED = (v: string) => `EXISTS (SELECT 1 FROM version_trust t
+                     WHERE t.contribution_id = ${v}.contribution_id AND t.version = ${v}.version
+                       AND t.verified = 1)`;
 
 /**
  * Inserts the missing earnings for paid purchases of one version. ?1 contribution ID, ?2 version,
@@ -30,7 +38,6 @@ export const ISSUE_EARNINGS_SQL = `INSERT INTO ledger_entries (idempotency_key, 
     FROM purchase_entitlements e
     JOIN ledger_entries p ON p.entry_id = e.purchase_entry_id AND p.entry_type = 'purchase'
     JOIN contributions c ON c.id = p.contribution_id
-    JOIN contribution_versions v ON v.contribution_id = p.contribution_id AND v.version = p.version
    WHERE e.contribution_id = ?1 AND e.version = ?2
      AND p.purchase_ref IS NOT NULL
      AND p.operator_id <> c.contributor_operator_id
@@ -38,16 +45,42 @@ export const ISSUE_EARNINGS_SQL = `INSERT INTO ledger_entries (idempotency_key, 
      AND NOT EXISTS (SELECT 1 FROM ledger_entries s
                      WHERE s.related_entry_id = p.entry_id
                        AND s.entry_type = 'contribution_revenue_share')
-     AND ((v.family = 'knowledge'
-           AND EXISTS (SELECT 1 FROM version_trust t
-                       WHERE t.contribution_id = v.contribution_id AND t.version = v.version
-                         AND t.verified = 1))
-       OR (v.family = 'execution'
-           AND EXISTS (SELECT 1 FROM feedback_reports f
-                       WHERE f.consumer_operator_id = p.operator_id
-                         AND f.contribution_id = v.contribution_id AND f.version = v.version
-                         AND f.dimension = 'outcome'
-                         AND json_extract(f.assessment_json, '$.finding') = 'success')))`;
+     AND ${VERIFIED("p")}`;
+
+const REWARDS_SO_FAR = `(SELECT COUNT(*) FROM ledger_entries r
+     WHERE r.entry_type = 'task_earning' AND r.contribution_id = ?1 AND r.version = ?2)`;
+
+/**
+ * Inserts the missing verification rewards for one Execution version: the earliest successful
+ * outcome reports of independent operators, up to two rewards in total. ?1 contribution ID,
+ * ?2 version, ?3 timestamp. Mirrors the migration 0018 triggers.
+ */
+export const ISSUE_REWARDS_SQL = `INSERT INTO ledger_entries (idempotency_key, agent_id, operator_id,
+    entry_type, from_bucket, to_bucket, amount_minor, currency, contribution_id, version,
+    created_at)
+  SELECT 'reward:' || f.contribution_id || ':' || f.version || ':' || f.consumer_operator_id,
+         f.agent_id, f.consumer_operator_id, 'task_earning', 'external', 'pending',
+         ${VERIFICATION_REWARD.perVerifierMinor}, '${VERIFICATION_REWARD.currency}',
+         f.contribution_id, f.version, ?3
+    FROM feedback_reports f
+    JOIN contribution_versions v ON v.contribution_id = f.contribution_id AND v.version = f.version
+    JOIN contributions c ON c.id = f.contribution_id
+   WHERE f.contribution_id = ?1 AND f.version = ?2
+     AND v.family = 'execution'
+     AND ${VERIFIED("v")}
+     AND f.dimension = 'outcome'
+     AND json_extract(f.assessment_json, '$.finding') = 'success'
+     AND f.consumer_operator_id <> c.contributor_operator_id
+     AND NOT EXISTS (SELECT 1 FROM ledger_entries r
+                     WHERE r.entry_type = 'task_earning' AND r.contribution_id = f.contribution_id
+                       AND r.version = f.version AND r.operator_id = f.consumer_operator_id)
+     AND (SELECT COUNT(*) FROM ledger_entries d
+          WHERE d.entry_type = 'task_earning' AND d.contribution_id IS NOT NULL
+            AND d.operator_id = f.consumer_operator_id
+            AND substr(d.created_at, 1, 10) = substr(?3, 1, 10))
+         < ${VERIFICATION_REWARD.perOperatorDailyLimit}
+   ORDER BY f.rowid
+   LIMIT MAX(0, ${VERIFICATION_REWARD.verifiers} - ${REWARDS_SO_FAR})`;
 
 export function issueEarningsStatement(
   db: D1Database,
@@ -59,17 +92,26 @@ export function issueEarningsStatement(
 }
 
 /**
- * Issues any earnings now due for one version. Best effort: earnings can always be issued on a
- * later attempt, so a failure here never fails the caller's request.
+ * Issues any earnings, and (when `rewards` is true, i.e. payments are on) any verification
+ * rewards, now due for one version. Best effort: both can be issued on a later attempt, so a
+ * failure here never fails the caller's request.
  */
 export async function issueEarnings(
   db: D1Database,
   contributionId: string,
   version: number,
   now: () => Date,
+  options: { readonly rewards: boolean } = { rewards: false },
 ): Promise<void> {
+  const at = now().toISOString();
   try {
-    await issueEarningsStatement(db, contributionId, version, now().toISOString()).run();
+    await issueEarningsStatement(db, contributionId, version, at).run();
+  } catch {
+    // Best effort only.
+  }
+  if (!options.rewards) return;
+  try {
+    await db.prepare(ISSUE_REWARDS_SQL).bind(contributionId, version, at).run();
   } catch {
     // Best effort only.
   }

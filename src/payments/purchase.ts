@@ -57,13 +57,15 @@ export type AccessDecision =
 interface VersionRow {
   family: "knowledge" | "execution";
   contributor_operator_id: string;
+  verified: number;
 }
 
-const VERSION_SQL = `SELECT v.family, c.contributor_operator_id
+const VERSION_SQL = `SELECT v.family, c.contributor_operator_id, COALESCE(t.verified, 0) AS verified
   FROM contribution_versions v
   JOIN contributions c ON c.id = v.contribution_id
   JOIN version_quality_states q
     ON q.contribution_id = v.contribution_id AND q.version = v.version
+  LEFT JOIN version_trust t ON t.contribution_id = v.contribution_id AND t.version = v.version
   WHERE v.contribution_id = ? AND v.version = ? AND q.state = 'listed_unverified'`;
 
 const ENTITLEMENT_SQL = `SELECT granted_at FROM purchase_entitlements
@@ -151,7 +153,7 @@ export class PurchaseService {
   ): Promise<AccessDecision> {
     const row = await this.version(contributionId, version);
     if (!row) return { required: false };
-    const price = this.prices(row.family);
+    const price = this.prices(row.family, row.verified === 1);
     if (!price.paymentRequired || row.contributor_operator_id === operatorId) {
       return { required: false };
     }
@@ -165,7 +167,7 @@ export class PurchaseService {
   async purchase(request: PurchaseRequest): Promise<PurchaseOutcome> {
     const row = await this.version(request.contributionId, request.version);
     if (!row) return { ok: false, code: "not_found", price: null };
-    const price = this.prices(row.family);
+    const price = this.prices(row.family, row.verified === 1);
     const done = (
       status: "purchased" | "already_entitled" | "not_required",
       grantedAt: string | null,

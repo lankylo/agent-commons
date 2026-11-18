@@ -56,6 +56,8 @@ export const LEDGER_REFUSALS = [
   "earning_not_eligible",
   "earning_amount_invalid",
   "earning_test_not_met",
+  "reward_not_eligible",
+  "reward_limit",
   "spending_suspended",
   "spending_policy_missing",
   "category_not_permitted",

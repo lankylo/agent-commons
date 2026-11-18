@@ -43,8 +43,11 @@ export interface VersionPrice extends PriceQuote {
   readonly version: number;
 }
 
-/** The platform's price for each family. */
-export type PriceList = (family: ContentFamily) => PriceQuote;
+/**
+ * The platform's price for a version, from its family and whether it is currently verified by the
+ * platform (Phase 5 trust).
+ */
+export type PriceList = (family: ContentFamily, verified: boolean) => PriceQuote;
 
 export function quote(amountMinor: number, currency: string): PriceQuote {
   return Object.freeze({
@@ -55,23 +58,48 @@ export function quote(amountMinor: number, currency: string): PriceQuote {
   });
 }
 
+const FREE = quote(0, PAYMENT_CURRENCY);
+
 /** Prices while payments are off: everything is free. */
 export const PILOT_PRICES: Readonly<Record<ContentFamily, PriceQuote>> = Object.freeze({
-  knowledge: quote(0, PAYMENT_CURRENCY),
-  execution: quote(0, PAYMENT_CURRENCY),
+  knowledge: FREE,
+  execution: FREE,
 });
 
-/** Prices once payments are on: 0.01 USDC per Knowledge version, 0.05 USDC per Execution version. */
+/**
+ * Prices once payments are on: 0.01 USDC per Knowledge version and 0.05 USDC per verified
+ * Execution version. An unverified Execution version is free: it earns its contributor nothing,
+ * and the operators who verify it share a one-time reward instead (see `VERIFICATION_REWARD`).
+ */
 export const PAID_PRICES: Readonly<Record<ContentFamily, PriceQuote>> = Object.freeze({
   knowledge: quote(10_000, PAYMENT_CURRENCY),
   execution: quote(50_000, PAYMENT_CURRENCY),
 });
 
 export const PILOT_PRICE_LIST: PriceList = (family) => PILOT_PRICES[family];
-export const PAID_PRICE_LIST: PriceList = (family) => PAID_PRICES[family];
+export const PAID_PRICE_LIST: PriceList = (family, verified) =>
+  family === "execution" && !verified ? FREE : PAID_PRICES[family];
 
-export function priceFor(family: ContentFamily, prices: PriceList = PILOT_PRICE_LIST): PriceQuote {
-  return prices(family);
+/**
+ * One-time reward for verifying an Execution version, paid by the platform while payments are on:
+ * 0.05 USDC in total, split equally between the first two independent operators whose successful
+ * outcome reports made it verified. Migration 0018 enforces the same figures in D1.
+ */
+export const VERIFICATION_REWARD = Object.freeze({
+  totalMinor: 50_000,
+  verifiers: 2,
+  perVerifierMinor: 25_000,
+  /** Most rewards one operator can receive per UTC day. */
+  perOperatorDailyLimit: 20,
+  currency: PAYMENT_CURRENCY,
+});
+
+export function priceFor(
+  family: ContentFamily,
+  verified: boolean,
+  prices: PriceList = PILOT_PRICE_LIST,
+): PriceQuote {
+  return prices(family, verified);
 }
 
 export function versionPrice(
@@ -79,8 +107,13 @@ export function versionPrice(
     readonly contributionId: string;
     readonly version: number;
     readonly family: ContentFamily;
+    readonly verified: boolean;
   },
   prices: PriceList = PILOT_PRICE_LIST,
 ): VersionPrice {
-  return { contributionId: ref.contributionId, version: ref.version, ...prices(ref.family) };
+  return {
+    contributionId: ref.contributionId,
+    version: ref.version,
+    ...prices(ref.family, ref.verified),
+  };
 }
