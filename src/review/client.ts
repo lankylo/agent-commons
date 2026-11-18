@@ -31,6 +31,11 @@ export const REMOTE_REVIEW_USAGE = `Usage (environment: COMMONS_REVIEW_URL, COMM
   settle [limit]
   refund <purchaseRef> <reason>
   reverse <ledgerEntryId> <reason>
+  validate <contributionId> <version> <note>
+  unvalidate <contributionId> <version> <note>
+  payouts
+  payout-sent <requestId> <txHash>
+  payout-reject <requestId> <reason>
 `;
 
 const LOCAL_HOSTS = new Set(["localhost", "127.0.0.1", "[::1]"]);
@@ -58,6 +63,29 @@ function parse(argv: readonly string[]): ParsedCommand | null {
       return a && b && c === undefined
         ? { op: "refund", body: { purchaseRef: a, reason: b } }
         : null;
+    case "validate":
+    case "unvalidate":
+      return a && Number.isSafeInteger(version) && c && d === undefined
+        ? {
+            op: "validate",
+            body: {
+              contributionId: a,
+              version,
+              note: c,
+              action: command === "validate" ? "validate" : "withdraw",
+            },
+          }
+        : null;
+    case "payouts":
+      return a === undefined ? { op: "payouts", body: {} } : null;
+    case "payout-sent":
+    case "payout-reject": {
+      const requestId = Number(a);
+      if (!Number.isSafeInteger(requestId) || !b || c !== undefined) return null;
+      return command === "payout-sent"
+        ? { op: "payout-sent", body: { requestId, txHash: b } }
+        : { op: "payout-reject", body: { requestId, reason: b } };
+    }
     case "reverse": {
       const entryId = Number(a);
       return Number.isSafeInteger(entryId) && b && c === undefined

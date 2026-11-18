@@ -14,6 +14,7 @@
  * The operator is always the one bound to the signing wallet; requests carry no operator ID. Only
  * public data is stored. Enforcement stays in D1 (migration 0014).
  */
+import { PayoutService } from "../payments/payouts";
 import { PAYMENT_CURRENCY } from "../payments/pricing";
 import {
   invalidPolicyField,
@@ -53,6 +54,12 @@ const POLICY_FIELDS = [
   "withdrawalsNeedApproval",
 ] as const;
 const SUSPENSION_FIELDS = ["action", "agentId", "reason"] as const;
+const PAYOUT_FIELDS = ["requestId", "decision"] as const;
+
+export interface PayoutApprovalRequest {
+  readonly requestId: number;
+  readonly decision: "approve" | "reject";
+}
 
 export type PolicyRequest = Omit<SpendingPolicyInput, "operatorId" | "setBy">;
 
@@ -130,7 +137,18 @@ export function formatUsdc(units: number): string {
 const NOT_A_TRANSACTION = "This signature is not a transaction and costs nothing.";
 
 /** The one-line statement the wallet shows: a readable summary of the request. */
-export function statementFor(purpose: ActionPurpose, request: unknown): string {
+export function statementFor(
+  purpose: ActionPurpose,
+  request: unknown,
+  payout?: { readonly amountMinor: number; readonly destination: string },
+): string {
+  if (purpose === "payout-approval") {
+    const p = request as PayoutApprovalRequest;
+    const verb = p.decision === "approve" ? "Approve" : "Reject";
+    const amount = payout ? ` of ${formatUsdc(payout.amountMinor)} USDC` : "";
+    const to = payout ? ` to your wallet ${payout.destination}` : "";
+    return `${verb} Agent Commons payout request ${p.requestId}${amount}${to}. ${NOT_A_TRANSACTION}`;
+  }
   if (purpose === "spending-policy") {
     const p = request as PolicyRequest;
     const summary = (categories: string) =>
@@ -150,7 +168,19 @@ export function statementFor(purpose: ActionPurpose, request: unknown): string {
   return head + (reason.length <= room ? reason : `${reason.slice(0, room - 3)}...`);
 }
 
+export function checkPayoutApproval(value: unknown): Checked<PayoutApprovalRequest> {
+  if (!isObject(value)) return { field: "request" };
+  const key = exactKeys(value, PAYOUT_FIELDS);
+  if (key) return { field: key };
+  if (!Number.isSafeInteger(value.requestId) || (value.requestId as number) < 1) {
+    return { field: "requestId" };
+  }
+  if (value.decision !== "approve" && value.decision !== "reject") return { field: "decision" };
+  return { ok: true, value: value as unknown as PayoutApprovalRequest };
+}
+
 function checkRequest(purpose: ActionPurpose, value: unknown): Checked<unknown> {
+  if (purpose === "payout-approval") return checkPayoutApproval(value);
   return purpose === "spending-policy" ? checkPolicyRequest(value) : checkSuspensionRequest(value);
 }
 
@@ -188,6 +218,19 @@ export async function handleSpendingChallenge(ctx: Ctx, request: Request): Promi
   if (typeof agentId === "string" && !(await agentOfOperator(ctx, account.operator_id, agentId))) {
     return fail(404, "agent_not_found", "No agent with that ID belongs to this wallet's operator.");
   }
+  let payout: { readonly amountMinor: number; readonly destination: string } | undefined;
+  if (purpose === "payout-approval") {
+    const found = await new PayoutService(ctx.db, ctx.now).get(
+      (checked.value as PayoutApprovalRequest).requestId,
+    );
+    if (!found || found.operatorId !== account.operator_id) {
+      return fail(404, "payout_not_found", "No payout request with that ID for this operator.");
+    }
+    if (found.status !== "awaiting_approval") {
+      return fail(409, "not_awaiting_approval", "That payout request is not awaiting approval.");
+    }
+    payout = found;
+  }
 
   const now = ctx.now();
   const issuedAt = now.toISOString();
@@ -199,7 +242,7 @@ export async function handleSpendingChallenge(ctx: Ctx, request: Request): Promi
   const message = buildActionMessage({
     domain: ctx.config.domain,
     address,
-    statement: statementFor(purpose, checked.value),
+    statement: statementFor(purpose, checked.value, payout),
     uri: ctx.config.uri,
     chainId: ctx.config.chainId,
     nonce,
@@ -346,4 +389,23 @@ export async function handleSpendingSuspension(ctx: Ctx, request: Request): Prom
     agentId: s.agentId,
     suspensionId: result.value.suspensionId,
   });
+}
+
+/** The operator's signed decision on a payout request that awaits approval. */
+export async function handlePayoutApproval(ctx: Ctx, request: Request): Promise<Response> {
+  const verified = await verifyAction(ctx, request, "payout-approval");
+  if (verified instanceof Response) return verified;
+  const decision = verified.value as PayoutApprovalRequest;
+  const result = await new PayoutService(ctx.db, ctx.now).decide(
+    verified.operatorId,
+    decision.requestId,
+    decision.decision === "approve",
+    `wallet:${verified.address}`,
+  );
+  if (!result.ok) {
+    return result.code === "not_found"
+      ? fail(404, "payout_not_found", "No payout request with that ID for this operator.")
+      : fail(409, result.code, "The payout decision was not recorded.");
+  }
+  return reply(201, { schemaVersion: "payout-decision/v1", payout: result.payout });
 }

@@ -8,12 +8,14 @@
  * A version is `verified` only when a named check passed:
  *   - `source_hash_match` (Knowledge): every recorded source matched its stored SHA-256 at its
  *     latest platform re-check;
- *   - `independent_operator_agreement` (both families): at least {@link TRUST_THRESHOLDS.operators}
- *     independent operators reported the content accurate (Knowledge) or the outcome successful
- *     (Execution).
+ *   - `independent_operator_agreement` (Knowledge): at least {@link TRUST_THRESHOLDS.operators}
+ *     independent operators reported the content accurate;
+ *   - `platform_validated` plus `independent_operator_agreement` (Execution): Agent Commons
+ *     validated the version (migration 0022) and at least one independent operator reported a
+ *     successful outcome, in either order.
  * It is never verified while a source that matched before no longer matches, or while at least
  * {@link TRUST_THRESHOLDS.operators} independent operators dispute it. Execution recipes are never
- * run by the platform, so Execution verification rests on operator reports alone.
+ * run by the platform, so Execution verification rests on its validation and operator reports.
  *
  * `reliabilityScore` is confirming operators divided by reporting operators on the core dimension
  * (accuracy or outcome), and stays null until {@link TRUST_THRESHOLDS.operators} independent
@@ -27,7 +29,11 @@ export const TRUST_THRESHOLDS = {
   operators: 2,
 } as const;
 
-export const TRUST_CHECKS = ["source_hash_match", "independent_operator_agreement"] as const;
+export const TRUST_CHECKS = [
+  "source_hash_match",
+  "independent_operator_agreement",
+  "platform_validated",
+] as const;
 export type TrustCheck = (typeof TRUST_CHECKS)[number];
 
 export const TRUST_FLAGS = [
@@ -93,6 +99,11 @@ const LATEST_CHECKS_CTE = `latest AS (
                            AND x.version = sc.version AND x.ordinal = sc.ordinal)
 )`;
 
+/** 1 when Agent Commons' latest decision on Execution version `v` is to validate it, else 0. */
+const PLATFORM_VALIDATED = (v: string) => `(COALESCE((SELECT pv.action FROM platform_validations pv
+     WHERE pv.contribution_id = ${v}.contribution_id AND pv.version = ${v}.version
+     ORDER BY pv.validation_id DESC LIMIT 1), '') = 'validate')`;
+
 const FINDING = "json_extract(f.assessment_json, '$.finding')";
 const CORE = "f.dimension IN ('accuracy','outcome')";
 
@@ -145,6 +156,8 @@ SELECT v.contribution_id, v.version,
        CASE WHEN COALESCE(b.disputing, 0) >= ?1 THEN 0
             WHEN COALESCE(s.changed, 0) > 0 THEN 0
             WHEN s.total IS NOT NULL AND s.matched = s.total THEN 1
+            WHEN v.family = 'execution'
+              THEN (${PLATFORM_VALIDATED("v")} AND COALESCE(b.confirming, 0) >= 1)
             WHEN COALESCE(b.confirming, 0) >= ?1 THEN 1
             ELSE 0 END,
        ?2
@@ -210,6 +223,7 @@ const READ_SQL = `SELECT v.contribution_id AS id, v.version AS version, v.family
        COALESCE(t.reporting_operators, 0) AS reporting,
        COALESCE(t.stale_reports, 0) AS stale_reports,
        COALESCE(t.verified, 0) AS verified,
+       ${PLATFORM_VALIDATED("v")} AS validated,
        CASE WHEN ${dueMs("v", "p")} IS NULL OR ?2 >= ${dueMs("v", "p")} THEN 1 ELSE 0 END
          AS overdue,
        (SELECT COUNT(*)
@@ -249,6 +263,7 @@ interface ReadRow {
   reporting: number;
   stale_reports: number;
   verified: number;
+  validated: number;
   overdue: number;
   deps_unavailable: number;
   deps_stale: number;
@@ -265,7 +280,10 @@ function toTrust(row: ReadRow): VersionTrust {
 
   const checks: TrustCheck[] = [];
   if (sourceStatus === "matched") checks.push("source_hash_match");
-  if (row.confirming >= threshold) checks.push("independent_operator_agreement");
+  if (row.family === "execution" && row.validated === 1) checks.push("platform_validated");
+  // Execution needs one independent operator beside the platform validation; Knowledge needs two.
+  const agreement = row.family === "execution" ? 1 : threshold;
+  if (row.confirming >= agreement) checks.push("independent_operator_agreement");
 
   const flags: TrustFlag[] = [];
   if (sourceStatus === "changed") flags.push("source_changed");

@@ -31,6 +31,7 @@ import {
   handleSpendingChallenge,
   handleSpendingPolicy,
   handleSpendingSuspension,
+  handlePayoutApproval,
 } from "./spending";
 
 export const ENROLL_PATH_PREFIX = "/v1/enroll/";
@@ -501,6 +502,8 @@ export async function handleEnrollment(request: Request, env: EnrollmentEnv): Pr
         return await handleSpendingPolicy(ctx, request);
       case `${ENROLL_PATH_PREFIX}spending-suspension`:
         return await handleSpendingSuspension(ctx, request);
+      case `${ENROLL_PATH_PREFIX}payout-approval`:
+        return await handlePayoutApproval(ctx, request);
       default:
         return fail(404, "not_found", "Not found.");
     }

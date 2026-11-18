@@ -19,6 +19,8 @@ import { listVersion } from "./helpers/quality";
 
 const START = Date.parse("2026-11-15T10:00:00.000Z");
 const PRICE = 250;
+// Test-only placeholder, not a real credential.
+const REVIEW_TOKEN = "test-only-Reviewer-Token-0123456789abcdefghijKLMNOP";
 
 interface Actor {
   readonly agentId: AgentId;
@@ -431,7 +433,7 @@ describe("contributor earnings", () => {
     expect(await earnings(knowledgeId)).toHaveLength(before);
   });
 
-  it("rewards the first two verifiers of a free Execution, then pays its contributor on use", async () => {
+  it("rewards one external validator of a free Execution, then pays its contributor on use", async () => {
     const EXECUTION_PRICE = 1000;
     // Like the paid price list: unverified Execution is free, verified Execution is priced.
     const prices: PriceList = (family, verified) =>
@@ -486,26 +488,39 @@ describe("contributor earnings", () => {
       "not_required",
     );
 
-    const first = await verifier("Execution Verifier One");
-    const second = await verifier("Execution Verifier Two");
-    const third = await verifier("Execution Verifier Three");
+    const first = await verifier("Execution Validator One");
+    const second = await verifier("Execution Validator Two");
+    // An external success report alone does not verify it, so nothing is paid.
     expect((await reportSuccess(first)).status).toBe(200);
     expect(await rewards()).toEqual([]);
-    // The second success makes it verified, but no reward accrues while payments are off.
-    expect((await reportSuccess(second, { PAYMENTS: undefined })).status).toBe(200);
+    // Agent Commons validates it while payments are off: verified, but no reward accrues.
+    const validated = await post(
+      "/v1/review/validate",
+      { contributionId: executionId, version: 1, note: "Ran the recipe" },
+      REVIEW_TOKEN,
+      {
+        REVIEW_INTERFACE: "on",
+        REVIEWER_ID: "pilot-reviewer",
+        REVIEWER_TOKEN: REVIEW_TOKEN,
+        PAYMENTS: undefined,
+      },
+    );
+    expect(validated.status, JSON.stringify(validated.body)).toBe(200);
+    expect(validated.body.trust.verified).toBe(true);
     expect(await rewards()).toEqual([]);
-    // With payments on, the first two verifiers share the reward; the third gets nothing.
-    expect((await reportSuccess(third)).status).toBe(200);
-    const reward = (actor: Actor) => ({
-      agent_id: actor.agentId,
-      operator_id: actor.operatorId,
-      amount_minor: 25_000,
-      currency: "USDC",
-      to_bucket: "pending",
-    });
-    expect(await rewards()).toEqual([reward(first), reward(second)]);
+    // With payments on, only the first external validator is paid, once: 0.025 USDC.
+    expect((await reportSuccess(second)).status).toBe(200);
+    expect(await rewards()).toEqual([
+      {
+        agent_id: first.agentId,
+        operator_id: first.operatorId,
+        amount_minor: 25_000,
+        currency: "USDC",
+        to_bucket: "pending",
+      },
+    ]);
     expect((await reportSuccess(first)).status).toBe(200);
-    expect(await rewards()).toHaveLength(2);
+    expect(await rewards()).toHaveLength(1);
 
     // Verified: now priced, and each independent purchase pays the contributor half.
     const buyer = await buyerWithPolicy("Verified Execution Buyer");
@@ -572,7 +587,7 @@ describe("contributor earnings", () => {
     expect(code(await forged(owner, 25_000, id))).toBe("reward_not_eligible");
     expect(code(await forged(reporter, 25_000, id))).toBe("ok");
 
-    // The first record already paid its two verifiers: a third verifier is over the limit.
+    // The first record already paid its one external validator: another is over the limit.
     const third = await db
       .prepare(
         `SELECT f.agent_id, f.consumer_operator_id FROM feedback_reports f

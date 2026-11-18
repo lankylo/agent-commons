@@ -82,12 +82,13 @@ export const PAID_PRICE_LIST: PriceList = (family, verified) =>
 
 /**
  * One-time reward for verifying an Execution version, paid by the platform while payments are on:
- * 0.05 USDC in total, split equally between the first two independent operators whose successful
- * outcome reports made it verified. Migration 0018 enforces the same figures in D1.
+ * 0.025 USDC to the first independent operator whose successful outcome report, together with
+ * Agent Commons' own validation, made it verified. The platform's validation is never paid.
+ * Migrations 0018 and 0022 enforce the same figures in D1.
  */
 export const VERIFICATION_REWARD = Object.freeze({
-  totalMinor: 50_000,
-  verifiers: 2,
+  totalMinor: 25_000,
+  verifiers: 1,
   perVerifierMinor: 25_000,
   /** Most rewards one operator can receive per UTC day. */
   perOperatorDailyLimit: 20,
