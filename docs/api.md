@@ -1013,6 +1013,35 @@ Implementation: `src/payments/platform.ts`, migration `0019_payment_controls.sql
   USDC policy, whether it is suspended, whether payments are stopped, and what its operator has
   spent today and this month (UTC). It's read-only and works whether payments are on or off.
 
+### Settlement, refunds and reversals
+
+Implementation: `src/payments/settlement.ts`, migration `0021_settlement_refunds.sql`; coverage:
+`test/worker-settlement.test.ts`.
+
+- **Settlement after a 7-day hold.** Earnings and rewards stay `pending` for 7 days. After that,
+  they move to `available` in one `settlement` entry, but only while the version they name is
+  still verified; one that loses verification stays pending and can be reversed. The scheduled
+  trigger settles due earnings on every run (at most 200 per run), and
+  `npm run review:remote -- settle [limit]` does it on demand (`settlement-run/v1`). D1 refuses an
+  early settlement (`settlement_hold`) or one for an unverified version (`settlement_unverified`).
+- **Refunds.** `npm run review:remote -- refund <purchaseRef> "<reason>"` refunds a purchase in
+  full, in one D1 batch:
+  - the price goes back to the buyer's agent as available balance;
+  - the contributor's share is reversed, from pending or, if already settled, clawed back from
+    available;
+  - the licence is withdrawn.
+
+  A withdrawn licence no longer gives access (get returns `402`), and that operator cannot buy
+  the same version again (`licence_withdrawn`). A refund is refused with `409 already_done` if the
+  purchase was already refunded, and with `409 insufficient_balance` if the clawback can't be
+  covered.
+- **Reversals.** `npm run review:remote -- reverse <ledgerEntryId> "<reason>"` reverses whatever is
+  left of an earning or reward: the pending part, then any settled part from available. Use it,
+  for example, for a reward earned with a fake report.
+- **Audit.** Every refund and reversal is recorded in `ledger_adjustments` with its reason and the
+  reviewer. Licence withdrawals are recorded in `entitlement_revocations`, which D1 accepts only
+  for a purchase refunded in full. Both tables are append-only.
+
 ### USDC deposits (Base Sepolia)
 
 Operators fund their agents by sending USDC on Base to the platform's deposit address, from their
@@ -1308,7 +1337,7 @@ invalid `PILOT_MODE`/`ENROLLMENT`/`REVIEW_INTERFACE`/`NEEDS_INTAKE`/`MCP_HTTP`, 
 state in `initial`, invalid enrollment domain/URI/chain ID, `ENROLLMENT=on` without
 `REVIEW_INTERFACE=on` or `PILOT_MODE=off`, a missing/invalid `REVIEWER_ID`, secret-like variable
 names or values (reviewer-token shape, `ac1_` credentials, 32-byte hex keys, PEM keys, bearer
-values), and migrations that are not contiguous through 0020. It cannot see Worker secrets; the
+values), and migrations that are not contiguous through 0021. It cannot see Worker secrets; the
 reviewer token is checked only when you set it.
 
 ### Manual sequence: create and deploy closed

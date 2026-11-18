@@ -12,6 +12,7 @@ import { refreshTrustBestEffort, toTrustSummary, trustKey, TrustStore } from "./
 import { SourceChecker, type SourceFetcher } from "./registry/source-check";
 import { issueEarnings } from "./payments/earnings";
 import { accountView } from "./payments/platform";
+import { settleDue } from "./payments/settlement";
 import { ChainReader, httpRpc, NETWORKS, type NetworkConfig, type RpcCall } from "./payments/chain";
 import { DepositService, MIN_DEPOSIT_MINOR, TX_HASH } from "./payments/deposits";
 import {
@@ -1456,6 +1457,11 @@ const worker = {
       }).run();
     } catch {
       // A failed run records nothing; the sources stay due for the next run.
+    }
+    try {
+      await settleDue(workerEnv.DB, workerEnv.NOW);
+    } catch {
+      // Nothing settles (for example while payments are stopped); it is retried next run.
     }
   },
 } satisfies ExportedHandler;

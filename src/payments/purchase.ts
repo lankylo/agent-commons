@@ -38,6 +38,7 @@ export type PurchaseRefusal =
   | "not_found"
   | "payment_declined"
   | "provider_unavailable"
+  | "licence_withdrawn"
   | Exclude<LedgerRefusal, "duplicate_entry" | "idempotency_conflict">;
 
 export type PurchaseOutcome =
@@ -68,8 +69,16 @@ const VERSION_SQL = `SELECT v.family, c.contributor_operator_id, COALESCE(t.veri
   LEFT JOIN version_trust t ON t.contribution_id = v.contribution_id AND t.version = v.version
   WHERE v.contribution_id = ? AND v.version = ? AND q.state = 'listed_unverified'`;
 
-const ENTITLEMENT_SQL = `SELECT granted_at FROM purchase_entitlements
-  WHERE operator_id = ? AND contribution_id = ? AND version = ?`;
+/** A licence that still gives access: withdrawn (refunded) licences do not count. */
+const ENTITLEMENT_SQL = `SELECT granted_at FROM purchase_entitlements e
+  WHERE e.operator_id = ? AND e.contribution_id = ? AND e.version = ?
+    AND NOT EXISTS (SELECT 1 FROM entitlement_revocations r
+                    WHERE r.purchase_entry_id = e.purchase_entry_id)`;
+
+/** One licence per operator and version: a refunded one cannot be bought again. */
+const WITHDRAWN_SQL = `SELECT 1 FROM purchase_entitlements e
+  JOIN entitlement_revocations r ON r.purchase_entry_id = e.purchase_entry_id
+  WHERE e.operator_id = ? AND e.contribution_id = ? AND e.version = ?`;
 
 const REPLAY_SQL = `SELECT e.granted_at FROM purchase_entitlements e
   JOIN ledger_entries p ON p.entry_id = e.purchase_entry_id
@@ -192,6 +201,11 @@ export class PurchaseService {
     if (replay) return done("purchased", replay, true);
     const held = await this.entitledAt(request);
     if (held) return done("already_entitled", held);
+    const withdrawn = await this.db
+      .prepare(WITHDRAWN_SQL)
+      .bind(request.operatorId, request.contributionId, request.version)
+      .first();
+    if (withdrawn) return { ok: false, code: "licence_withdrawn", price };
 
     const refusal = await this.precheck(request, price);
     if (refusal) return { ok: false, code: refusal, price };
