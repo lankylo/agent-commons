@@ -143,7 +143,10 @@ describe("clean migration", () => {
         "needs_reports",
         "operator_spending_policies",
         "operators",
+        "payout_events",
+        "payout_requests",
         "pilot_capacity_places",
+        "platform_validations",
         "platform_payment_controls",
         "platform_reward_caps",
         "purchase_entitlements",
@@ -171,7 +174,7 @@ describe("clean migration", () => {
       count(
         "SELECT count(*) AS c FROM sqlite_master WHERE type = 'index' AND name LIKE '%\\_idx' ESCAPE '\\'",
       ),
-    ).toBe(28);
+    ).toBe(31);
     expect(
       db
         .prepare("PRAGMA table_info(retrieval_receipts)")

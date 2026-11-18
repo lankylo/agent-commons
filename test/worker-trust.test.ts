@@ -512,18 +512,44 @@ describe("independent operator agreement", () => {
     expect(state?.consumer_count).toBe(1);
   });
 
-  it("verifies Execution only from independent outcome reports, never by fetching", async () => {
+  it("verifies Execution from platform validation plus one independent report, never by fetching", async () => {
     const id = await createExecution("execword");
     const before = fetched.length;
     expect((await report(id, outcome("success"), opA)).status).toBe(200);
-    expect((await trustOf(id)).verified).toBe(false);
-    expect((await report(id, outcome("success"), opB)).status).toBe(200);
+    expect(await trustOf(id)).toMatchObject({
+      verified: false,
+      checks: ["independent_operator_agreement"],
+    });
+    const validated = await review("validate", { contributionId: id, version: 1, note: "Ran it" });
+    expect(validated.status).toBe(200);
+    expect(validated.body.schemaVersion).toBe("platform-validation/v1");
     const trust = await trustOf(id);
     expect(trust).toMatchObject({
       verified: true,
-      checks: ["independent_operator_agreement"],
+      checks: ["platform_validated", "independent_operator_agreement"],
       sourceStatus: "none",
     });
+
+    // Either order works: validated first, then one independent report.
+    const second = await createExecution("execword");
+    await review("validate", { contributionId: second, version: 1, note: "Checked first" });
+    expect((await trustOf(second)).verified).toBe(false);
+    expect((await report(second, outcome("success"), opB)).status).toBe(200);
+    expect((await trustOf(second)).verified).toBe(true);
+
+    // Withdrawing the validation removes verification; only Execution can be validated.
+    await review("validate", {
+      contributionId: second,
+      version: 1,
+      note: "Found a problem",
+      action: "withdraw",
+    });
+    expect((await trustOf(second)).verified).toBe(false);
+    const knowledge = await createKnowledge("validword");
+    const refused = await review("validate", { contributionId: knowledge, version: 1, note: "x" });
+    expect(refused.status).toBe(400);
+    expect(refused.body.error.code).toBe("execution_only");
+    expect((await review("validate", { contributionId: id, version: 1 })).status).toBe(400);
     await recheckAll(START + 60 * DAY);
     expect(fetched.slice(before).some((url) => url.includes("httpbin.org/get"))).toBe(false);
     expect((await trustOf(id)).sourceStatus).toBe("none");

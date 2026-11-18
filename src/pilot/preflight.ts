@@ -78,7 +78,7 @@ const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const BUCKET = /^[a-z0-9][a-z0-9-]{1,61}[a-z0-9]$/;
 const ON_OFF = new Set(["on", "off"]);
 const MIGRATION_FILE = /^(\d{4})_[a-z0-9_]+\.sql$/;
-const REQUIRED_MIGRATIONS = 21;
+const REQUIRED_MIGRATIONS = 22;
 
 function dropTrailingCommas(text: string): string {
   let out = "";

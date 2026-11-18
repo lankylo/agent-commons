@@ -7,10 +7,10 @@
  * only while the version is verified by the platform (both families). An unverified Execution
  * version is free, so it is never bought and its contributor earns nothing until it is verified.
  *
- * Verification reward: the first two independent operators whose successful outcome reports make
- * an Execution version verified share a one-time, platform-paid {@link VERIFICATION_REWARD}
- * (0.025 USDC each), as `pending` `task_earning` entries that name the version. Rewards are
- * issued only while payments are on.
+ * Verification reward: an Execution version is verified by Agent Commons' own validation plus one
+ * independent operator's successful outcome report. That operator (the earliest such report)
+ * earns a one-time, platform-paid {@link VERIFICATION_REWARD} of 0.025 USDC as a `pending`
+ * `task_earning` entry naming the version. Rewards are issued only while payments are on.
  *
  * Both are tried right after a purchase and after each feedback report, so anything due later is
  * still issued. The statements skip what already exists, and D1 triggers (migrations 0014, 0016

@@ -146,8 +146,12 @@ export function parseSiweMessage(message: unknown): SiweFields | null {
 }
 
 /** Operator actions an enrolled wallet can sign (Phase 6 spending controls). */
-export type ActionPurpose = "spending-policy" | "spending-suspension";
-export const ACTION_PURPOSES: readonly ActionPurpose[] = ["spending-policy", "spending-suspension"];
+export type ActionPurpose = "spending-policy" | "spending-suspension" | "payout-approval";
+export const ACTION_PURPOSES: readonly ActionPurpose[] = [
+  "spending-policy",
+  "spending-suspension",
+  "payout-approval",
+];
 const REQUEST_PREFIX = "urn:agent-commons:request:sha256:";
 const MAX_STATEMENT_CHARS = 300;
 
@@ -189,7 +193,7 @@ const ACTION_RE = new RegExp(
   MESSAGE_RE.source.replace(
     "(?<purpose>enroll|rotate)$",
     () =>
-      `(?<purpose>spending-policy|spending-suspension)\\n- ${escapeRe(REQUEST_PREFIX)}` +
+      `(?<purpose>spending-policy|spending-suspension|payout-approval)\\n- ${escapeRe(REQUEST_PREFIX)}` +
       "(?<requestDigest>[0-9a-f]{64})$",
   ),
 );

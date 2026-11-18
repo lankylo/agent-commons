@@ -13,7 +13,9 @@ import { SourceChecker, type SourceFetcher } from "./registry/source-check";
 import { issueEarnings } from "./payments/earnings";
 import { accountView } from "./payments/platform";
 import { settleDue } from "./payments/settlement";
-import { ChainReader, httpRpc, NETWORKS, type NetworkConfig, type RpcCall } from "./payments/chain";
+import { ChainReader, httpRpc, type RpcCall } from "./payments/chain";
+import { depositConfigOf } from "./payments/config";
+import { MIN_PAYOUT_MINOR, PayoutService } from "./payments/payouts";
 import { DepositService, MIN_DEPOSIT_MINOR, TX_HASH } from "./payments/deposits";
 import {
   PAID_PRICE_LIST,
@@ -83,39 +85,6 @@ interface WorkerEnv extends ReviewEnv, EnrollmentEnv, McpHttpEnv {
   readonly BASE_RPC_URL?: string;
   /** Test injection for the chain reader; never set from configuration. */
   readonly CHAIN_RPC?: RpcCall;
-}
-
-type DepositConfig =
-  | { readonly mode: "off" }
-  | {
-      readonly mode: "on";
-      readonly network: NetworkConfig;
-      readonly address: string;
-      readonly rpcUrl: string;
-    }
-  | { readonly mode: "invalid" };
-
-/** Deposits run only on an enabled network, with sandbox payments and a valid address. */
-function depositConfigOf(env: WorkerEnv): DepositConfig {
-  const value = env.DEPOSITS;
-  if (value === undefined || value === "" || value === "off") return { mode: "off" };
-  const network = value === "base-sepolia" || value === "base" ? NETWORKS[value] : undefined;
-  const address =
-    typeof env.DEPOSIT_ADDRESS === "string" && /^0x[0-9a-fA-F]{40}$/.test(env.DEPOSIT_ADDRESS)
-      ? env.DEPOSIT_ADDRESS.toLowerCase()
-      : null;
-  const rpcUrl = env.BASE_RPC_URL ?? network?.defaultRpcUrl;
-  if (
-    !network?.enabled ||
-    resolvePaymentsMode(env.PAYMENTS) !== "sandbox" ||
-    address === null ||
-    address === `0x${"0".repeat(40)}` ||
-    typeof rpcUrl !== "string" ||
-    !rpcUrl.startsWith("https://")
-  ) {
-    return { mode: "invalid" };
-  }
-  return { mode: "on", network, address, rpcUrl };
 }
 
 /** Paid prices apply only while payments are on; otherwise everything is free. */
@@ -199,6 +168,7 @@ async function authenticateAndRateLimit(
     | "Purchase"
     | "Account"
     | "Deposit"
+    | "Payout"
     | "MCP access",
 ): Promise<AuthorizationResult> {
   if (!env.DB) {
@@ -837,6 +807,72 @@ async function handleDeposit(request: Request, env: WorkerEnv): Promise<Response
   }
 }
 
+const PAYOUT_STATUS: Readonly<Record<string, number>> = {
+  invalid_request: 400,
+  insufficient_balance: 402,
+  payments_stopped: 503,
+};
+
+/**
+ * Payouts to the operator's enrolled wallet. `{}` lists this agent's payout requests;
+ * `{amountMinor, idempotencyKey}` requests one, which the operator then approves by wallet
+ * signature (unless its policy approves withdrawals automatically).
+ */
+async function handlePayout(request: Request, env: WorkerEnv): Promise<Response> {
+  try {
+    const config = depositConfigOf(env);
+    if (config.mode === "invalid") {
+      return httpError(503, "misconfigured", "Service configuration is invalid.");
+    }
+    if (config.mode === "off")
+      return httpError(403, "payouts_disabled", "Payouts are not enabled.");
+    const authorization = await authenticateAndRateLimit(request, env, "Payout");
+    if (!authorization.ok) return authorization.response;
+    if (!env.DB) return httpError(500, "internal_error", "Payouts are unavailable.");
+    const parsed = await parseJsonBody(request);
+    if (!parsed.ok) return parsed.response;
+    const body = parsed.value;
+    if (typeof body !== "object" || body === null || Array.isArray(body)) {
+      return httpError(400, "invalid_request", "The payout request body must be an object.");
+    }
+    const record = body as Record<string, unknown>;
+    const service = new PayoutService(env.DB, env.NOW ?? (() => new Date()));
+    if (Object.keys(record).length === 0) {
+      return Response.json({
+        schemaVersion: "payout-list/v1",
+        minimumMinor: MIN_PAYOUT_MINOR,
+        payouts: await service.forAgent(authorization.actor.agentId),
+      });
+    }
+    if (Object.keys(record).some((k) => k !== "amountMinor" && k !== "idempotencyKey")) {
+      return httpError(400, "invalid_request", "Only amountMinor and idempotencyKey are accepted.");
+    }
+    const result = await service.request({
+      agentId: authorization.actor.agentId,
+      operatorId: authorization.actor.operatorId,
+      amountMinor: record.amountMinor as number,
+      idempotencyKey: record.idempotencyKey as string,
+    });
+    if (!result.ok) {
+      return httpError(
+        PAYOUT_STATUS[result.code] ?? 403,
+        result.code,
+        "The payout was not requested.",
+      );
+    }
+    return Response.json(
+      {
+        schemaVersion: "payout-request/v1",
+        replayed: result.replayed ?? false,
+        payout: result.payout,
+      },
+      { status: result.replayed ? 200 : 201 },
+    );
+  } catch {
+    return httpError(500, "internal_error", "Payouts are unavailable.");
+  }
+}
+
 /**
  * The calling agent's own account: balances, recent ledger entries, and its operator's spending
  * policy, suspension state and spending so far. Read-only, so it works whether payments are on or
@@ -1391,7 +1427,8 @@ const router = {
         (pathname === "/v1/commons/contribute" ||
           pathname === "/v1/commons/feedback" ||
           pathname === "/v1/commons/purchase" ||
-          pathname === "/v1/commons/deposit")
+          pathname === "/v1/commons/deposit" ||
+          pathname === "/v1/commons/payout")
       ) {
         return httpError(
           403,
@@ -1429,6 +1466,9 @@ const router = {
     }
     if (pathname === "/v1/commons/deposit" && request.method === "POST") {
       return handleDeposit(request, workerEnv);
+    }
+    if (pathname === "/v1/commons/payout" && request.method === "POST") {
+      return handlePayout(request, workerEnv);
     }
     return new Response("Not Found", { status: 404 });
   },

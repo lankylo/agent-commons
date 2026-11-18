@@ -37,6 +37,7 @@ let credentials: CredentialService;
 let owner: Actor;
 let knowledgeId: string;
 let executionId: string;
+let secondExecutionId: string;
 let counter = 0;
 
 const charges: ChargeRequest[] = [];
@@ -93,8 +94,15 @@ beforeAll(async () => {
   if (!execution.ok) throw new Error(execution.error.code);
   executionId = execution.contribution.id;
   await listVersion(proxy.env, executionId);
-  // Both records verified, so purchases earn and Execution rewards are possible.
-  for (const id of [knowledgeId, executionId]) {
+  const executionB = await registry.createContribution(owner.agentId, {
+    ...HTTPBIN_EXECUTION_SEED,
+    title: "controlsword execution record two",
+  } as never);
+  if (!executionB.ok) throw new Error(executionB.error.code);
+  secondExecutionId = executionB.contribution.id;
+  await listVersion(proxy.env, secondExecutionId);
+  // All records verified, so purchases earn and Execution rewards are possible.
+  for (const id of [knowledgeId, executionId, secondExecutionId]) {
     await db
       .prepare(
         `INSERT INTO version_trust (contribution_id, version, source_status, verified, updated_at)
@@ -189,8 +197,8 @@ async function buyerWithPolicy(name: string) {
   return a;
 }
 
-/** A verifier operator with a successful outcome report on the Execution record. */
-async function verifier(name: string) {
+/** A validator operator with a successful outcome report on an Execution record. */
+async function verifier(name: string, id = executionId) {
   const a = await actor(name);
   await db
     .prepare(
@@ -198,12 +206,13 @@ async function verifier(name: string) {
          dimension, assessment_json)
        VALUES (?, ?, ?, 1, 'outcome', '{"finding":"success"}')`,
     )
-    .bind(a.operatorId, a.agentId, executionId)
+    .bind(a.operatorId, a.agentId, id)
     .run();
   return a;
 }
-const reward = (a: Actor) =>
-  entry(a, "task_earning", 25_000, { contribution: { id: executionId, version: 1 } });
+/** One reward per Execution version: each validator here rewards a different record. */
+const reward = (a: Actor, id = executionId) =>
+  entry(a, "task_earning", 25_000, { contribution: { id, version: 1 } });
 
 describe("emergency stop", () => {
   it("stops every payment at once, keeps unwinding possible, and restarts", async () => {
@@ -270,15 +279,17 @@ describe("reward cap", () => {
       (await review("payments", { action: "cap", capMinor: 25_000, reason: "test" })).status,
     ).toBe(200);
     const first = await verifier("Capped Verifier One");
-    const second = await verifier("Capped Verifier Two");
+    const second = await verifier("Capped Verifier Two", secondExecutionId);
     expect(code(await ledger().append([reward(first)]))).toBe("ok");
-    expect(code(await ledger().append([reward(second)]))).toBe("reward_cap_reached");
+    expect(code(await ledger().append([reward(second, secondExecutionId)]))).toBe(
+      "reward_cap_reached",
+    );
 
     expect(
       (await review("payments", { action: "cap", capMinor: 100_000_000, reason: "restore" })).body
         .rewardCapIsDefault,
     ).toBe(false);
-    expect(code(await ledger().append([reward(second)]))).toBe("ok");
+    expect(code(await ledger().append([reward(second, secondExecutionId)]))).toBe("ok");
   });
 });
 
