@@ -97,6 +97,8 @@ const PRECHECK_SQL = `SELECT
                  ORDER BY suspension_id DESC LIMIT 1), '') = 'suspend'
     OR COALESCE((SELECT action FROM spending_suspensions WHERE operator_id = ?1 AND agent_id = ?3
                  ORDER BY suspension_id DESC LIMIT 1), '') = 'suspend' AS suspended,
+  COALESCE((SELECT action FROM platform_payment_controls ORDER BY control_id DESC LIMIT 1), '')
+    = 'stop' AS stopped,
   EXISTS (SELECT 1 FROM operator_spending_policies WHERE operator_id = ?1 AND currency = ?2)
     AS has_policy,
   EXISTS (SELECT 1 FROM contribution_versions v, json_each(${policyCol("permitted_categories_json")}) c
@@ -115,6 +117,7 @@ const PRECHECK_SQL = `SELECT
 
 interface PrecheckRow {
   suspended: number;
+  stopped: number;
   has_policy: number;
   permitted: number;
   per_transaction: number | null;
@@ -266,6 +269,7 @@ export class PurchaseService {
       .first<PrecheckRow>();
     if (!row) return "spending_policy_missing";
     const amount = price.amountMinor;
+    if (row.stopped === 1) return "payments_stopped";
     if (row.suspended === 1) return "spending_suspended";
     if (row.has_policy !== 1) return "spending_policy_missing";
     if (row.permitted !== 1) return "category_not_permitted";

@@ -990,6 +990,29 @@ contributor earns nothing until it is verified.
 Earnings are tried again after every feedback report, so one whose version is verified later is
 still issued. There is at most one earning per purchase.
 
+### Platform payment controls and views
+
+Implementation: `src/payments/platform.ts`, migration `0019_payment_controls.sql`; coverage:
+`test/worker-payment-controls.test.ts`.
+
+- **Emergency stop.** `npm run review:remote -- payments stop "<reason>"` stops every payment at
+  once, and `payments start "<reason>"` restarts them. While payments are stopped, D1 refuses funding,
+  reservations (so purchases), withdrawals, earnings, rewards and settlements with
+  `payments_stopped`. A purchase is refused with `503 payments_stopped` before anything is charged.
+  Releases, refunds and reversals stay possible, so in-flight money can be unwound. Controls are
+  append-only, and `payments` with no arguments shows the current state.
+- **Reward cap.** Verification rewards (below) are capped in total, net of reversals:
+  `reward_cap_reached`. The cap defaults to 100 USDC; `payments cap <usdcBaseUnits> "<reason>"`
+  changes it.
+- **Platform ledger.** `npm run review:remote -- ledger` returns `platform-ledger/v1`, per
+  currency: what is owed to agents (pending, available, reserved), funding, purchases net of
+  refunds, contributor shares net of reversals, fee income, net rewards, the net position and
+  withdrawals, plus the control state and the reward cap remaining.
+- **Agent account.** `POST /v1/commons/account` with `{}` (agent credential) returns `account/v1`:
+  the agent's balances per currency, its latest 20 ledger entries (newest first), its operator's
+  USDC policy, whether it is suspended, whether payments are stopped, and what its operator has
+  spent today and this month (UTC). It's read-only and works whether payments are on or off.
+
 ### Execution verification reward
 
 Verifying an Execution version is rewarded once. When independent operators' successful outcome
@@ -1249,7 +1272,7 @@ invalid `PILOT_MODE`/`ENROLLMENT`/`REVIEW_INTERFACE`/`NEEDS_INTAKE`/`MCP_HTTP`, 
 state in `initial`, invalid enrollment domain/URI/chain ID, `ENROLLMENT=on` without
 `REVIEW_INTERFACE=on` or `PILOT_MODE=off`, a missing/invalid `REVIEWER_ID`, secret-like variable
 names or values (reviewer-token shape, `ac1_` credentials, 32-byte hex keys, PEM keys, bearer
-values), and migrations that are not contiguous through 0018. It cannot see Worker secrets; the
+values), and migrations that are not contiguous through 0019. It cannot see Worker secrets; the
 reviewer token is checked only when you set it.
 
 ### Manual sequence: create and deploy closed

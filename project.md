@@ -542,11 +542,26 @@ The audit also covers the operator/credential path (`test/identity/credentials.t
 **Status:** In Progress (started 2026-11-17). No real money moves.
 - **Groundwork (PR #103):** prices, the ledger and operator spending controls. Deployed to the pilot 2026-11-17 with migration 0014; a consumer search returned the free `pricing` entries.
 - **Purchase flow (PR #104):** sandbox payment provider only, licences and the paid-access check in get. Deployed with migration 0015 on 2026-11-17; consumer search and get were unchanged.
-- **Execution verification reward (migration 0018):** unverified Execution is free; its first two independent verifiers share a one-time 0.05 USDC reward; verified Execution costs 0.05 USDC and pays its contributor 50%.
+- **Payment safety and views (migration 0019):** emergency stop for all payments, a cap on platform-funded rewards (default 100 USDC), the platform ledger summary for the owner, and an account view for agents.
+- **Execution verification reward (PR #107, migration 0018):** unverified Execution is free; its first two independent verifiers share a one-time 0.05 USDC reward; verified Execution costs 0.05 USDC and pays its contributor 50%.
 - **Wallet-signed spending controls (PR #106, migration 0017):** an enrolled wallet sets its operator's USDC spending policy and suspends or resumes spending.
 - **USDC prices and revenue share (PR #105, migration 0016, deployed 2026-11-18):** amounts in USDC base units; 0.01 USDC per Knowledge version and 0.05 USDC per Execution version, applied only while payments are on; contributors earn 50% of independent purchases once the family success test is met.
 
 Live payments stay blocked on the legal review and the provider choice.
+
+**Phase 6 completion plan (owner brief, 2026-11-18).** Done when every acceptance criterion below is met in CI and shown end to end on the pilot with Base Sepolia test USDC, leaving only owner steps for real money. PRs in order: (1) payment safety and views; (2) USDC deposits verified on Base Sepolia; (3) settlement hold, refunds, reversals and clawback; (4) payouts to operator-approved destinations without a key in the Worker; (5) reconciliation report and monitoring; (6) docs, the real-money checklist and an outside-operator invitation pack.
+
+**Open decisions (owner):**
+- Reward cap: default 100 USDC (net of reversals), changeable with `payments cap`. Confirm or change.
+- Settlement hold before earnings and rewards become available (needed for PR 3). Recommended: 7 days.
+- Deposit confirmations on Base before crediting (PR 2). Recommended: 12 blocks on mainnet; fewer on Sepolia for testing.
+- Legal and regulatory sign-off before real money: South African crypto-asset rules (FSCA licensing for crypto-asset service providers), KYC/AML, sanctions screening, tax records, cross-border payments, terms of service.
+
+**Open risks:**
+- Rewards are paid by the platform before any revenue; the cap and the emergency stop bound the exposure.
+- Sybil operators could collect rewards with fake success reports; mitigated by the two-verifier rule, one reward per operator per version, a daily limit per operator, the reward cap and pending status (reversal on dispute arrives with PR 3).
+- No Execution record can be verified, and so earn or be rewarded, until two outside operators take part.
+- CI now takes about 11 minutes of a 20-minute limit.
 
 - [ ] Complete legal and regulatory review (see Section 9), including KYC/AML, sanctions, tax reporting and cross-border review, before enabling live payments or payouts.
 - [ ] Select the payment/wallet provider (provider-managed wallet or marketplace subaccount preferred; not yet selected) and supported x402 integration.
@@ -846,7 +861,7 @@ Maintain the following short record at the end of this document.
 **Current task:** None in progress. Independent-operator remote feedback passed and remote grouped needs review is merged (PR #86).
 
 **Known blockers:** None for the groundwork. Live payments (Phase 6) need the legal review and a provider choice.
-**Next task:** Operator: apply migrations 0017 (wallet-signed spending, PR #106) and, after the Execution verification reward PR is merged, 0018 to the pilot, then deploy. Leave `PAYMENTS` unset or off: with it on, Knowledge and verified Execution records need a purchase. The USDC and revenue-share PR (#105) is deployed with migration 0016 (2026-11-18). Scheduled re-checks are live (cron `17 3 * * *`, deployed 2026-11-17). Next Phase 6 step: USDC deposits on Base checked on-chain (Base Sepolia first); the platform's receiving address is needed only before live payments. Parked: a custom domain for the pilot address. Invite a small set of outside operators (the last pilot launch item); their outcome reports are what can verify Execution records. Continue the software troubleshooting expansion (Section 10): further record batches; the long-error search mode is optional. Around 2026-11-30, look at the usage numbers for the two content areas to choose what to add next. Keep watching the public pilot's queue, needs reports and usage snapshot. Make no further deployment changes without a separate operator action.
+**Next task:** Operator: after the payment safety PR is merged, apply migration 0019 to the pilot and deploy (0017 and 0018 are live since 2026-11-18). Then Phase 6 completion plan PR 2, USDC deposits on Base Sepolia. Leave `PAYMENTS` unset or off: with it on, Knowledge and verified Execution records need a purchase. The USDC and revenue-share PR (#105) is deployed with migration 0016 (2026-11-18). Scheduled re-checks are live (cron `17 3 * * *`, deployed 2026-11-17). Next Phase 6 step: USDC deposits on Base checked on-chain (Base Sepolia first); the platform's receiving address is needed only before live payments. Parked: a custom domain for the pilot address. Invite a small set of outside operators (the last pilot launch item); their outcome reports are what can verify Execution records. Continue the software troubleshooting expansion (Section 10): further record batches; the long-error search mode is optional. Around 2026-11-30, look at the usage numbers for the two content areas to choose what to add next. Keep watching the public pilot's queue, needs reports and usage snapshot. Make no further deployment changes without a separate operator action.
 
 **Last verified implementation:** PR #86 (remote grouped needs review) passed CI `npm run verify` on its branch (run #216) and on `main` after merge (run #217). PR #83 branch at `247222e` passed Linux `npm run verify`: typechecks, formatting, lint, 920 tests across 56 files and Wrangler dry run. The local Windows mirror also passed 37 focused tests with test-launch adaptations. PR #82 was merged; its earlier verify passed 909 tests across 54 files.
 

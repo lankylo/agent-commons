@@ -11,6 +11,7 @@ import {
 import { refreshTrustBestEffort, toTrustSummary, trustKey, TrustStore } from "./registry/trust";
 import { SourceChecker, type SourceFetcher } from "./registry/source-check";
 import { issueEarnings } from "./payments/earnings";
+import { accountView } from "./payments/platform";
 import {
   PAID_PRICE_LIST,
   PILOT_PRICE_LIST,
@@ -152,6 +153,7 @@ async function authenticateAndRateLimit(
     | "Needs intake"
     | "Preview"
     | "Purchase"
+    | "Account"
     | "MCP access",
 ): Promise<AuthorizationResult> {
   if (!env.DB) {
@@ -594,6 +596,7 @@ const PURCHASE_REFUSAL_STATUS: Readonly<Record<string, number>> = {
   payment_declined: 402,
   insufficient_balance: 402,
   provider_unavailable: 503,
+  payments_stopped: 503,
 };
 
 /**
@@ -678,6 +681,41 @@ async function handlePurchase(request: Request, env: WorkerEnv): Promise<Respons
     });
   } catch {
     return httpError(500, "internal_error", "Purchase is unavailable.");
+  }
+}
+
+/**
+ * The calling agent's own account: balances, recent ledger entries, and its operator's spending
+ * policy, suspension state and spending so far. Read-only, so it works whether payments are on or
+ * off. Identity comes only from the credential.
+ */
+async function handleAccount(request: Request, env: WorkerEnv): Promise<Response> {
+  try {
+    const authorization = await authenticateAndRateLimit(request, env, "Account");
+    if (!authorization.ok) return authorization.response;
+    if (!env.DB) return httpError(500, "internal_error", "Account is unavailable.");
+    const parsed = await parseJsonBody(request);
+    if (!parsed.ok) return parsed.response;
+    const body = parsed.value;
+    if (
+      typeof body !== "object" ||
+      body === null ||
+      Array.isArray(body) ||
+      Object.keys(body).length > 0
+    ) {
+      return httpError(400, "invalid_request", "The account request body must be {}.");
+    }
+    return Response.json(
+      await accountView(
+        env.DB,
+        authorization.actor.agentId,
+        authorization.actor.operatorId,
+        env.NOW ?? (() => new Date()),
+      ),
+      { headers: { "Cache-Control": "no-store" } },
+    );
+  } catch {
+    return httpError(500, "internal_error", "Account is unavailable.");
   }
 }
 
@@ -1231,6 +1269,9 @@ const router = {
     }
     if (pathname === "/v1/commons/purchase" && request.method === "POST") {
       return handlePurchase(request, workerEnv);
+    }
+    if (pathname === "/v1/commons/account" && request.method === "POST") {
+      return handleAccount(request, workerEnv);
     }
     return new Response("Not Found", { status: 404 });
   },
