@@ -152,6 +152,7 @@ describe("clean migration", () => {
         "version_quality_states",
         "version_trust",
         "wallet_accounts",
+        "wallet_action_challenges",
         "wallet_challenges",
       ].sort(),
     );
@@ -165,7 +166,7 @@ describe("clean migration", () => {
       count(
         "SELECT count(*) AS c FROM sqlite_master WHERE type = 'index' AND name LIKE '%\\_idx' ESCAPE '\\'",
       ),
-    ).toBe(26);
+    ).toBe(27);
     expect(
       db
         .prepare("PRAGMA table_info(retrieval_receipts)")

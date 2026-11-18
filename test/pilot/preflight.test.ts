@@ -231,12 +231,12 @@ describe("pilot preflight", () => {
     expect(run(config({ vars: { REVIEWER_TOKEN: TOKEN } })).errors.join("\n")).toMatch(/secret/);
   });
 
-  it("requires contiguous migrations through 0016", () => {
+  it("requires contiguous migrations through 0017", () => {
     const text = config({});
     const base = { configText: text, phase: "initial" as const, forbiddenPolicies };
     expect(preflight({ ...base, migrationFiles }).ok).toBe(true);
     expect(
-      preflight({ ...base, migrationFiles: migrationFiles.filter((f) => !f.startsWith("0016")) })
+      preflight({ ...base, migrationFiles: migrationFiles.filter((f) => !f.startsWith("0017")) })
         .ok,
     ).toBe(false);
     expect(preflight({ ...base, migrationFiles: migrationFiles.slice(0, 10) }).ok).toBe(false);
