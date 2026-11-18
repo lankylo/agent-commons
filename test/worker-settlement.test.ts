@@ -189,15 +189,12 @@ const shareOf = (purchaseRef: string) =>
     )
     .bind(purchaseRef)
     .first<{ entry_id: number }>();
-const balances = async (a: Actor) => ({
-  pending: 0,
-  available: 0,
-  reserved: 0,
-  spent: 0,
-  withdrawn: 0,
-  reversed: 0,
-  ...(await new Ledger(db).balances(a.agentId)).USDC,
-});
+/** USDC buckets of an agent, with zero for an agent that has no USDC entries yet. */
+const balances = async (a: Actor) =>
+  Object.assign(
+    { pending: 0, available: 0, reserved: 0, spent: 0, withdrawn: 0, reversed: 0 },
+    (await new Ledger(db).balances(a.agentId)).USDC,
+  );
 
 describe("settlement", () => {
   it("settles earnings only after the 7-day hold, once", async () => {
