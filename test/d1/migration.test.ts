@@ -151,6 +151,7 @@ describe("clean migration", () => {
         "platform_reward_caps",
         "purchase_entitlements",
         "rate_limit_windows",
+        "reconciliation_runs",
         "retrieval_receipts",
         "source_checks",
         "spending_suspensions",

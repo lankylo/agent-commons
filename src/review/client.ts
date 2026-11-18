@@ -36,6 +36,7 @@ export const REMOTE_REVIEW_USAGE = `Usage (environment: COMMONS_REVIEW_URL, COMM
   payouts
   payout-sent <requestId> <txHash>
   payout-reject <requestId> <reason>
+  reconcile
 `;
 
 const LOCAL_HOSTS = new Set(["localhost", "127.0.0.1", "[::1]"]);
@@ -78,6 +79,8 @@ function parse(argv: readonly string[]): ParsedCommand | null {
         : null;
     case "payouts":
       return a === undefined ? { op: "payouts", body: {} } : null;
+    case "reconcile":
+      return a === undefined ? { op: "reconcile", body: {} } : null;
     case "payout-sent":
     case "payout-reject": {
       const requestId = Number(a);

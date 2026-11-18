@@ -13,6 +13,7 @@ import { SourceChecker, type SourceFetcher } from "./registry/source-check";
 import { issueEarnings } from "./payments/earnings";
 import { accountView } from "./payments/platform";
 import { settleDue } from "./payments/settlement";
+import { reconcile, recordRun } from "./payments/reconcile";
 import { ChainReader, httpRpc, type RpcCall } from "./payments/chain";
 import { depositConfigOf } from "./payments/config";
 import { MIN_PAYOUT_MINOR, PayoutService } from "./payments/payouts";
@@ -1502,6 +1503,32 @@ const worker = {
       await settleDue(workerEnv.DB, workerEnv.NOW);
     } catch {
       // Nothing settles (for example while payments are stopped); it is retried next run.
+    }
+    try {
+      const config = depositConfigOf(workerEnv);
+      const report = await reconcile(
+        workerEnv.DB,
+        workerEnv.NOW,
+        config.mode === "on"
+          ? {
+              network: config.network,
+              platformAddress: config.address,
+              reader: new ChainReader(workerEnv.CHAIN_RPC ?? httpRpc(config.rpcUrl)),
+            }
+          : undefined,
+      );
+      await recordRun(workerEnv.DB, report, "scheduled");
+      if (!report.ok) {
+        // Aggregate codes only, for Workers logs and alerting; no identities or addresses.
+        console.warn(
+          JSON.stringify({
+            event: "reconciliation_alert",
+            alerts: report.alerts.map((a) => ({ code: a.code, severity: a.severity })),
+          }),
+        );
+      }
+    } catch {
+      // Monitoring never breaks the scheduled run; the next run tries again.
     }
   },
 } satisfies ExportedHandler;

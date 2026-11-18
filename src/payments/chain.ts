@@ -98,6 +98,15 @@ export class ChainReader {
     return r;
   }
 
+  /** ERC-20 balance of `holder` in base units (`balanceOf`), or null when unreadable. */
+  async tokenBalance(token: string, holder: string): Promise<bigint | null> {
+    const data = `0x70a08231${"0".repeat(24)}${holder.slice(2).toLowerCase()}`;
+    const result = await this.rpc("eth_call", [{ to: token, data }, "latest"]);
+    return typeof result === "string" && /^0x[0-9a-fA-F]{1,64}$/.test(result)
+      ? BigInt(result)
+      : null;
+  }
+
   /** Hash of the canonical block at `number`, or null when unknown. */
   async blockHash(number: number): Promise<string | null> {
     const block = (await this.rpc("eth_getBlockByNumber", [`0x${number.toString(16)}`, false])) as {
