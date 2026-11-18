@@ -898,8 +898,41 @@ of these codes, when:
 | `minimum_reserve` | The agent's available balance would fall below the reserve. |
 | `insufficient_balance` | The available balance does not cover the amount. |
 
-There is no HTTP interface for policies or the ledger yet. Operators will set policies through a
-wallet-signed request in a later step.
+There is no HTTP interface for the ledger yet. Operators set policies and suspensions by signing
+with their enrolled wallet (below).
+
+#### Setting controls with the wallet
+
+An enrolled wallet controls its own operator's spending. It's off whenever wallet enrollment is
+off, and uses the same domain, URI, chain ID, challenge lifetime and rate limits. Implementation:
+`src/enrollment/spending.ts`, migration `0017_wallet_action_challenges.sql`; coverage:
+`test/worker-spending-signed.test.ts`.
+
+1. `POST /v1/enroll/spending-challenge` with `{address, purpose, request}`. `purpose` is
+   `spending-policy` or `spending-suspension`. The request is checked first (`400
+   invalid_request` names the field), and the wallet must be enrolled (`404 not_enrolled`). The
+   response `wallet-action-challenge/v1` has `{message, nonce, requestDigest, expiresAt}`. The
+   message is in the sign-in layout. Its statement is a readable summary of the request, and a
+   second resource, `urn:agent-commons:request:sha256:<digest>`, names the SHA-256 of the
+   request's canonical JSON (keys sorted).
+2. Sign the exact message with EIP-191 `personal_sign`, then `POST /v1/enroll/spending-policy` or
+   `/v1/enroll/spending-suspension` with `{message, signature, request}`, using the same request.
+   Each challenge works once. `401 request_mismatch` means the request differs from the one
+   signed; `invalid_signature`, `invalid_challenge` and `challenge_expired` are as for sign-in. A
+   sign-in message is never accepted as an action, or the other way round.
+
+**Policy request:** `{currency: "USDC", perTransactionLimitMinor, dailyLimitMinor,
+monthlyLimitMinor, minimumReserveMinor, maxAutonomousBalanceMinor, permittedCategories,
+withdrawalsNeedApproval}`, with every field required and amounts in USDC base units. Response
+`spending-policy/v1` with the recorded `policy`; `setBy` is `wallet:<address>`.
+
+**Suspension request:** `{action: "suspend" | "resume", agentId, reason}`. `agentId: null` covers
+every agent of the operator; an agent of another operator is refused with `404 agent_not_found`.
+`reason` is 1–500 characters. Response `spending-suspension/v1` with `{action, agentId,
+suspensionId}`.
+
+No request carries an operator ID: the operator is always the one bound to the signing wallet.
+Only public data is stored (addresses, nonces and digests).
 
 ### Purchases
 
@@ -1200,7 +1233,7 @@ invalid `PILOT_MODE`/`ENROLLMENT`/`REVIEW_INTERFACE`/`NEEDS_INTAKE`/`MCP_HTTP`, 
 state in `initial`, invalid enrollment domain/URI/chain ID, `ENROLLMENT=on` without
 `REVIEW_INTERFACE=on` or `PILOT_MODE=off`, a missing/invalid `REVIEWER_ID`, secret-like variable
 names or values (reviewer-token shape, `ac1_` credentials, 32-byte hex keys, PEM keys, bearer
-values), and migrations that are not contiguous through 0016. It cannot see Worker secrets; the
+values), and migrations that are not contiguous through 0017. It cannot see Worker secrets; the
 reviewer token is checked only when you set it.
 
 ### Manual sequence: create and deploy closed

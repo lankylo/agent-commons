@@ -13,6 +13,7 @@
  * returned once with `Cache-Control: no-store` and never logged or placed in URLs.
  * Only public wallet addresses are stored: no private keys, seed phrases, signatures, GitHub
  * identity, payment credentials or KYC data. Smart-contract wallets (ERC-1271) are unsupported.
+ * An enrolled wallet also signs its operator's spending controls (see `./spending.ts`).
  */
 import { CredentialService } from "../identity/credentials";
 import type { AgentId, OperatorId } from "../identity/types";
@@ -26,6 +27,11 @@ import {
   recoverPersonalSignAddress,
   type ChallengePurpose,
 } from "./siwe";
+import {
+  handleSpendingChallenge,
+  handleSpendingPolicy,
+  handleSpendingSuspension,
+} from "./spending";
 
 export const ENROLL_PATH_PREFIX = "/v1/enroll/";
 
@@ -66,10 +72,15 @@ export interface EnrollmentConfig {
 }
 
 const NO_STORE = { "Cache-Control": "no-store" };
-function reply(status: number, body: unknown, extra?: Record<string, string>): Response {
+export function reply(status: number, body: unknown, extra?: Record<string, string>): Response {
   return Response.json(body, { status, headers: { ...NO_STORE, ...extra } });
 }
-function fail(status: number, code: string, message: string, extra?: Record<string, string>) {
+export function fail(
+  status: number,
+  code: string,
+  message: string,
+  extra?: Record<string, string>,
+) {
   return reply(status, { error: { code, message } }, extra);
 }
 
@@ -144,13 +155,13 @@ export function resolveEnrollmentConfig(env: EnrollmentEnv): EnrollmentConfig | 
 const toHex = (bytes: Uint8Array): string =>
   Array.from(bytes, (b) => b.toString(16).padStart(2, "0")).join("");
 
-async function sha256Hex(value: string): Promise<string> {
+export async function sha256Hex(value: string): Promise<string> {
   return toHex(
     new Uint8Array(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(value))),
   );
 }
 
-async function readBody(
+export async function readBody(
   request: Request,
   fields: readonly string[],
 ): Promise<Record<string, unknown> | Response> {
@@ -178,14 +189,14 @@ async function readBody(
   return value as Record<string, unknown>;
 }
 
-interface Ctx {
+export interface Ctx {
   readonly db: D1Database;
   readonly now: () => Date;
   readonly config: EnrollmentConfig;
   readonly limiter: RateLimitService;
 }
 
-async function limited(ctx: Ctx, key: string, limit: number): Promise<Response | null> {
+export async function limited(ctx: Ctx, key: string, limit: number): Promise<Response | null> {
   const d = await ctx.limiter.checkKey(key, limit);
   if (d.allowed) return null;
   if (d.unavailable) {
@@ -198,7 +209,7 @@ async function limited(ctx: Ctx, key: string, limit: number): Promise<Response |
 }
 
 /** Per-client and global bounds applied before any body parsing or signature work. */
-async function limitClient(ctx: Ctx, request: Request): Promise<Response | null> {
+export async function limitClient(ctx: Ctx, request: Request): Promise<Response | null> {
   const ip = request.headers.get("CF-Connecting-IP") ?? "unknown";
   // Store only a digest of the client address in the counter key.
   const ipKey = `enroll:ip:${(await sha256Hex(`agent-commons/enroll-ip:${ip}`)).slice(0, 32)}`;
@@ -328,12 +339,12 @@ async function verifyAndConsume(
   return { address };
 }
 
-interface Account {
+export interface Account {
   readonly operator_id: string;
   readonly agent_id: string;
 }
 
-const findAccount = (db: D1Database, address: string) =>
+export const findAccount = (db: D1Database, address: string) =>
   db
     .prepare("SELECT operator_id, agent_id FROM wallet_accounts WHERE address = ?")
     .bind(address)
@@ -484,6 +495,12 @@ export async function handleEnrollment(request: Request, env: EnrollmentEnv): Pr
         return await handleEnroll(ctx, request);
       case `${ENROLL_PATH_PREFIX}rotate`:
         return await handleRotate(ctx, request);
+      case `${ENROLL_PATH_PREFIX}spending-challenge`:
+        return await handleSpendingChallenge(ctx, request);
+      case `${ENROLL_PATH_PREFIX}spending-policy`:
+        return await handleSpendingPolicy(ctx, request);
+      case `${ENROLL_PATH_PREFIX}spending-suspension`:
+        return await handleSpendingSuspension(ctx, request);
       default:
         return fail(404, "not_found", "Not found.");
     }

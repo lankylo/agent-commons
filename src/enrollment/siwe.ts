@@ -145,6 +145,84 @@ export function parseSiweMessage(message: unknown): SiweFields | null {
   };
 }
 
+/** Operator actions an enrolled wallet can sign (Phase 6 spending controls). */
+export type ActionPurpose = "spending-policy" | "spending-suspension";
+export const ACTION_PURPOSES: readonly ActionPurpose[] = ["spending-policy", "spending-suspension"];
+const REQUEST_PREFIX = "urn:agent-commons:request:sha256:";
+const MAX_STATEMENT_CHARS = 300;
+
+export interface ActionFields extends Omit<SiweFields, "purpose"> {
+  readonly purpose: ActionPurpose;
+  /** SHA-256 (hex) of the canonical JSON of the exact request being authorized. */
+  readonly requestDigest: string;
+}
+
+/**
+ * Build the exact ERC-4361 message for an operator action. Same layout as sign-in, but the
+ * statement is a server-written, human-readable summary of the request (one line, at most 300
+ * characters), and a second resource names the request digest.
+ */
+export function buildActionMessage(f: Omit<ActionFields, "version">): string {
+  if (/[\r\n]/.test(f.statement) || f.statement.length > MAX_STATEMENT_CHARS) {
+    throw new Error("action statement must be one line of at most 300 characters");
+  }
+  return [
+    `${f.domain} wants you to sign in with your Ethereum account:`,
+    toChecksumAddress(f.address),
+    "",
+    f.statement,
+    "",
+    `URI: ${f.uri}`,
+    "Version: 1",
+    `Chain ID: ${f.chainId}`,
+    `Nonce: ${f.nonce}`,
+    `Issued At: ${f.issuedAt}`,
+    `Expiration Time: ${f.expirationTime}`,
+    "Resources:",
+    `- ${RESOURCE_PREFIX}${f.purpose}`,
+    `- ${REQUEST_PREFIX}${f.requestDigest}`,
+  ].join("\n");
+}
+
+const escapeRe = (s: string) => s.replace(/[.:-]/g, "\\$&");
+const ACTION_RE = new RegExp(
+  MESSAGE_RE.source.replace(
+    "(?<purpose>enroll|rotate)$",
+    () =>
+      `(?<purpose>spending-policy|spending-suspension)\\n- ${escapeRe(REQUEST_PREFIX)}` +
+      "(?<requestDigest>[0-9a-f]{64})$",
+  ),
+);
+
+/**
+ * Parse an operator-action message in the server's fixed layout. The statement is not checked
+ * here: callers compare the whole message with the digest stored when the challenge was issued.
+ */
+export function parseActionMessage(message: unknown): ActionFields | null {
+  if (typeof message !== "string" || encoder.encode(message).length > MAX_MESSAGE_BYTES) {
+    return null;
+  }
+  const g = ACTION_RE.exec(message)?.groups;
+  if (!g) return null;
+  if (toChecksumAddress(g.address!) !== g.address) return null;
+  if (!ISO_RE.test(g.issuedAt!) || !ISO_RE.test(g.expirationTime!)) return null;
+  const chainId = Number(g.chainId);
+  if (!Number.isSafeInteger(chainId)) return null;
+  return {
+    domain: g.domain!,
+    address: g.address!,
+    statement: g.statement!,
+    uri: g.uri!,
+    version: "1",
+    chainId,
+    nonce: g.nonce!,
+    issuedAt: g.issuedAt!,
+    expirationTime: g.expirationTime!,
+    purpose: g.purpose as ActionPurpose,
+    requestDigest: g.requestDigest!,
+  };
+}
+
 /** EIP-191 version 0x45 ("personal_sign") digest of a UTF-8 message. */
 export function personalMessageHash(message: string): Uint8Array {
   const body = encoder.encode(message);

@@ -59,7 +59,8 @@ const amountOk = (n: unknown) =>
 const textOk = (s: unknown, max: number) =>
   typeof s === "string" && s.trim().length > 0 && s.length <= max;
 
-function invalidPolicyField(p: SpendingPolicyInput): string | null {
+/** The first invalid field of a policy, or null when it is valid. */
+export function invalidPolicyField(p: SpendingPolicyInput): string | null {
   if (!textOk(p.operatorId, 64)) return "operatorId";
   if (typeof p.currency !== "string" || !CURRENCY.test(p.currency)) return "currency";
   for (const field of [
