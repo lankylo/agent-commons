@@ -65,6 +65,9 @@ const ALLOWED_VARS = new Set([
   "EXECUTION_DOMAIN_POLICY_JSON",
   "KNOWLEDGE_PERMISSION_POLICY_JSON",
   "PAYMENTS",
+  "DEPOSITS",
+  "DEPOSIT_ADDRESS",
+  "BASE_RPC_URL",
 ]);
 const SECRET_KEY =
   /token|secret|password|passwd|private|api[_-]?key|credential|signature|mnemonic|seed/i;
@@ -75,7 +78,7 @@ const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const BUCKET = /^[a-z0-9][a-z0-9-]{1,61}[a-z0-9]$/;
 const ON_OFF = new Set(["on", "off"]);
 const MIGRATION_FILE = /^(\d{4})_[a-z0-9_]+\.sql$/;
-const REQUIRED_MIGRATIONS = 19;
+const REQUIRED_MIGRATIONS = 20;
 
 function dropTrailingCommas(text: string): string {
   let out = "";
@@ -265,6 +268,22 @@ function checkSettings(vars: Record<string, unknown>, phase: PilotPhase, errors:
   const payments = vars["PAYMENTS"];
   if (payments !== undefined && payments !== "off" && payments !== "sandbox") {
     errors.push('vars.PAYMENTS: must be "off" or "sandbox" when present');
+  }
+  // Deposits are optional; only Base Sepolia test USDC is supported, and only with sandbox payments.
+  const deposits = vars["DEPOSITS"];
+  if (deposits !== undefined && deposits !== "off") {
+    if (deposits !== "base-sepolia") {
+      errors.push('vars.DEPOSITS: must be "off" or "base-sepolia" when present');
+    }
+    if (payments !== "sandbox") errors.push('vars.DEPOSITS: needs PAYMENTS "sandbox"');
+    const address = vars["DEPOSIT_ADDRESS"];
+    if (typeof address !== "string" || !/^0x[0-9a-fA-F]{40}$/.test(address)) {
+      errors.push("vars.DEPOSIT_ADDRESS: must be the platform's public 0x address");
+    }
+  }
+  const rpc = vars["BASE_RPC_URL"];
+  if (rpc !== undefined && (typeof rpc !== "string" || !rpc.startsWith("https://"))) {
+    errors.push("vars.BASE_RPC_URL: must be an https:// URL when present");
   }
   const on = (k: string) => vars[k] === "on";
 

@@ -27,6 +27,9 @@
   // Purchases: absent or "PAYMENTS": "off" disables them and every record stays free; "sandbox"
   // enables sandbox payments only (no real money) and the USDC prices (0.01 Knowledge, 0.05
   // Execution), so records then need a purchase.
+  // USDC deposits: absent or "DEPOSITS": "off" disables them; "base-sepolia" (test USDC only, needs
+  // PAYMENTS "sandbox") also needs "DEPOSIT_ADDRESS": the platform's public 0x address, never a
+  // key. "BASE_RPC_URL" (https) is optional.
   "vars": {
     // Initial deployment: contributions and feedback closed; enrollment, review, needs closed.
     "PILOT_MODE": "read-only",
