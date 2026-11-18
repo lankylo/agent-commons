@@ -42,6 +42,7 @@ import {
 import { handleReview, REVIEW_PATH_PREFIX, type ReviewEnv } from "./review/routes";
 import { ENROLL_PATH_PREFIX, handleEnrollment, type EnrollmentEnv } from "./enrollment/routes";
 import { handleEnrollmentPage } from "./enrollment/page";
+import { handleOperatorPage } from "./enrollment/operator-page";
 import { handleMcpHttp, MCP_PATH, type McpHttpEnv } from "./mcp/http";
 import { handleOnboarding, withOnboardingHint } from "./onboarding/document";
 
@@ -1393,6 +1394,8 @@ const router = {
     }
     const enrollmentPage = handleEnrollmentPage(request, workerEnv);
     if (enrollmentPage) return enrollmentPage;
+    const operatorPage = handleOperatorPage(request, workerEnv);
+    if (operatorPage) return operatorPage;
     const onboarding = handleOnboarding(request, workerEnv);
     if (onboarding) return onboarding;
     // Operator-only review: separate prefix, reviewer token only, never agent credentials.
