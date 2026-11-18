@@ -24,6 +24,10 @@ export const REMOTE_REVIEW_USAGE = `Usage (environment: COMMONS_REVIEW_URL, COMM
   usage
   recheck [limit]
   recheck <contributionId> <version>
+  ledger
+  payments
+  payments <stop|start> <reason>
+  payments cap <usdcBaseUnits> <reason>
 `;
 
 const LOCAL_HOSTS = new Set(["localhost", "127.0.0.1", "[::1]"]);
@@ -39,6 +43,18 @@ function parse(argv: readonly string[]): ParsedCommand | null {
       return a === undefined ? { op: "usage", body: {} } : null;
     case "capacity":
       return a === undefined ? { op: "capacity", body: {} } : null;
+    case "ledger":
+      return a === undefined ? { op: "ledger", body: {} } : null;
+    case "payments": {
+      if (a === undefined) return { op: "payments", body: {} };
+      if ((a === "stop" || a === "start") && b && c === undefined) {
+        return { op: "payments", body: { action: a, reason: b } };
+      }
+      const capMinor = Number(b);
+      return a === "cap" && Number.isSafeInteger(capMinor) && c && d === undefined
+        ? { op: "payments", body: { action: "cap", capMinor, reason: c } }
+        : null;
+    }
     case "queue": {
       if (c !== undefined) return null;
       const body: Record<string, unknown> = {};

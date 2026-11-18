@@ -12,11 +12,13 @@
  * pilot can enable needs intake with a remote operator review path. `usage` returns aggregate,
  * identity-free pilot counts (`PilotUsage.snapshot`). `recheck` runs one bounded batch of
  * Knowledge source re-checks (`SourceChecker.run`), and `inspect` also returns the version's
- * provenance, derived trust and latest source checks.
+ * provenance, derived trust and latest source checks. `payments` reads or changes the platform
+ * payment controls (emergency stop, reward cap) and `ledger` returns the platform ledger summary.
  */
 import type { RegistryEnv } from "../registry/creation";
 import { NEEDS_REVIEW_MAX_GROUPS, NeedsIntake } from "../registry/needs";
 import { PilotUsage } from "../registry/usage";
+import { PlatformControls, platformSummary } from "../payments/platform";
 import {
   DEFAULT_QUEUE_PAGE,
   MAX_QUEUE_PAGE,
@@ -374,6 +376,46 @@ async function needs(db: D1Database, now: () => Date, body: Record<string, unkno
   return reply(200, await new NeedsIntake(db, { now }).review(limit as number));
 }
 
+/**
+ * Platform payment controls. `{}` returns the state; `{action: "stop" | "start", reason}` stops or
+ * restarts payments; `{action: "cap", capMinor, reason}` sets the verification-reward cap.
+ */
+async function payments(
+  db: D1Database,
+  now: () => Date,
+  reviewerId: string,
+  body: Record<string, unknown>,
+): Promise<Response> {
+  const controls = new PlatformControls(db, now);
+  const state = async () =>
+    reply(200, { schemaVersion: "payment-controls/v1", ...(await controls.state()) });
+  if (Object.keys(body).length === 0) return state();
+  const setBy = `reviewer:${reviewerId}`;
+  if (body.action === "stop" || body.action === "start") {
+    if (unknownFields(body, ["action", "reason"])) {
+      return fail(400, "invalid_request", "Only action and reason are accepted.");
+    }
+    if (!(await controls.set(body.action, String(body.reason ?? ""), setBy))) {
+      return fail(400, "invalid_request", "reason must be 1 to 500 characters.");
+    }
+    return state();
+  }
+  if (body.action === "cap") {
+    if (unknownFields(body, ["action", "capMinor", "reason"])) {
+      return fail(400, "invalid_request", "Only action, capMinor and reason are accepted.");
+    }
+    if (!(await controls.setRewardCap(Number(body.capMinor), String(body.reason ?? ""), setBy))) {
+      return fail(
+        400,
+        "invalid_request",
+        "capMinor must be a non-negative integer of USDC base units; reason 1 to 500 characters.",
+      );
+    }
+    return state();
+  }
+  return fail(400, "invalid_request", "action must be stop, start or cap.");
+}
+
 type Enablement = "disabled" | "enabled" | "invalid";
 function enablement(value: unknown): Enablement {
   if (value === undefined || value === "" || value === "off") return "disabled";
@@ -400,7 +442,19 @@ export async function handleReview(request: Request, env: ReviewEnv): Promise<Re
   }
   if (request.method !== "POST") return fail(405, "method_not_allowed", "Use POST.");
   const op = new URL(request.url).pathname.slice(REVIEW_PATH_PREFIX.length);
-  if (!["queue", "inspect", "decide", "capacity", "needs", "usage", "recheck"].includes(op)) {
+  if (
+    ![
+      "queue",
+      "inspect",
+      "decide",
+      "capacity",
+      "needs",
+      "usage",
+      "recheck",
+      "payments",
+      "ledger",
+    ].includes(op)
+  ) {
     return fail(404, "not_found", "Not found.");
   }
   if (!env.DB || !env.CONTENT_BUCKET) {
@@ -417,6 +471,11 @@ export async function handleReview(request: Request, env: ReviewEnv): Promise<Re
       if (unknownFields(body, [])) return fail(400, "invalid_request", "No fields are accepted.");
       return reply(200, await new PilotUsage(env.DB, now).snapshot());
     }
+    if (op === "ledger") {
+      if (unknownFields(body, [])) return fail(400, "invalid_request", "No fields are accepted.");
+      return reply(200, await platformSummary(env.DB, now));
+    }
+    if (op === "payments") return await payments(env.DB, now, env.REVIEWER_ID, body);
     if (op === "queue") return await queue(reviewer, body);
     if (op === "inspect") return await inspect(reviewer, env.DB, now, body);
     if (op === "recheck") return await recheck(env.DB, now, env.SOURCE_FETCHER, body);

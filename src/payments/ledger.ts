@@ -58,6 +58,8 @@ export const LEDGER_REFUSALS = [
   "earning_test_not_met",
   "reward_not_eligible",
   "reward_limit",
+  "reward_cap_reached",
+  "payments_stopped",
   "spending_suspended",
   "spending_policy_missing",
   "category_not_permitted",

@@ -141,6 +141,8 @@ describe("clean migration", () => {
         "operator_spending_policies",
         "operators",
         "pilot_capacity_places",
+        "platform_payment_controls",
+        "platform_reward_caps",
         "purchase_entitlements",
         "rate_limit_windows",
         "retrieval_receipts",
