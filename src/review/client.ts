@@ -28,6 +28,9 @@ export const REMOTE_REVIEW_USAGE = `Usage (environment: COMMONS_REVIEW_URL, COMM
   payments
   payments <stop|start> <reason>
   payments cap <usdcBaseUnits> <reason>
+  settle [limit]
+  refund <purchaseRef> <reason>
+  reverse <ledgerEntryId> <reason>
 `;
 
 const LOCAL_HOSTS = new Set(["localhost", "127.0.0.1", "[::1]"]);
@@ -45,6 +48,22 @@ function parse(argv: readonly string[]): ParsedCommand | null {
       return a === undefined ? { op: "capacity", body: {} } : null;
     case "ledger":
       return a === undefined ? { op: "ledger", body: {} } : null;
+    case "settle": {
+      if (b !== undefined) return null;
+      if (a === undefined) return { op: "settle", body: {} };
+      const limit = Number(a);
+      return Number.isSafeInteger(limit) ? { op: "settle", body: { limit } } : null;
+    }
+    case "refund":
+      return a && b && c === undefined
+        ? { op: "refund", body: { purchaseRef: a, reason: b } }
+        : null;
+    case "reverse": {
+      const entryId = Number(a);
+      return Number.isSafeInteger(entryId) && b && c === undefined
+        ? { op: "reverse", body: { entryId, reason: b } }
+        : null;
+    }
     case "payments": {
       if (a === undefined) return { op: "payments", body: {} };
       if ((a === "stop" || a === "start") && b && c === undefined) {

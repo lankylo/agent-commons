@@ -19,6 +19,7 @@ import type { RegistryEnv } from "../registry/creation";
 import { NEEDS_REVIEW_MAX_GROUPS, NeedsIntake } from "../registry/needs";
 import { PilotUsage } from "../registry/usage";
 import { PlatformControls, platformSummary } from "../payments/platform";
+import { refundPurchase, reverseEarning, settleDue } from "../payments/settlement";
 import {
   DEFAULT_QUEUE_PAGE,
   MAX_QUEUE_PAGE,
@@ -416,6 +417,67 @@ async function payments(
   return fail(400, "invalid_request", "action must be stop, start or cap.");
 }
 
+const ADJUSTMENT_STATUS: Readonly<Record<string, number>> = {
+  invalid_request: 400,
+  not_found: 404,
+  already_done: 409,
+  insufficient_balance: 409,
+  payments_stopped: 503,
+};
+
+/**
+ * `settle` `{limit?}` settles due earnings now (the scheduled trigger also does this);
+ * `refund` `{purchaseRef, reason}` refunds a purchase; `reverse` `{entryId, reason}` reverses
+ * what remains of an earning or reward.
+ */
+async function adjust(
+  op: "settle" | "refund" | "reverse",
+  db: D1Database,
+  now: () => Date,
+  reviewerId: string,
+  body: Record<string, unknown>,
+): Promise<Response> {
+  const setBy = `reviewer:${reviewerId}`;
+  if (op === "settle") {
+    if (unknownFields(body, ["limit"]))
+      return fail(400, "invalid_request", "Only limit is accepted.");
+    const limit = body.limit ?? 200;
+    if (!Number.isSafeInteger(limit) || (limit as number) < 1 || (limit as number) > 500) {
+      return fail(400, "invalid_request", "limit must be an integer from 1 to 500.");
+    }
+    try {
+      return reply(200, {
+        schemaVersion: "settlement-run/v1",
+        ...(await settleDue(db, now, limit as number)),
+      });
+    } catch (error) {
+      const message = error instanceof Error ? `${error.message} ${String(error.cause ?? "")}` : "";
+      if (/payments_stopped/.test(message)) {
+        return fail(503, "payments_stopped", "Payments are stopped.");
+      }
+      throw error;
+    }
+  }
+  const outcome =
+    op === "refund"
+      ? unknownFields(body, ["purchaseRef", "reason"])
+        ? ({ ok: false, code: "invalid_request" } as const)
+        : await refundPurchase(
+            db,
+            String(body.purchaseRef ?? ""),
+            String(body.reason ?? ""),
+            setBy,
+            now,
+          )
+      : unknownFields(body, ["entryId", "reason"])
+        ? ({ ok: false, code: "invalid_request" } as const)
+        : await reverseEarning(db, Number(body.entryId), String(body.reason ?? ""), setBy, now);
+  if (!outcome.ok) {
+    return fail(ADJUSTMENT_STATUS[outcome.code] ?? 400, outcome.code, `The ${op} was not made.`);
+  }
+  return reply(200, { schemaVersion: "ledger-adjustment/v1", kind: op, entries: outcome.entries });
+}
+
 type Enablement = "disabled" | "enabled" | "invalid";
 function enablement(value: unknown): Enablement {
   if (value === undefined || value === "" || value === "off") return "disabled";
@@ -453,6 +515,9 @@ export async function handleReview(request: Request, env: ReviewEnv): Promise<Re
       "recheck",
       "payments",
       "ledger",
+      "settle",
+      "refund",
+      "reverse",
     ].includes(op)
   ) {
     return fail(404, "not_found", "Not found.");
@@ -476,6 +541,9 @@ export async function handleReview(request: Request, env: ReviewEnv): Promise<Re
       return reply(200, await platformSummary(env.DB, now));
     }
     if (op === "payments") return await payments(env.DB, now, env.REVIEWER_ID, body);
+    if (op === "settle" || op === "refund" || op === "reverse") {
+      return await adjust(op, env.DB, now, env.REVIEWER_ID, body);
+    }
     if (op === "queue") return await queue(reviewer, body);
     if (op === "inspect") return await inspect(reviewer, env.DB, now, body);
     if (op === "recheck") return await recheck(env.DB, now, env.SOURCE_FETCHER, body);

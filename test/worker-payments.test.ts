@@ -436,7 +436,9 @@ describe("earnings", () => {
 
     const earningId = earned.entries[0]!.entryId;
     const settle = (amount: number) =>
-      ledger.append([entry(owner, "settlement", amount, { relatedEntryId: earningId })]);
+      ledgerAt(START + 7 * DAY).append([
+        entry(owner, "settlement", amount, { relatedEntryId: earningId }),
+      ]);
     expect(refusal(await settle(100))).toBe("ok");
     expect(
       refusal(await ledger.append([entry(owner, "reversal", 100, { relatedEntryId: earningId })])),
