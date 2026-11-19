@@ -61,14 +61,18 @@ export type RpcCall = (method: string, params: readonly unknown[]) => Promise<un
 
 export class RpcError extends Error {}
 
-export function httpRpc(url: string, fetchImpl: typeof fetch = fetch): RpcCall {
+export function httpRpc(
+  url: string,
+  fetchImpl: typeof fetch = (input, init) => fetch(input, init),
+): RpcCall {
   let id = 0;
   return async (method, params) => {
+    // Workers reject redirect: "error"; "manual" returns a 3xx, which fails the ok check below.
     const response = await fetchImpl(url, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ jsonrpc: "2.0", id: ++id, method, params }),
-      redirect: "error",
+      redirect: "manual",
     });
     if (!response.ok) throw new RpcError(`rpc http ${response.status}`);
     const body = (await response.json()) as { result?: unknown; error?: unknown };
