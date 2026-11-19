@@ -109,4 +109,6 @@ Record the run (date, transaction hashes, reconcile output) in `project.md`.
   once. Refunds and reversals still work.
 - **Disputes and fake reports:** use `refund` and `reverse`. Every adjustment is recorded with
   its reason.
-- **Later:** Telegram alerts built on the reconciliation report (owner request).
+- **Telegram:** with notifications on, new payouts to send, validations and reviews arrive every
+  15 minutes, and the daily summary carries the reconciliation result (`docs/api.md`, "Owner
+  notifications").

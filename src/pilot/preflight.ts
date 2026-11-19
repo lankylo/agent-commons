@@ -68,6 +68,8 @@ const ALLOWED_VARS = new Set([
   "DEPOSITS",
   "DEPOSIT_ADDRESS",
   "BASE_RPC_URL",
+  "NOTIFICATIONS",
+  "TELEGRAM_CHAT_ID",
 ]);
 const SECRET_KEY =
   /token|secret|password|passwd|private|api[_-]?key|credential|signature|mnemonic|seed/i;
@@ -78,7 +80,7 @@ const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const BUCKET = /^[a-z0-9][a-z0-9-]{1,61}[a-z0-9]$/;
 const ON_OFF = new Set(["on", "off"]);
 const MIGRATION_FILE = /^(\d{4})_[a-z0-9_]+\.sql$/;
-const REQUIRED_MIGRATIONS = 23;
+const REQUIRED_MIGRATIONS = 24;
 
 function dropTrailingCommas(text: string): string {
   let out = "";
@@ -284,6 +286,18 @@ function checkSettings(vars: Record<string, unknown>, phase: PilotPhase, errors:
   const rpc = vars["BASE_RPC_URL"];
   if (rpc !== undefined && (typeof rpc !== "string" || !rpc.startsWith("https://"))) {
     errors.push("vars.BASE_RPC_URL: must be an https:// URL when present");
+  }
+  // Telegram notifications: the bot token is a Worker secret, never a variable.
+  const notifications = vars["NOTIFICATIONS"];
+  if (notifications !== undefined && notifications !== "off" && notifications !== "telegram") {
+    errors.push('vars.NOTIFICATIONS: must be "off" or "telegram" when present');
+  }
+  const chatId = vars["TELEGRAM_CHAT_ID"];
+  if (chatId !== undefined && (typeof chatId !== "string" || !/^-?\d{1,20}$/.test(chatId))) {
+    errors.push("vars.TELEGRAM_CHAT_ID: must be a numeric Telegram chat ID");
+  }
+  if (notifications === "telegram" && chatId === undefined) {
+    errors.push('vars.TELEGRAM_CHAT_ID: required when NOTIFICATIONS is "telegram"');
   }
   const on = (k: string) => vars[k] === "on";
 

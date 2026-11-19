@@ -231,12 +231,12 @@ describe("pilot preflight", () => {
     expect(run(config({ vars: { REVIEWER_TOKEN: TOKEN } })).errors.join("\n")).toMatch(/secret/);
   });
 
-  it("requires contiguous migrations through 0023", () => {
+  it("requires contiguous migrations through 0024", () => {
     const text = config({});
     const base = { configText: text, phase: "initial" as const, forbiddenPolicies };
     expect(preflight({ ...base, migrationFiles }).ok).toBe(true);
     expect(
-      preflight({ ...base, migrationFiles: migrationFiles.filter((f) => !f.startsWith("0023")) })
+      preflight({ ...base, migrationFiles: migrationFiles.filter((f) => !f.startsWith("0024")) })
         .ok,
     ).toBe(false);
     expect(preflight({ ...base, migrationFiles: migrationFiles.slice(0, 10) }).ok).toBe(false);
@@ -272,6 +272,18 @@ describe("pilot preflight", () => {
     expect(errors({ PAYMENTS: "off" })).toMatch(/DEPOSITS: needs PAYMENTS/);
     expect(errors({ DEPOSIT_ADDRESS: "not-an-address" })).toMatch(/DEPOSIT_ADDRESS/);
     expect(errors({ BASE_RPC_URL: "http://example.com" })).toMatch(/BASE_RPC_URL/);
+  });
+
+  it("accepts Telegram notifications with a chat ID, and never the bot token as a variable", () => {
+    const vars = { ...OPEN, NOTIFICATIONS: "telegram", TELEGRAM_CHAT_ID: "123456789" };
+    expect(run(config({ vars }), "pilot").ok).toBe(true);
+    expect(run(config({ vars: { ...OPEN, NOTIFICATIONS: "off" } }), "pilot").ok).toBe(true);
+    const errors = (v: Record<string, unknown>) =>
+      run(config({ vars: { ...vars, ...v } }), "pilot").errors.join("\n");
+    expect(errors({ NOTIFICATIONS: "email" })).toMatch(/NOTIFICATIONS/);
+    expect(errors({ TELEGRAM_CHAT_ID: "@owner" })).toMatch(/TELEGRAM_CHAT_ID/);
+    expect(errors({ TELEGRAM_CHAT_ID: undefined })).toMatch(/TELEGRAM_CHAT_ID: required/);
+    expect(errors({ TELEGRAM_BOT_TOKEN: "123456:abc" })).toMatch(/secret-like setting name/);
   });
 
   it("rejects unparseable configuration", () => {

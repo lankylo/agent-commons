@@ -30,6 +30,10 @@
   // USDC deposits: absent or "DEPOSITS": "off" disables them; "base-sepolia" (test USDC only, needs
   // PAYMENTS "sandbox") also needs "DEPOSIT_ADDRESS": the platform's public 0x address, never a
   // key. "BASE_RPC_URL" (https) is optional.
+  // Telegram notifications: absent or "NOTIFICATIONS": "off" disables them; "telegram" needs
+  // "TELEGRAM_CHAT_ID" (numeric) here and the bot token as a Worker secret, never a variable:
+  // npx wrangler secret put TELEGRAM_BOT_TOKEN --config <local copy>. Add "*/15 * * * *" to the
+  // crons for new-item alerts every 15 minutes; the daily cron also sends a summary.
   "vars": {
     // Initial deployment: contributions and feedback closed; enrollment, review, needs closed.
     "PILOT_MODE": "read-only",

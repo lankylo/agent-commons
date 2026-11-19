@@ -37,6 +37,7 @@ export const REMOTE_REVIEW_USAGE = `Usage (environment: COMMONS_REVIEW_URL, COMM
   payout-sent <requestId> <txHash>
   payout-reject <requestId> <reason>
   reconcile
+  notify [test|now|digest]
 `;
 
 const LOCAL_HOSTS = new Set(["localhost", "127.0.0.1", "[::1]"]);
@@ -81,6 +82,11 @@ function parse(argv: readonly string[]): ParsedCommand | null {
       return a === undefined ? { op: "payouts", body: {} } : null;
     case "reconcile":
       return a === undefined ? { op: "reconcile", body: {} } : null;
+    case "notify":
+      if (b !== undefined) return null;
+      return a === undefined || a === "test" || a === "now" || a === "digest"
+        ? { op: "notify", body: { action: a ?? "test" } }
+        : null;
     case "payout-sent":
     case "payout-reject": {
       const requestId = Number(a);
