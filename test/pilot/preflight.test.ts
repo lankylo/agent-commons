@@ -286,6 +286,23 @@ describe("pilot preflight", () => {
     expect(errors({ TELEGRAM_BOT_TOKEN: "123456:abc" })).toMatch(/secret-like setting name/);
   });
 
+  it("accepts live payments only with deposits, and Base mainnet only with live payments", () => {
+    const address = "0x1111111111111111111111111111111111111111";
+    const live = { ...OPEN, PAYMENTS: "live", DEPOSITS: "base", DEPOSIT_ADDRESS: address };
+    expect(run(config({ vars: live }), "pilot").ok).toBe(true);
+    expect(run(config({ vars: { ...live, DEPOSITS: "base-sepolia" } }), "pilot").ok).toBe(true);
+    const errors = (v: Record<string, unknown>) =>
+      run(config({ vars: { ...live, ...v } }), "pilot").errors.join("\n");
+    expect(errors({ PAYMENTS: "sandbox" })).toMatch(/"base" \(real USDC\) needs PAYMENTS "live"/);
+    expect(errors({ DEPOSITS: undefined, DEPOSIT_ADDRESS: undefined })).toMatch(
+      /"live" needs DEPOSITS/,
+    );
+    expect(errors({ DEPOSITS: "ethereum" })).toMatch(/DEPOSITS: must be/);
+    expect(run(config({ vars: { PAYMENTS: "live" } })).errors.join("\n")).toMatch(
+      /initial phase: PAYMENTS/,
+    );
+  });
+
   it("rejects unparseable configuration", () => {
     expect(run("{ nope").ok).toBe(false);
     expect(run("[]").ok).toBe(false);

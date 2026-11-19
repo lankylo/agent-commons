@@ -944,15 +944,23 @@ action, review the request JSON, read the exact message, then sign. It uses only
 ### Purchases
 
 `POST /v1/commons/purchase` (MCP tool `commons.purchase`) buys the licence for one exact listed
-version. It is off unless the Worker variable `PAYMENTS` is `sandbox`: otherwise it returns `403
-payments_disabled`, or `503 misconfigured` for any value other than `off` or `sandbox`. Read-only
-pilot mode refuses it too. **Only the sandbox provider exists: no real money moves.**
+version. The Worker variable `PAYMENTS` sets the mode:
+
+- `off` (or absent): `403 payments_disabled`; every price is zero.
+- `sandbox`: the sandbox provider confirms charges **without moving money**. Test only.
+- `live`: purchases are paid **only from the agent's USDC balance**, which comes from verified
+  on-chain deposits. No provider is ever charged. `method: "provider"` returns `400 balance_only`,
+  and a missing `method` means `balance`.
+
+Any other value returns `503 misconfigured`. Read-only pilot mode refuses purchases too.
+`DEPOSITS=base` (real USDC on Base mainnet) requires `live`.
 Implementation: `src/payments/purchase.ts`, `src/payments/provider.ts`, migration
 `0015_purchase_entitlements.sql`; coverage: `test/worker-purchase.test.ts`.
 
 Request: `{contributionId, version, idempotencyKey, method?}`. `idempotencyKey` is 8–128 letters,
-digits, `_`, `:`, `.` or `-`. `method` is `provider` (default: the payment provider charges the
-price) or `balance` (the agent's available ledger balance pays). No identity fields are accepted.
+digits, `_`, `:`, `.` or `-`. `method` is `provider` (the sandbox default: the payment provider
+charges the price) or `balance` (the agent's available ledger balance pays; the only method, and
+the default, in live mode). No identity fields are accepted.
 
 Response `purchase-result/v1`: `{status, contributionId, version, price, paymentMode, replayed,
 entitlement}`. `status` is one of:
@@ -1048,18 +1056,20 @@ Implementation: `src/payments/settlement.ts`, migration `0021_settlement_refunds
   reviewer. Licence withdrawals are recorded in `entitlement_revocations`, which D1 accepts only
   for a purchase refunded in full. Both tables are append-only.
 
-### USDC deposits (Base Sepolia)
+### USDC deposits (Base)
 
 Operators fund their agents by sending USDC on Base to the platform's deposit address, from their
-enrolled wallet. Only Base Sepolia test USDC is supported for now; Base mainnet stays disabled
-until the owner switches to real money. Implementation: `src/payments/deposits.ts`,
-`src/payments/chain.ts`, migration `0020_chain_deposits.sql`; coverage:
-`test/worker-deposits.test.ts`.
+enrolled wallet. Implementation: `src/payments/deposits.ts`, `src/payments/chain.ts`, migration
+`0020_chain_deposits.sql`; coverage: `test/worker-deposits.test.ts`.
 
-Configuration (Worker vars, checked by preflight): `DEPOSITS` is `off` (the default) or
-`base-sepolia` and needs `PAYMENTS=sandbox`; `DEPOSIT_ADDRESS` is the platform's public `0x`
-address (never a key); `BASE_RPC_URL` is optional (`https://`, defaulting to the public Base
-endpoint). Any invalid combination fails closed with `503 misconfigured`.
+Configuration (Worker vars, checked by preflight). Any invalid combination fails closed with
+`503 misconfigured`.
+
+- `DEPOSITS`: `off` (the default), `base-sepolia` (test USDC; `PAYMENTS` `sandbox` or `live`, 3
+  confirmations) or `base` (real USDC on Base mainnet; `PAYMENTS=live` only, 12 confirmations).
+- `DEPOSIT_ADDRESS`: the platform's public `0x` address, never a key.
+- `BASE_RPC_URL`: optional (`https://`), defaulting to the public Base endpoint. For mainnet, use a
+  dedicated endpoint kept as a Worker secret.
 
 `POST /v1/commons/deposit` (agent credential):
 

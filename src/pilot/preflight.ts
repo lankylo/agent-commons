@@ -266,18 +266,34 @@ function checkSettings(vars: Record<string, unknown>, phase: PilotPhase, errors:
   if (mcp !== undefined && (typeof mcp !== "string" || !ON_OFF.has(mcp))) {
     errors.push('vars.MCP_HTTP: must be explicitly "on" or "off" when present');
   }
-  // Purchases are optional (absent means off); only sandbox payments exist.
+  // Purchases are optional (absent means off). "sandbox" uses a test provider that moves no money;
+  // "live" is paid only from USDC balances funded by on-chain deposits.
   const payments = vars["PAYMENTS"];
-  if (payments !== undefined && payments !== "off" && payments !== "sandbox") {
-    errors.push('vars.PAYMENTS: must be "off" or "sandbox" when present');
+  if (
+    payments !== undefined &&
+    payments !== "off" &&
+    payments !== "sandbox" &&
+    payments !== "live"
+  ) {
+    errors.push('vars.PAYMENTS: must be "off", "sandbox" or "live" when present');
   }
-  // Deposits are optional; only Base Sepolia test USDC is supported, and only with sandbox payments.
   const deposits = vars["DEPOSITS"];
-  if (deposits !== undefined && deposits !== "off") {
-    if (deposits !== "base-sepolia") {
-      errors.push('vars.DEPOSITS: must be "off" or "base-sepolia" when present');
+  const depositsOn = deposits !== undefined && deposits !== "off";
+  if (payments === "live" && !depositsOn) {
+    errors.push('vars.PAYMENTS: "live" needs DEPOSITS, or no agent can pay');
+  }
+  // Deposits: Base Sepolia (test USDC) with sandbox or live payments; Base mainnet (real USDC)
+  // only with live payments, so the sandbox provider can never stand in for real money.
+  if (depositsOn) {
+    if (deposits !== "base-sepolia" && deposits !== "base") {
+      errors.push('vars.DEPOSITS: must be "off", "base-sepolia" or "base" when present');
     }
-    if (payments !== "sandbox") errors.push('vars.DEPOSITS: needs PAYMENTS "sandbox"');
+    if (payments !== "sandbox" && payments !== "live") {
+      errors.push('vars.DEPOSITS: needs PAYMENTS "sandbox" or "live"');
+    }
+    if (deposits === "base" && payments !== "live") {
+      errors.push('vars.DEPOSITS: "base" (real USDC) needs PAYMENTS "live"');
+    }
     const address = vars["DEPOSIT_ADDRESS"];
     if (typeof address !== "string" || !/^0x[0-9a-fA-F]{40}$/.test(address)) {
       errors.push("vars.DEPOSIT_ADDRESS: must be the platform's public 0x address");
@@ -303,7 +319,9 @@ function checkSettings(vars: Record<string, unknown>, phase: PilotPhase, errors:
 
   if (phase === "initial") {
     if (mode !== "read-only") errors.push('initial phase: PILOT_MODE must be "read-only"');
-    if (payments === "sandbox") errors.push('initial phase: PAYMENTS must be "off"');
+    if (payments === "sandbox" || payments === "live") {
+      errors.push('initial phase: PAYMENTS must be "off"');
+    }
     for (const key of ["ENROLLMENT", "REVIEW_INTERFACE", "NEEDS_INTAKE", "MCP_HTTP"]) {
       if (on(key)) errors.push(`initial phase: ${key} must be "off"`);
     }

@@ -26,7 +26,13 @@ import {
   versionPrice,
   type PriceList,
 } from "./payments/pricing";
-import { resolvePaymentsMode, SANDBOX_PROVIDER, type PaymentProvider } from "./payments/provider";
+import {
+  paymentsOn,
+  REFUSING_PROVIDER,
+  resolvePaymentsMode,
+  SANDBOX_PROVIDER,
+  type PaymentProvider,
+} from "./payments/provider";
 import { PurchaseService, type PaymentMethod } from "./payments/purchase";
 import type { ConditionalRetrievalResponse } from "./registry/retrieval-conditional";
 import type { RetrievalResponse } from "./registry/retrieval-response";
@@ -74,13 +80,13 @@ interface WorkerEnv extends ReviewEnv, EnrollmentEnv, McpHttpEnv {
   readonly RATE_LIMIT_WINDOW_SECONDS?: number | string;
   /** Test injection for scheduled source re-checks; never set from configuration. */
   readonly SOURCE_FETCHER?: SourceFetcher;
-  /** Purchases: off unless exactly "sandbox". No real payment provider exists yet. */
+  /** Purchases: "off" (default), "sandbox" (test provider) or "live" (USDC balance only). */
   readonly PAYMENTS?: string;
   /** Test injection for the payment provider; never set from configuration. */
   readonly PAYMENT_PROVIDER?: PaymentProvider;
   /** Test injection for prices; never set from configuration. */
   readonly PRICE_LIST?: PriceList;
-  /** USDC deposits: off unless "base-sepolia" (and PAYMENTS is "sandbox"). */
+  /** USDC deposits: "base-sepolia" (sandbox or live) or "base" (live only); see config.ts. */
   readonly DEPOSITS?: string;
   /** The platform's public deposit address (never a key). */
   readonly DEPOSIT_ADDRESS?: string;
@@ -92,8 +98,7 @@ interface WorkerEnv extends ReviewEnv, EnrollmentEnv, McpHttpEnv {
 
 /** Paid prices apply only while payments are on; otherwise everything is free. */
 const pricesOf = (env: WorkerEnv): PriceList =>
-  env.PRICE_LIST ??
-  (resolvePaymentsMode(env.PAYMENTS) === "sandbox" ? PAID_PRICE_LIST : PILOT_PRICE_LIST);
+  env.PRICE_LIST ?? (paymentsOn(env.PAYMENTS) ? PAID_PRICE_LIST : PILOT_PRICE_LIST);
 
 function httpError(
   status: number,
@@ -618,8 +623,9 @@ const PURCHASE_REFUSAL_STATUS: Readonly<Record<string, number>> = {
 };
 
 /**
- * Buys the licence for one exact listed version (sandbox payments only). Off unless
- * `PAYMENTS=sandbox`. A version that is free, or the operator's own, needs no purchase.
+ * Buys the licence for one exact listed version. Off unless `PAYMENTS` is "sandbox" or "live"; live
+ * purchases are paid only from the agent's USDC balance. A version that is free, or the
+ * operator's own, needs no purchase.
  */
 async function handlePurchase(request: Request, env: WorkerEnv): Promise<Response> {
   try {
@@ -647,7 +653,15 @@ async function handlePurchase(request: Request, env: WorkerEnv): Promise<Respons
     if (!Object.keys(record).every((field) => PURCHASE_FIELDS.has(field))) {
       return httpError(400, "invalid_request", "Purchase request contains unsupported fields.");
     }
-    const method = record.method ?? "provider";
+    // Live payments are paid only from the agent's USDC balance (on-chain deposits).
+    const method = record.method ?? (mode === "live" ? "balance" : "provider");
+    if (mode === "live" && method === "provider") {
+      return httpError(
+        400,
+        "balance_only",
+        'Live purchases are paid from the agent\'s USDC balance: use method "balance" (deposit USDC first).',
+      );
+    }
     if (
       typeof record.contributionId !== "string" ||
       record.contributionId.length === 0 ||
@@ -666,7 +680,7 @@ async function handlePurchase(request: Request, env: WorkerEnv): Promise<Respons
     const outcome = await new PurchaseService(
       env.DB,
       pricesOf(env),
-      env.PAYMENT_PROVIDER ?? SANDBOX_PROVIDER,
+      mode === "live" ? REFUSING_PROVIDER : (env.PAYMENT_PROVIDER ?? SANDBOX_PROVIDER),
       env.NOW ?? (() => new Date()),
     ).purchase({
       agentId: authorization.actor.agentId,
@@ -1293,7 +1307,7 @@ async function handleFeedback(request: Request, env: WorkerEnv): Promise<Respons
     // A report can make a version verified: earnings on its purchases become due, and (while
     // payments are on) the operators who verified an Execution version earn their reward.
     await issueEarnings(env.DB, reported.id, reported.version, env.NOW ?? (() => new Date()), {
-      rewards: resolvePaymentsMode(env.PAYMENTS) === "sandbox",
+      rewards: paymentsOn(env.PAYMENTS),
     });
 
     return Response.json({
