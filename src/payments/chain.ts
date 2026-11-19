@@ -61,23 +61,67 @@ export type RpcCall = (method: string, params: readonly unknown[]) => Promise<un
 
 export class RpcError extends Error {}
 
+export interface RpcOptions {
+  /** Wait before each retry; its length is the number of retries. */
+  readonly retryDelaysMs?: readonly number[];
+  readonly sleep?: (ms: number) => Promise<void>;
+}
+
+/**
+ * Public nodes throttle Cloudflare's shared egress addresses now and then (seen on the Base
+ * Sepolia run), so transient failures are retried twice before the read counts as unavailable.
+ */
+export const RPC_RETRY_DELAYS_MS: readonly number[] = Object.freeze([250, 1000]);
+
+type Attempt =
+  | { readonly ok: true; readonly result: unknown }
+  | { readonly ok: false; readonly retry: boolean; readonly reason: string };
+
 export function httpRpc(
   url: string,
   fetchImpl: typeof fetch = (input, init) => fetch(input, init),
+  options: RpcOptions = {},
 ): RpcCall {
+  const delays = options.retryDelaysMs ?? RPC_RETRY_DELAYS_MS;
+  const sleep = options.sleep ?? ((ms: number) => new Promise<void>((r) => setTimeout(r, ms)));
   let id = 0;
+
+  const attempt = async (method: string, params: readonly unknown[]): Promise<Attempt> => {
+    let response: Response;
+    try {
+      // Workers reject redirect: "error"; "manual" returns a 3xx, which is refused below.
+      response = await fetchImpl(url, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ jsonrpc: "2.0", id: ++id, method, params }),
+        redirect: "manual",
+      });
+    } catch {
+      return { ok: false, retry: true, reason: "rpc network" };
+    }
+    // Throttling and server errors are transient; redirects and other client errors are not.
+    if (response.status === 429 || response.status >= 500) {
+      return { ok: false, retry: true, reason: `rpc http ${response.status}` };
+    }
+    if (!response.ok) return { ok: false, retry: false, reason: `rpc http ${response.status}` };
+    let body: { result?: unknown; error?: unknown };
+    try {
+      body = (await response.json()) as typeof body;
+    } catch {
+      return { ok: false, retry: true, reason: "rpc body" };
+    }
+    // Nodes also report throttling as a JSON-RPC error, so these are retried too.
+    if (body.error !== undefined) return { ok: false, retry: true, reason: "rpc error" };
+    return { ok: true, result: body.result ?? null };
+  };
+
   return async (method, params) => {
-    // Workers reject redirect: "error"; "manual" returns a 3xx, which fails the ok check below.
-    const response = await fetchImpl(url, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ jsonrpc: "2.0", id: ++id, method, params }),
-      redirect: "manual",
-    });
-    if (!response.ok) throw new RpcError(`rpc http ${response.status}`);
-    const body = (await response.json()) as { result?: unknown; error?: unknown };
-    if (body.error !== undefined) throw new RpcError("rpc error");
-    return body.result ?? null;
+    for (let tried = 0; ; tried++) {
+      const outcome = await attempt(method, params);
+      if (outcome.ok) return outcome.result;
+      if (!outcome.retry || tried >= delays.length) throw new RpcError(outcome.reason);
+      await sleep(delays[tried]!);
+    }
   };
 }
 
