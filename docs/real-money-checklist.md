@@ -74,16 +74,34 @@ Test ETH for gas comes from a Base Sepolia faucet.
 
 Record the run (date, transaction hashes, reconcile output) in `project.md`.
 
-## 4. Code changes for mainnet (one PR, after sections 1 to 3)
+## 4. Code changes for mainnet (done in the live-payments PR)
 
-- [ ] Confirm the USDC contract addresses in `src/payments/chain.ts` against Circle's
-      documentation: Base mainnet `0x8335…2913`, Base Sepolia `0x036C…CF7e`.
-- [ ] Set `enabled: true` for `base` in `NETWORKS`, and let preflight accept `DEPOSITS=base`.
-- [ ] Confirm 12 confirmations on mainnet.
-- [ ] Decide whether `PAYMENTS` keeps the name `sandbox` for live use, or gains a `live` value
-      that refuses the sandbox provider.
-- [ ] Use a dedicated RPC endpoint (`BASE_RPC_URL`) with an API key kept as a Worker secret, not
-      the public endpoint.
+- [x] USDC contracts in `src/payments/chain.ts`: Base mainnet
+      `0x833589fcd6edb6e08f4c7c32d4f71b54bda02913` (Circle's native USDC), Base Sepolia
+      `0x036cbd53842c5426634e7929541ec2318f3dcf7e`.
+- [x] `base` is enabled in `NETWORKS`, with 12 confirmations.
+- [x] `PAYMENTS=live`: purchases are paid only from the agent's USDC balance and no provider is
+      ever charged (`balance_only` for `method: "provider"`). `DEPOSITS=base` is accepted only with
+      `live`, so the sandbox provider can never stand in for real money. Preflight enforces both.
+- [ ] Owner: a dedicated RPC endpoint (`BASE_RPC_URL`) with its API key kept as a Worker secret
+      (`npx wrangler secret put BASE_RPC_URL`); remove `BASE_RPC_URL` from `vars` when you do.
+
+## 4a. Switching the pilot to live (owner steps, in order)
+
+1. **Clear the test balances.** The ledger still holds what Base Sepolia test USDC funded. After
+   the switch, those balances would be claims on real USDC. While still on Base Sepolia:
+   - pay out each agent's remaining test balance as a normal payout (or reject and keep track),
+   - run `reverse <entryId> "test network retired"` for each pending test reward or earning
+     (`npm run review:remote -- ledger` lists them),
+   - run `reconcile` until `owedToAgentsMinor` is `0`.
+2. **Platform wallet on mainnet** (section 2): a dedicated wallet, ideally a hardware wallet or
+   Safe, with a little ETH on Base for payout gas.
+3. **Config** (git-ignored `wrangler.pilot.local.jsonc`): `"PAYMENTS": "live"`, `"DEPOSITS":
+   "base"`, `"DEPOSIT_ADDRESS": "<mainnet platform wallet>"`; the dedicated `BASE_RPC_URL` as a
+   secret. Preflight, then deploy.
+4. **First real deposit, small:** send 1 USDC on Base from an enrolled operator wallet, claim it,
+   buy one record from the balance, then run `reconcile`. Expect `ok: true`.
+5. Keep `payments stop "<reason>"` at hand. It halts every money movement at once.
 
 ## 5. Owner settings to confirm before going live
 

@@ -6,7 +6,10 @@ import { NETWORKS, type NetworkConfig, type RpcCall } from "./chain";
 import { resolvePaymentsMode } from "./provider";
 
 export interface ChainEnv {
-  /** "off" (default) or "base-sepolia"; needs PAYMENTS "sandbox". */
+  /**
+   * "off" (default), "base-sepolia" (test USDC; PAYMENTS "sandbox" or "live") or "base" (real USDC
+   * on Base mainnet; PAYMENTS "live" only, so the sandbox provider can never pay for real money).
+   */
   readonly DEPOSITS?: string;
   /** The platform's public wallet address (never a key). */
   readonly DEPOSIT_ADDRESS?: string;
@@ -27,7 +30,13 @@ export type DepositConfig =
     }
   | { readonly mode: "invalid" };
 
-/** On only for an enabled network, with sandbox payments and a valid platform address. */
+/** Payments modes allowed with each network. */
+const MODES_FOR: Readonly<Record<string, readonly string[]>> = Object.freeze({
+  "base-sepolia": ["sandbox", "live"],
+  base: ["live"],
+});
+
+/** On only for an enabled network, with an allowed payments mode and a valid platform address. */
 export function depositConfigOf(env: ChainEnv): DepositConfig {
   const value = env.DEPOSITS;
   if (value === undefined || value === "" || value === "off") return { mode: "off" };
@@ -37,9 +46,11 @@ export function depositConfigOf(env: ChainEnv): DepositConfig {
       ? env.DEPOSIT_ADDRESS.toLowerCase()
       : null;
   const rpcUrl = env.BASE_RPC_URL ?? network?.defaultRpcUrl;
+  const mode = resolvePaymentsMode(env.PAYMENTS);
   if (
     !network?.enabled ||
-    resolvePaymentsMode(env.PAYMENTS) !== "sandbox" ||
+    mode === undefined ||
+    !(MODES_FOR[network.network] ?? []).includes(mode) ||
     address === null ||
     address === `0x${"0".repeat(40)}` ||
     typeof rpcUrl !== "string" ||

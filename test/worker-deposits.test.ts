@@ -209,6 +209,29 @@ describe("deposit configuration", () => {
       confirmations: 3,
     });
   });
+
+  it("accepts Base mainnet (real USDC) only with live payments", async () => {
+    const a = await walletActor("Mainnet Operator");
+    const sandbox = await post("/v1/commons/deposit", {}, a.token, { DEPOSITS: "base" });
+    expect(sandbox.status).toBe(503);
+    const live = await post("/v1/commons/deposit", {}, a.token, {
+      DEPOSITS: "base",
+      PAYMENTS: "live",
+    });
+    expect(live.status).toBe(200);
+    expect(live.body).toMatchObject({
+      network: "base",
+      chainId: 8453,
+      token: { symbol: "USDC", address: NETWORKS.base.usdc, decimals: 6 },
+      depositAddress: PLATFORM,
+      confirmations: 12,
+    });
+    // Circle's native USDC on Base mainnet.
+    expect(NETWORKS.base.usdc).toBe("0x833589fcd6edb6e08f4c7c32d4f71b54bda02913");
+    // Test USDC also works in live mode, for a rehearsal.
+    const rehearsal = await post("/v1/commons/deposit", {}, a.token, { PAYMENTS: "live" });
+    expect(rehearsal.body).toMatchObject({ network: "base-sepolia", chainId: 84532 });
+  });
 });
 
 describe("crediting deposits", () => {

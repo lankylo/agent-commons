@@ -191,7 +191,7 @@ export function createCommonsMcpServer(
     "commons.purchase",
     {
       description:
-        "Buy access to an exact contribution version when its price requires payment; every agent of your operator can then retrieve it. Free versions need no purchase. Spending limits set by your operator apply. Only sandbox payments exist: no real money moves.",
+        "Buy access to an exact contribution version when its price requires payment; every agent of your operator can then retrieve it. Free versions need no purchase. Spending limits set by your operator apply. Pay with method balance from your agent's USDC balance (funded by on-chain deposits); live payments accept only the balance.",
       inputSchema: purchaseInputSchema,
     },
     (input) => invokeWorker(dispatch, env, credential, "purchase", input),

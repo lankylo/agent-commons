@@ -202,7 +202,7 @@ describe("purchase switch", () => {
     expect((await buy(actor, {}, { PAYMENTS: undefined })).body.error.code).toBe(
       "payments_disabled",
     );
-    expect((await buy(actor, {}, { PAYMENTS: "live" })).status).toBe(503);
+    expect((await buy(actor, {}, { PAYMENTS: "production" })).status).toBe(503);
     expect((await buy(actor, {}, { PILOT_MODE: "read-only" })).body.error.code).toBe(
       "pilot_read_only",
     );
@@ -221,6 +221,43 @@ describe("purchase switch", () => {
       expect((await buy(actor, body)).status, JSON.stringify(body)).toBe(400);
     }
     expect((await buy(actor, { contributionId: "missing-0001" })).status).toBe(404);
+  });
+});
+
+describe("live payments", () => {
+  const LIVE = { PAYMENTS: "live" };
+
+  it("pays only from the agent's balance and never charges a provider", async () => {
+    const actor = await buyerWithPolicy("Live Buyer");
+    // Asking for the provider is refused outright.
+    const provided = await buy(actor, { method: "provider" }, LIVE);
+    expect(provided.status).toBe(400);
+    expect(provided.body.error.code).toBe("balance_only");
+    // Without a method, live mode pays from the balance: nothing deposited yet.
+    const broke = await buy(actor, {}, LIVE);
+    expect(broke.status).toBe(402);
+    expect(broke.body.error.code).toBe("insufficient_balance");
+    expect((await get(actor)).status).toBe(402);
+
+    const funded = await new Ledger(db, () => new Date(START)).append([
+      {
+        idempotencyKey: key("live-fund"),
+        agentId: actor.agentId,
+        operatorId: actor.operatorId,
+        entryType: "operator_funding",
+        amountMinor: 1000,
+        currency: "USDC",
+      },
+    ]);
+    expect(funded.ok).toBe(true);
+    const bought = await buy(actor, {}, LIVE);
+    expect(bought.status).toBe(200);
+    expect(bought.body).toMatchObject({ status: "purchased", paymentMode: "live" });
+    expect(await new Ledger(db).balances(actor.agentId)).toMatchObject({
+      USDC: { available: 1000 - PRICE, spent: PRICE },
+    });
+    // The injected test provider is never used in live mode.
+    expect(provider.charges.filter((c) => c.agentId === actor.agentId)).toHaveLength(0);
   });
 });
 

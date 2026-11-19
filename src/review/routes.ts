@@ -25,7 +25,7 @@ import { depositConfigOf, type ChainEnv } from "../payments/config";
 import { issueEarnings } from "../payments/earnings";
 import { PayoutService, type PayoutResult } from "../payments/payouts";
 import { reconcile, recordRun } from "../payments/reconcile";
-import { resolvePaymentsMode } from "../payments/provider";
+import { paymentsOn } from "../payments/provider";
 import { notifyNew, sendDigest } from "../notify/notifications";
 import { telegramOf, type NotifyEnv } from "../notify/telegram";
 import {
@@ -539,7 +539,7 @@ async function validate(
   }
   await new TrustStore(db, now).refresh(ref);
   await issueEarnings(db, ref.id, ref.version, now, {
-    rewards: resolvePaymentsMode(env.PAYMENTS) === "sandbox",
+    rewards: paymentsOn(env.PAYMENTS),
   });
   const trust = (await new TrustStore(db, now).read([ref])).get(trustKey(ref.id, ref.version));
   return reply(200, { schemaVersion: "platform-validation/v1", action, trust: trust ?? null });

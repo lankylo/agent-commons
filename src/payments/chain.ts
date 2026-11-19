@@ -34,7 +34,8 @@ export const NETWORKS: Readonly<Record<DepositNetwork, NetworkConfig>> = Object.
     usdc: "0x833589fcd6edb6e08f4c7c32d4f71b54bda02913",
     defaultRpcUrl: "https://mainnet.base.org",
     confirmations: 12,
-    enabled: false,
+    // Real USDC: allowed only with PAYMENTS "live" (see `depositConfigOf`).
+    enabled: true,
   },
 });
 
