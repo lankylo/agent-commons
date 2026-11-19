@@ -13,7 +13,8 @@ import { SourceChecker, type SourceFetcher } from "./registry/source-check";
 import { issueEarnings } from "./payments/earnings";
 import { accountView } from "./payments/platform";
 import { settleDue } from "./payments/settlement";
-import { reconcile, recordRun } from "./payments/reconcile";
+import { reconcile, recordRun, type ReconciliationReport } from "./payments/reconcile";
+import { NOTIFY_CRON, notifyNew, sendDigest } from "./notify/notifications";
 import { ChainReader, httpRpc, type RpcCall } from "./payments/chain";
 import { depositConfigOf } from "./payments/config";
 import { MIN_PAYOUT_MINOR, PayoutService } from "./payments/payouts";
@@ -1488,12 +1489,23 @@ const worker = {
   },
 
   /**
-   * Cron entry point: one bounded batch of Knowledge source re-checks. It runs only when the
-   * deployment configures a cron trigger; with none configured nothing is ever fetched.
+   * Cron entry point. The daily trigger runs one bounded batch of Knowledge source re-checks,
+   * settlement, reconciliation, new-item notifications and the daily summary; `NOTIFY_CRON` only
+   * announces new items. Nothing runs unless the deployment configures cron triggers.
    */
-  async scheduled(_controller: unknown, env?: unknown): Promise<void> {
+  async scheduled(controller: unknown, env?: unknown): Promise<void> {
     const workerEnv = (env ?? {}) as WorkerEnv;
     if (!workerEnv.DB) return;
+    // The frequent cron only announces new items; every other trigger runs the daily jobs too.
+    if ((controller as { cron?: unknown } | undefined)?.cron === NOTIFY_CRON) {
+      try {
+        await notifyNew(workerEnv.DB, workerEnv, workerEnv.NOW);
+      } catch {
+        // Nothing is recorded; the next run announces the same items.
+      }
+      return;
+    }
+    let report: ReconciliationReport | undefined;
     try {
       await new SourceChecker(workerEnv.DB, {
         now: workerEnv.NOW,
@@ -1509,7 +1521,7 @@ const worker = {
     }
     try {
       const config = depositConfigOf(workerEnv);
-      const report = await reconcile(
+      report = await reconcile(
         workerEnv.DB,
         workerEnv.NOW,
         config.mode === "on"
@@ -1533,6 +1545,12 @@ const worker = {
     } catch {
       // Monitoring never breaks the scheduled run; the next run tries again.
     }
+    try {
+      await notifyNew(workerEnv.DB, workerEnv, workerEnv.NOW);
+    } catch {
+      // Announced on the next run instead.
+    }
+    await sendDigest(workerEnv.DB, workerEnv, workerEnv.NOW, report);
   },
 } satisfies ExportedHandler;
 

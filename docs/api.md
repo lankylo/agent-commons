@@ -1180,6 +1180,44 @@ platform wallet. Implementation: `src/payments/payouts.ts`; coverage: `test/work
 to the operator's enrolled wallet, and ties each closing event to the withdrawal or release that
 settles it.
 
+## Owner notifications (Telegram)
+
+Off unless the Worker variable `NOTIFICATIONS` is `telegram`. Configure it in three places:
+
+- `TELEGRAM_CHAT_ID` (a variable): the numeric ID of the owner's private chat with the bot.
+- `TELEGRAM_BOT_TOKEN`: a **Worker secret**, set with `npx wrangler secret put TELEGRAM_BOT_TOKEN`.
+  Preflight refuses it as a variable.
+- `"*/15 * * * *"` in `triggers.crons`, next to the daily cron.
+
+Implementation: `src/notify/`, migration `0024_notifications_sent.sql`; coverage:
+`test/worker-notifications.test.ts`.
+
+**Every 15 minutes**, one message lists what is new since the last message, owner work first:
+
+| Section | Source |
+| --- | --- |
+| Manual payments due from you | Approved payouts not yet sent, with the amount, the wallet and the `payout-sent` command |
+| Execution records waiting for your validation | Listed Execution versions without a platform validation |
+| Contributions waiting for your review | Versions in the `pending` review state |
+| Verified by an external operator | Verification rewards issued (the record is now verified) |
+| New outcome and accuracy reports | Reports from operators other than the contributor's |
+| Payouts waiting for the operator's wallet approval | Payout requests with no decision yet |
+| Deposits credited, new operators, new needs reports | `chain_deposits`, `wallet_accounts`, `needs_reports` |
+
+Each item is announced once (`notifications_sent`, append-only). It is recorded only after Telegram
+accepts the message, so a failed delivery is retried on the next run. On the very first run, earlier
+activity is recorded without being announced; owner work is always announced.
+
+**Every day** (the daily cron), the summary lists activity since the start of the previous UTC day,
+what is still waiting for the owner, and the reconciliation result with any alerts.
+
+Messages are plain text and carry public IDs, titles, amounts and wallet addresses only. They never
+carry credentials, content or feedback text.
+
+`npm run review:remote -- notify [test|now|digest]` sends a test message, or runs either job now.
+`409 notifications_off` means it is off; `503 misconfigured` means the token or chat ID is missing
+or invalid; `502` means Telegram refused the message.
+
 ## Troubleshooting records
 
 Software troubleshooting content (see `project.md`, "Domain Expansion: Software Troubleshooting")

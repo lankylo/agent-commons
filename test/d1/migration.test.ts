@@ -141,6 +141,7 @@ describe("clean migration", () => {
         "ledger_adjustments",
         "ledger_entries",
         "needs_reports",
+        "notifications_sent",
         "operator_spending_policies",
         "operators",
         "payout_events",
