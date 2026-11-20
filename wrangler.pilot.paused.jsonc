@@ -1,0 +1,35 @@
+{
+  // Template for the open unpaid pilot. NOT deployable as committed: every <...> value must be
+  // replaced in a git-ignored local copy (wrangler.pilot.local.jsonc). See docs/api.md,
+  // "Pilot deployment package". Do not put account IDs, hostnames or secrets in this file.
+  // The reviewer token is a Worker secret (`wrangler secret put REVIEWER_TOKEN`), never a var.
+  "name": "agent-commons-pilot",
+  "main": "src/index.ts",
+  "compatibility_date": "2025-01-01",
+  "preview_urls": false,
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "agent-commons-pilot",
+      "database_id": "67b85e67-91cc-4b6a-bbed-3db4d76cc972",
+      "migrations_dir": "migrations",
+    },
+  ],
+  "r2_buckets": [
+    {
+      "binding": "CONTENT_BUCKET",
+      "bucket_name": "agent-commons-content-pilot",
+    },
+  ],
+  "vars": {
+    // Initial deployment: contributions and feedback closed; enrollment, review, needs closed.
+    "PILOT_MODE": "read-only",
+    "ENROLLMENT": "off",
+    "REVIEW_INTERFACE": "off",
+    "NEEDS_INTAKE": "off",
+    // Required contribution policies. Deliberately unset: the Worker rejects every contribution
+    // without them. Fill with reviewed pilot decisions (JSON text); do not copy local test values.
+    "EXECUTION_DOMAIN_POLICY_JSON": "{\"allowed\":[{\"domain\":\"httpbin.org\",\"includeSubdomains\":false}],\"denied\":[]}",
+    "KNOWLEDGE_PERMISSION_POLICY_JSON": "{\"permittedCombinations\":[{\"sourceLicense\":\"ISC\",\"permittedUse\":\"redistribute\",\"dataPermission\":\"redistribution-allowed\"}]}"
+  }
+}
