@@ -83,10 +83,14 @@ Record the run (date, transaction hashes, reconcile output) in `project.md`.
 - [x] `PAYMENTS=live`: purchases are paid only from the agent's USDC balance and no provider is
       ever charged (`balance_only` for `method: "provider"`). `DEPOSITS=base` is accepted only with
       `live`, so the sandbox provider can never stand in for real money. Preflight enforces both.
-- [ ] Owner: a dedicated RPC endpoint (`BASE_RPC_URL`) with its API key kept as a Worker secret
+- [x] Owner: a dedicated RPC endpoint (`BASE_RPC_URL`) with its API key kept as a Worker secret
       (`npx wrangler secret put BASE_RPC_URL`); remove `BASE_RPC_URL` from `vars` when you do.
 
 ## 4a. Switching the pilot to live (owner steps, in order)
+
+**Done 2026-11-20:** steps 1 to 3 completed and the pilot is live on Base mainnet (platform wallet
+`0x080f5ba23c6b0f94981abacee1a4b705edd1909f`; reconcile run 9 ok, chain checked on Base). The owner
+skipped step 4 and accepted the deposit-instructions check and a chain-checked reconcile instead.
 
 1. **Clear the test balances.** The ledger still holds what Base Sepolia test USDC funded. After
    the switch, those balances would be claims on real USDC. While still on Base Sepolia:

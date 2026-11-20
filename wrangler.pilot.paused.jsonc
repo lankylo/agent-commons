@@ -30,6 +30,6 @@
     // Required contribution policies. Deliberately unset: the Worker rejects every contribution
     // without them. Fill with reviewed pilot decisions (JSON text); do not copy local test values.
     "EXECUTION_DOMAIN_POLICY_JSON": "{\"allowed\":[{\"domain\":\"httpbin.org\",\"includeSubdomains\":false}],\"denied\":[]}",
-    "KNOWLEDGE_PERMISSION_POLICY_JSON": "{\"permittedCombinations\":[{\"sourceLicense\":\"ISC\",\"permittedUse\":\"redistribute\",\"dataPermission\":\"redistribution-allowed\"}]}"
-  }
+    "KNOWLEDGE_PERMISSION_POLICY_JSON": "{\"permittedCombinations\":[{\"sourceLicense\":\"ISC\",\"permittedUse\":\"redistribute\",\"dataPermission\":\"redistribution-allowed\"}]}",
+  },
 }
