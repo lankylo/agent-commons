@@ -1,0 +1,6 @@
+# Reviewed gitleaks findings: deliberately fake values in tests, not real secrets.
+# preflight.test.ts: made-up token used to check that preflight rejects secrets.
+ae4785e6e4b0d3d75949cb34db68c44274d2303a:test/pilot/preflight.test.ts:generic-api-key:21
+# content-scan.test.ts: PEM markers with random bodies and an example sentence.
+87d5154290b3c2c0372ad6aa0b441915511a44c3:test/registry/content-scan.test.ts:private-key:17
+87d5154290b3c2c0372ad6aa0b441915511a44c3:test/registry/content-scan.test.ts:private-key:57
