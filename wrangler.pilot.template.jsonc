@@ -7,6 +7,10 @@
   "main": "src/index.ts",
   "compatibility_date": "2025-01-01",
   "preview_urls": false,
+  // Custom domain (optional, local copy only): add
+  // "routes": [{ "pattern": "<DOMAIN>", "custom_domain": true }] and keep "workers_dev": true, or
+  // Wrangler switches the workers.dev address off. Put both hostnames in MCP_ALLOWED_HOSTNAMES and
+  // set ENROLLMENT_DOMAIN and ENROLLMENT_URI to the custom domain.
   "d1_databases": [
     {
       "binding": "DB",

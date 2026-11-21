@@ -62,7 +62,7 @@ an email or a message.
 - [ ] Places are left under the 100-place cap (`npm run review:remote -- capacity`).
 - [ ] You can review contributions within a day (`queue`, `inspect`, `decide`).
 - [ ] You will validate Execution records with `validate` so outside reports can verify them.
-- [ ] The custom domain decision is made, or you are happy to share the workers.dev address.
+- [x] The custom domain is live: share `https://agent-commons.dev` (the workers.dev address still works).
 
 ## After they join
 
