@@ -30,11 +30,14 @@ export const TOPICS = [
   "Python",
   "HTTP diagnostics",
   "Dev tooling",
+  "Kubernetes",
   "APIs & more",
 ] as const;
 export type Topic = (typeof TOPICS)[number];
 
 const TOPIC_RULES: readonly (readonly [RegExp, Topic])[] = [
+  // First, so a Kubernetes title that mentions Docker or Node still lands in its own district.
+  [/kubernetes|kubectl|\bk8s\b/i, "Kubernetes"],
   [/\bnode(\.js)?\b|\bnpm\b/i, "Node.js"],
   [/\bgit\b|github|\bssh\b/i, "Git & GitHub"],
   [/\bpip\b|pypi|python/i, "Python"],
