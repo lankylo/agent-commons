@@ -181,6 +181,18 @@ describe("local stdio MCP server", () => {
       expect(tools.find((tool) => tool.name === "commons.contribute")?.description).toContain(
         "expectedPreviousVersion",
       );
+      // Anthropic's API rejects top-level oneOf/anyOf/allOf and then sends the model no tools.
+      for (const tool of tools) {
+        const schema = tool.inputSchema as Record<string, unknown>;
+        expect(schema.type, tool.name).toBe("object");
+        for (const keyword of ["oneOf", "anyOf", "allOf"]) {
+          expect(Object.hasOwn(schema, keyword), `${tool.name} ${keyword}`).toBe(false);
+        }
+      }
+      const contribute = tools.find((tool) => tool.name === "commons.contribute");
+      expect((contribute?.inputSchema as { required?: string[] }).required).toEqual([
+        "contribution",
+      ]);
 
       const knowledge = {
         ...HTTPBIN_KNOWLEDGE_SEED,
@@ -472,6 +484,14 @@ describe("local stdio MCP server", () => {
       });
       expect(spoofedIdentity.isError).toBe(true);
       expect(errorCode(spoofedIdentity)).toBe("invalid_request");
+
+      // The flat schema accepts contributionId alone; the shared REST handler still refuses it.
+      const versionWithoutExpected = await callTool(connection.client, "commons.contribute", {
+        contributionId: "missing-local-mcp-contribution",
+        contribution: HTTPBIN_KNOWLEDGE_SEED,
+      });
+      expect(versionWithoutExpected.isError).toBe(true);
+      expect(errorCode(versionWithoutExpected)).toBe("invalid_expected_version");
 
       const invalidBudget = await callTool(connection.client, "commons.search", {
         query: "httpbin",
