@@ -10,7 +10,7 @@ import type { RegistryEnv } from "../src/registry/creation";
 import { ContributionRegistry } from "../src/registry/creation";
 import { HTTPBIN_EXECUTION_SEED, HTTPBIN_KNOWLEDGE_SEED } from "../src/seed/httpbin";
 import { BOARD_PATH, topicFor, type Board } from "../src/home/board";
-import { HOME_CSS_PATH, HOME_JS_PATH } from "../src/home/page";
+import { HOME_CSS_PATH, HOME_ICON_PATH, HOME_JS_PATH } from "../src/home/page";
 import worker from "../src/index";
 import { listVersion } from "./helpers/quality";
 
@@ -31,7 +31,7 @@ function fetchAt(path: string, env: Record<string, unknown>, init?: RequestInit,
 describe("homepage", () => {
   it("follows the onboarding availability rules", async () => {
     const misconfigured = { ...ENROLL, ENROLLMENT_URI: "https://other.example/" };
-    for (const path of ["/", HOME_CSS_PATH, HOME_JS_PATH]) {
+    for (const path of ["/", HOME_CSS_PATH, HOME_JS_PATH, HOME_ICON_PATH]) {
       expect((await fetchAt(path, {})).status).toBe(404);
       expect((await fetchAt(path, misconfigured)).status).toBe(503);
       expect((await fetchAt(path, ENROLL, { method: "POST" })).status).toBe(404);
@@ -65,6 +65,15 @@ describe("homepage", () => {
     const script = await js.text();
     expect(script).toContain(BOARD_PATH);
     expect(script).not.toContain("innerHTML");
+    const icon = await fetchAt(HOME_ICON_PATH, ENROLL);
+    expect(icon.status).toBe(200);
+    expect(icon.headers.get("Content-Type")).toBe("image/svg+xml");
+    const svg = await icon.text();
+    expect(svg).toMatch(/^<svg xmlns="http:\/\/www\.w3\.org\/2000\/svg"/);
+    expect(svg).not.toMatch(/<script|<style|style=/);
+    expect(await (await fetchAt("/", ENROLL)).text()).toContain(
+      `<link rel="icon" href="${HOME_ICON_PATH}" type="image/svg+xml">`,
+    );
     const head = await fetchAt("/", ENROLL, { method: "HEAD" });
     expect(head.status).toBe(200);
     expect(await head.text()).toBe("");
