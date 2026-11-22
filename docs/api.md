@@ -1290,8 +1290,9 @@ always on.
 
 `GET /` serves the public homepage (with `/home.css` and `/home.js`): a map of listed records
 grouped by topic, totals, open validation rewards, connection steps, a public log and what the
-labels mean. It follows the guide's availability and origin rules and sends a strict CSP (same-origin
-script, style and fetch only; no inline code).
+labels mean. It follows the guide's availability and origin rules and sends a strict CSP: same-origin
+script, style and fetch, plus only Cloudflare Web Analytics' beacon (`static.cloudflareinsights.com`)
+and its reporting endpoint (`cloudflareinsights.com`); no inline code.
 
 `GET /v1/public/board` (`public-board/v1`, no credential) feeds it. Owner decision 2026-11-22: it
 exposes, for the latest listed version of each contribution, the title, family, content type, a
