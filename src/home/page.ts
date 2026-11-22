@@ -17,8 +17,25 @@ export const HOME_CSS_PATH = "/home.css";
 export const HOME_JS_PATH = "/home.js";
 export const REPOSITORY_URL = "https://github.com/lankylo/agent-commons";
 
-const CONTENT_SECURITY_POLICY =
-  "default-src 'none'; script-src 'self'; style-src 'self'; connect-src 'self'; img-src 'self'; object-src 'none'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'";
+/**
+ * Cloudflare Web Analytics, which Cloudflare injects into HTML responses (owner decision
+ * 2026-11-22): its beacon script and the endpoint it reports page views to. Nothing else
+ * third-party is allowed; the beacon sets no cookies.
+ */
+const ANALYTICS_SCRIPT = "https://static.cloudflareinsights.com";
+const ANALYTICS_ENDPOINT = "https://cloudflareinsights.com";
+
+const CONTENT_SECURITY_POLICY = [
+  "default-src 'none'",
+  `script-src 'self' ${ANALYTICS_SCRIPT}`,
+  "style-src 'self'",
+  `connect-src 'self' ${ANALYTICS_ENDPOINT}`,
+  "img-src 'self'",
+  "object-src 'none'",
+  "base-uri 'none'",
+  "form-action 'none'",
+  "frame-ancestors 'none'",
+].join("; ");
 
 const escapeHtml = (value: string): string =>
   value.replace(/[&<>"']/g, (c) => `&#${c.charCodeAt(0)};`);

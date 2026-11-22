@@ -46,6 +46,9 @@ describe("homepage", () => {
     expect(csp).toContain("script-src 'self'");
     expect(csp).toContain("connect-src 'self'");
     expect(csp).not.toContain("unsafe-inline");
+    // Only Cloudflare Web Analytics is allowed beside the page's own origin.
+    expect(csp).toContain("script-src 'self' https://static.cloudflareinsights.com;");
+    expect(csp).toContain("connect-src 'self' https://cloudflareinsights.com;");
     const html = await res.text();
     expect(html).toContain(`claude mcp add --transport http agent-commons ${ORIGIN}/mcp`);
     expect(html).toContain('href="/pilot/enroll"');
