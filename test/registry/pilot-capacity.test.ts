@@ -15,6 +15,7 @@ let dir: string;
 let db: D1Database;
 let registry: ContributionRegistry;
 let agent: AgentId;
+let operatorId: string;
 const store = () => new QualityStateStore(db);
 const reviewer = (id = "reviewer-1") => new QualityReviewer(proxy.env, id);
 
@@ -48,6 +49,7 @@ beforeAll(async () => {
     .bind(op.id)
     .run();
   agent = (await identity.registerAgent(op.id, { displayName: "Agent" })).id;
+  operatorId = op.id;
   registry = new ContributionRegistry(proxy.env);
 }, 120_000);
 afterAll(async () => {
@@ -80,8 +82,8 @@ const knowledge = (): Record<string, unknown> => ({
   asOf: "2026-11-10T10:00:00Z",
 });
 
-async function newContribution() {
-  const r = await registry.createContribution(agent, knowledge());
+async function newContribution(by: AgentId = agent) {
+  const r = await registry.createContribution(by, knowledge());
   if (!r.ok) throw new Error(JSON.stringify(r.error));
   return r.contribution;
 }
@@ -212,6 +214,69 @@ describe("pilot capacity", () => {
     await expect(db.prepare("DELETE FROM pilot_capacity_places").run()).rejects.toThrow();
     await expect(
       db.prepare("UPDATE pilot_capacity_places SET first_version = 2").run(),
+    ).rejects.toThrow();
+  });
+});
+
+// Runs after the cap is full (100 places used). Migration 0025: platform seeding operators.
+describe("pilot capacity exemption", () => {
+  const exempt = (id: string) =>
+    db
+      .prepare(
+        "INSERT INTO pilot_capacity_exempt_operators (operator_id, reason, added_at) VALUES (?, 'platform seeding', '2026-11-22T00:00:00Z')",
+      )
+      .bind(id)
+      .run();
+  async function newOperatorAgent(name: string) {
+    const identity = new IdentityRepository(db);
+    const op = await identity.createOperator({ kind: "organization", displayName: name });
+    await db
+      .prepare("UPDATE operators SET contribution_allow_listed = 1 WHERE id = ?")
+      .bind(op.id)
+      .run();
+    return { op: op.id, agent: (await identity.registerAgent(op.id, { displayName: name })).id };
+  }
+
+  it("lets an exempt operator's records list at full capacity without claiming a place", async () => {
+    expect((await reviewer().capacity()).remaining).toBe(0);
+    const seeder = await newOperatorAgent("Seeder");
+    await exempt(seeder.op);
+    const c = await newContribution(seeder.agent);
+    expect(code(await approve(c.id))).toBe("ok");
+    expect((await store().get(c.id, 1))?.state).toBe("listed_unverified");
+    expect(await places()).toBe(100);
+    expect((await reviewer().capacity()).used).toBe(100);
+  });
+
+  it("stops counting places an operator already holds once it is exempt", async () => {
+    const held = (await db
+      .prepare(
+        `SELECT count(*) AS c FROM pilot_capacity_places p
+           JOIN contributions c ON c.id = p.contribution_id
+          WHERE c.contributor_operator_id = ?`,
+      )
+      .bind(operatorId)
+      .first<{ c: number }>())!.c;
+    expect(held).toBeGreaterThan(0);
+    await exempt(operatorId);
+    expect(await reviewer().capacity()).toEqual({
+      limit: 100,
+      used: 100 - held,
+      remaining: held,
+    });
+    expect(await places()).toBe(100);
+
+    // An outside operator can now take a freed place; the cap still applies to it.
+    const outside = await newOperatorAgent("Outside");
+    const c = await newContribution(outside.agent);
+    expect(code(await approve(c.id))).toBe("ok");
+    expect((await reviewer().capacity()).used).toBe(101 - held);
+    expect(await places()).toBe(101);
+  });
+
+  it("refuses edits to exemption rows", async () => {
+    await expect(
+      db.prepare("UPDATE pilot_capacity_exempt_operators SET reason = 'x'").run(),
     ).rejects.toThrow();
   });
 });

@@ -146,6 +146,7 @@ describe("clean migration", () => {
         "operators",
         "payout_events",
         "payout_requests",
+        "pilot_capacity_exempt_operators",
         "pilot_capacity_places",
         "platform_validations",
         "platform_payment_controls",
@@ -669,6 +670,38 @@ describe("pilot capacity migration 0010", () => {
       TS,
     );
     expect(count("SELECT count(*) AS c FROM pilot_capacity_places")).toBe(100);
+  });
+});
+
+describe("pilot capacity exemption migration 0025", () => {
+  it("lets an exempt operator's approvals through a full cap without claiming a place", () => {
+    for (let i = 0; i < 100; i++) {
+      run(
+        "INSERT INTO pilot_capacity_places (contribution_id, first_version, claimed_at) VALUES (?, 1, ?)",
+        `f-${i}`,
+        TS,
+      );
+    }
+    run(
+      "INSERT INTO pilot_capacity_exempt_operators (operator_id, reason, added_at) VALUES (?, 'platform seeding', ?)",
+      OP,
+      TS,
+    );
+    run(
+      "INSERT INTO version_quality_decisions (contribution_id, version, from_state, to_state, reviewer_id, reason, decided_at) VALUES (?, 1, 'pending', 'listed_unverified', 'r', 'x', ?)",
+      K,
+      TS,
+    );
+    expect(count("SELECT count(*) AS c FROM version_quality_decisions")).toBe(1);
+    expect(count("SELECT count(*) AS c FROM pilot_capacity_places")).toBe(100);
+    expect(count("SELECT count(*) AS c FROM pilot_capacity_counted")).toBe(100);
+    // Places held by non-exempt contributions still enforce the cap.
+    expect(() =>
+      run(
+        "INSERT INTO pilot_capacity_places (contribution_id, first_version, claimed_at) VALUES ('f-x', 1, ?)",
+        TS,
+      ),
+    ).toThrow(/capacity_reached/);
   });
 });
 
