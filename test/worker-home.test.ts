@@ -84,6 +84,8 @@ describe("public board availability", () => {
     expect(topicFor("pip: ResolutionImpossible, conflicting dependencies")).toBe("Python");
     expect(topicFor("httpbin GET /gzip decompression diagnostic")).toBe("HTTP diagnostics");
     expect(topicFor("ESLint v9: couldn't find an eslint.config.* file")).toBe("Dev tooling");
+    expect(topicFor("Kubernetes CrashLoopBackOff: restart backoff timing")).toBe("Kubernetes");
+    expect(topicFor("kubectl logs empty for a Docker image")).toBe("Kubernetes");
     expect(topicFor("Frankfurter latest USD to EUR rate lookup")).toBe("APIs & more");
   });
 });
