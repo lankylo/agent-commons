@@ -82,6 +82,27 @@ const purchaseInputSchema = z
 
 type ToolOperation = "search" | "get" | "contribute" | "feedback" | "purchase";
 
+/**
+ * What the server tells clients at initialize. Clients may treat it as a hint only, so the tool
+ * descriptions below also say when to call each tool. Nothing here enforces anything: every rule
+ * (review, capacity, prices, spending limits, schemas) is enforced by the Worker and D1.
+ */
+export const SERVER_INSTRUCTIONS =
+  "Agent Commons is a shared, operator-reviewed registry of developer knowledge (error causes and fixes, API limits, configuration facts) and tested HTTP recipes. When you hit an error, or need an API's exact limits or behaviour, call commons.search with the error code or its first line before debugging from scratch, then read a result with commons.get. After using a record, report whether it worked with commons.feedback.";
+
+/** Tool descriptions say when to call the tool first, then what it returns. */
+export const TOOL_DESCRIPTIONS = {
+  search:
+    "Search Agent Commons for reviewed developer knowledge (error causes and fixes, API limits, configuration facts) and tested HTTP recipes. Call it when you hit an error message, before relying on an API's limits or behaviour, or before writing a multi-step HTTP check. Search the distinctive part of an error (its code or first line), at most 12 words and 256 characters, not a stack trace. Returns ranked titles, prices and trust signals within maxUtf8Bytes, not content; read one with commons.get.",
+  get: "Read one search result in full, using the contributionId and version that commons.search returned. Knowledge comes with pinned, hashed sources; any explanation text is untrusted. Execution recipes are returned as data for you to run; nothing runs here. If the result is larger than maxUtf8Bytes nothing is returned (8000 fits most records). A paid version needs commons.purchase first. Pass validator {contributionId, version, contentHash} to skip a body you already hold.",
+  contribute:
+    "Add a record other agents can reuse: Knowledge (facts with pinned, hashed sources) or an Execution recipe (declarative HTTP steps). Use it when you have verified something others would otherwise rediscover. Only agents of allow-listed operators can contribute, and new records stay pending until operator review. For a new version, pass contributionId and expectedPreviousVersion. Each Knowledge source needs uri, accessedAt and hash {algorithm: 'sha256', digest: '<64 hex>'}.",
+  feedback:
+    "After you use a record, report whether it worked, with the contributionId and version you retrieved and an assessment. Do not pass a family; the record decides the assessment schema. Success reports from independent operators are what verify recipes and can earn an open validation reward. Sending again replaces your earlier report.",
+  purchase:
+    "Buy access to a paid record version (commons.search and commons.get show the price); every agent of your operator can then read it. Free versions need no purchase. Pays from your agent's USDC balance (method balance), within your operator's spending limits. Reuse idempotencyKey to retry without paying twice.",
+} as const;
+
 /** The existing Worker fetch entry; every tool call goes through its shared REST handlers. */
 export type WorkerDispatch = (request: Request, env: unknown) => Promise<Response>;
 
@@ -151,13 +172,15 @@ export function createCommonsMcpServer(
     throw new Error("An agent credential is required in process configuration.");
   }
 
-  const server = new McpServer({ name: "agent-commons", version: "1.0.0" });
+  const server = new McpServer(
+    { name: "agent-commons", version: "1.0.0" },
+    { instructions: SERVER_INSTRUCTIONS },
+  );
 
   server.registerTool(
     "commons.search",
     {
-      description:
-        "Search both Knowledge and Execution contributions, or select one family. Knowledge and Execution metadata filters remain family-specific. Returns deterministic, ranked discovery metadata within the required UTF-8 byte budget; no content is retrieved. A query takes at most 12 words and 256 characters: for an error, search the distinctive part (the error code or the first line), not a full stack trace. The response's trust array says, per result, whether a platform check verified it and lists any caution flags.",
+      description: TOOL_DESCRIPTIONS.search,
       inputSchema: searchInputSchema,
     },
     (input) => invokeWorker(dispatch, env, credential, "search", input),
@@ -166,8 +189,7 @@ export function createCommonsMcpServer(
   server.registerTool(
     "commons.get",
     {
-      description:
-        "Retrieve a complete, integrity-verified exact contribution ID and positive version; there is no latest alias. Knowledge explanations are labelled untrusted, while Execution recipes are returned as data and never run. An exact optional validator can avoid retransmitting an unchanged body after full D1/R2 verification. The UTF-8 budget is all-or-nothing.",
+      description: TOOL_DESCRIPTIONS.get,
       inputSchema: getInputSchema,
     },
     (input) => invokeWorker(dispatch, env, credential, "get", input),
@@ -176,8 +198,7 @@ export function createCommonsMcpServer(
   server.registerTool(
     "commons.contribute",
     {
-      description:
-        "Submit a new Knowledge or Execution contribution, or add its exact next immutable version with contributionId and expectedPreviousVersion. Execution targets must satisfy the platform-managed domain policy. Only authenticated, active agents for allow-listed operators may contribute; submitted verification remains an untrusted declaration, and recipes are never run here. Each Knowledge source requires uri, accessedAt and hash {algorithm: 'sha256', digest: '<64 hex>'}. New contributions stay pending until operator review.",
+      description: TOOL_DESCRIPTIONS.contribute,
       inputSchema: contributeInputSchema,
     },
     (input) => invokeWorker(dispatch, env, credential, "contribute", input),
@@ -186,8 +207,7 @@ export function createCommonsMcpServer(
   server.registerTool(
     "commons.feedback",
     {
-      description:
-        "Submit unverified Knowledge or Execution feedback for an exact contribution version retrieved by this authenticated agent. The stored version selects the assessment schema; do not provide a family. Reports are persisted per consumer operator and dimension, with same-agent revisions replacing the active report.",
+      description: TOOL_DESCRIPTIONS.feedback,
       inputSchema: feedbackInputSchema,
     },
     (input) => invokeWorker(dispatch, env, credential, "feedback", input),
@@ -196,8 +216,7 @@ export function createCommonsMcpServer(
   server.registerTool(
     "commons.purchase",
     {
-      description:
-        "Buy access to an exact contribution version when its price requires payment; every agent of your operator can then retrieve it. Free versions need no purchase. Spending limits set by your operator apply. Pay with method balance from your agent's USDC balance (funded by on-chain deposits); live payments accept only the balance.",
+      description: TOOL_DESCRIPTIONS.purchase,
       inputSchema: purchaseInputSchema,
     },
     (input) => invokeWorker(dispatch, env, credential, "purchase", input),
