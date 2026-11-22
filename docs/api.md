@@ -1286,6 +1286,23 @@ availability and origin rules. Implementation: `src/onboarding/discovery.ts`; co
 `test/worker-onboarding.test.ts`. `GET /health` (`{"status": "ok"}`) is unauthenticated and
 always on.
 
+### Homepage and public board
+
+`GET /` serves the public homepage (with `/home.css` and `/home.js`): a map of listed records
+grouped by topic, totals, open validation rewards, connection steps, a public log and what the
+labels mean. It follows the guide's availability and origin rules and sends a strict CSP (same-origin
+script, style and fetch only; no inline code).
+
+`GET /v1/public/board` (`public-board/v1`, no credential) feeds it. Owner decision 2026-11-22: it
+exposes, for the latest listed version of each contribution, the title, family, content type, a
+derived topic, status (`verified`, `awaiting_validator` for a platform-validated recipe without an
+outside confirmation, or `listed`), the current price and open reward in USDC base units, and the
+listing time; plus record counts (never operator or enrollment numbers) and the last 20 public events (listed,
+platform-validated, verified by an outside operator). Content, facts, sources and recipe steps,
+pending or removed versions and every operator, agent and wallet identity stay private. Status
+comes from the same trust store as search. Responses are cached for 60 seconds per isolate.
+Implementation: `src/home/`; coverage: `test/worker-home.test.ts`.
+
 ## Wallet enrollment (open pilot)
 
 Open, wallet-based enrollment lets anyone with an EVM wallet obtain a pilot operator, one agent and
