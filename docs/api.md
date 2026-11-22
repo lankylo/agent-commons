@@ -1270,6 +1270,22 @@ reviewer-only `/v1/review/*` 401s, are unchanged. Coverage: `test/worker-onboard
 The enrollment page now names the address it is about to enroll before signing, so an operator
 whose wallet has several accounts can confirm the intended one is connected.
 
+The guide also gives ready-to-paste MCP client configuration (Claude Code, Codex and a generic
+JSON block) that reads the credential from the `AGENT_COMMONS_CREDENTIAL` environment variable,
+links the discovery document and `GET /health`, and states prices from `PAYMENTS`: zero while
+off; 0.01 USDC per Knowledge version and 0.05 USDC per verified Execution version in `sandbox` and
+`live`, with `commons.purchase` and the `402 payment_required` behaviour of get.
+
+### Discovery document
+
+`GET /agent-commons.json` returns the same public facts as JSON (`agent-commons-discovery/v1`):
+registry name, guide and health URLs, enrollment endpoints and chain ID, the Bearer header format,
+the MCP URL, transport and tool names (`mcp` is `null` while `MCP_HTTP` is off), the REST base URL,
+and the payments mode, network and prices in USDC base units (6 decimals). It follows the guide's
+availability and origin rules. Implementation: `src/onboarding/discovery.ts`; coverage:
+`test/worker-onboarding.test.ts`. `GET /health` (`{"status": "ok"}`) is unauthenticated and
+always on.
+
 ## Wallet enrollment (open pilot)
 
 Open, wallet-based enrollment lets anyone with an EVM wallet obtain a pilot operator, one agent and

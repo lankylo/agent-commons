@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import worker from "../src/index";
-import { ONBOARDING_ALIAS_PATH, ONBOARDING_PATH } from "../src/onboarding/document";
+import { DISCOVERY_PATH, ONBOARDING_ALIAS_PATH, ONBOARDING_PATH } from "../src/onboarding/document";
 
 const DOMAIN = "commons.example.org";
 const ORIGIN = `https://${DOMAIN}`;
@@ -28,6 +28,14 @@ function post(path: string, env: Env, headers: Record<string, string> = {}) {
 }
 
 type ErrorBody = { error: { code: string; details?: { onboarding?: string } } };
+type Discovery = {
+  schemaVersion: string;
+  onboarding: string;
+  health: string;
+  enrollment: { chainId: number };
+  mcp: { url: string; tools: string[] } | null;
+  payments: { mode: string | null; pricesMinor: { knowledge: number } };
+};
 
 describe("agent onboarding document", () => {
   it("is unavailable while enrollment is off and fails closed when misconfigured", async () => {
@@ -63,6 +71,68 @@ describe("agent onboarding document", () => {
     const full = await (await fetchAt(ONBOARDING_PATH, enabled)).text();
     expect(full).toContain(`${ORIGIN}/mcp`);
     expect(full).toContain(`${ORIGIN}/v1/commons/needs`);
+  });
+
+  it("gives ready-to-paste client config only when MCP is on", async () => {
+    const basic = await (await fetchAt(ONBOARDING_PATH, ENROLL)).text();
+    expect(basic).not.toContain("claude mcp add");
+    const full = await (await fetchAt(ONBOARDING_PATH, { ...ENROLL, ...MCP })).text();
+    expect(full).toContain(`claude mcp add --transport http agent-commons ${ORIGIN}/mcp`);
+    expect(full).toContain('bearer_token_env_var = "AGENT_COMMONS_CREDENTIAL"');
+    expect(full).toContain('"Authorization": "Bearer ${AGENT_COMMONS_CREDENTIAL}"');
+    expect(full).toContain("`commons.purchase`");
+    expect(full).toContain(`${ORIGIN}${DISCOVERY_PATH}`);
+    expect(full).toContain(`GET ${ORIGIN}/health`);
+  });
+
+  it("states prices that match the payments mode", async () => {
+    const off = await (await fetchAt(ONBOARDING_PATH, ENROLL)).text();
+    expect(off).toContain("Payments are off");
+    expect(off).not.toContain("0.01 per Knowledge");
+    expect(off).not.toContain("|purchase}");
+    const live = await (await fetchAt(ONBOARDING_PATH, { ...ENROLL, PAYMENTS: "live" })).text();
+    expect(live).toContain("0.01 per Knowledge version and 0.05 per verified Execution");
+    expect(live).toContain("402");
+    expect(live).toContain("|purchase}");
+    expect(live).not.toContain("every price is 0");
+    expect(live).not.toContain("free, operator-reviewed");
+  });
+});
+
+describe("machine-readable discovery", () => {
+  it("follows the onboarding availability rules", async () => {
+    const misconfigured = { ...ENROLL, ENROLLMENT_URI: "https://other.example/" };
+    expect((await fetchAt(DISCOVERY_PATH, {})).status).toBe(404);
+    expect((await fetchAt(DISCOVERY_PATH, misconfigured)).status).toBe(503);
+    expect((await fetchAt(DISCOVERY_PATH, ENROLL, { method: "POST" })).status).toBe(404);
+  });
+
+  it("builds endpoints from the configured origin and prices from the mode", async () => {
+    const offRes = await fetchAt(DISCOVERY_PATH, ENROLL, undefined, "attacker.example");
+    expect(offRes.status).toBe(200);
+    expect(offRes.headers.get("Content-Type")).toContain("application/json");
+    const offText = await offRes.text();
+    expect(offText).not.toContain("attacker.example");
+    const off = JSON.parse(offText) as Discovery;
+    expect(off.schemaVersion).toBe("agent-commons-discovery/v1");
+    expect(off.onboarding).toBe(ONBOARDING_URL);
+    expect(off.health).toBe(`${ORIGIN}/health`);
+    expect(off.enrollment.chainId).toBe(1);
+    expect(off.mcp).toBeNull();
+    expect(off.payments.mode).toBe("off");
+    expect(off.payments.pricesMinor.knowledge).toBe(0);
+
+    const liveEnv = { ...ENROLL, ...MCP, PAYMENTS: "live", DEPOSITS: "base" };
+    const live = (await (await fetchAt(DISCOVERY_PATH, liveEnv)).json()) as Discovery;
+    expect(live.mcp?.url).toBe(`${ORIGIN}/mcp`);
+    expect(live.mcp?.tools).toContain("commons.purchase");
+    expect(live.payments).toMatchObject({
+      mode: "live",
+      currency: "USDC",
+      network: "base",
+      pricesMinor: { knowledge: 10_000, verifiedExecution: 50_000, unverifiedExecution: 0 },
+      verificationRewardMinor: 25_000,
+    });
   });
 });
 
