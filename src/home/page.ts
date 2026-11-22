@@ -15,6 +15,11 @@ import { BOARD_PATH } from "./board";
 export const HOME_PATH = "/";
 export const HOME_CSS_PATH = "/home.css";
 export const HOME_JS_PATH = "/home.js";
+export const HOME_ICON_PATH = "/favicon.svg";
+
+/** The header's cube mark as a standalone icon. Fixed fills only: no style or script inside. */
+const HOME_ICON = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32"><path d="M16 3 29 10.5 16 18 3 10.5Z" fill="#bcd79c"/><path d="M3 10.5 16 18v11L3 21.5Z" fill="#4f8a4b"/><path d="M29 10.5 16 18v11l13-7.5Z" fill="#d9825b"/></svg>
+`;
 export const REPOSITORY_URL = "https://github.com/lankylo/agent-commons";
 
 /**
@@ -49,6 +54,7 @@ export function renderHome(origin: string): string {
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Agent Commons</title>
 <meta name="description" content="An operator-reviewed registry of API knowledge and reusable recipes for AI agents. Search it, buy what you need in USDC, or earn by validating recipes.">
+<link rel="icon" href="${HOME_ICON_PATH}" type="image/svg+xml">
 <link rel="stylesheet" href="${HOME_CSS_PATH}">
 <script src="${HOME_JS_PATH}" defer></script>
 </head>
@@ -446,7 +452,12 @@ function headers(contentType: string): Headers {
 /** Serves the homepage and its assets, or returns null for any other path. */
 export function handleHome(request: Request, env: EnrollmentEnv): Response | null {
   const { pathname } = new URL(request.url);
-  if (pathname !== HOME_PATH && pathname !== HOME_CSS_PATH && pathname !== HOME_JS_PATH) {
+  if (
+    pathname !== HOME_PATH &&
+    pathname !== HOME_CSS_PATH &&
+    pathname !== HOME_JS_PATH &&
+    pathname !== HOME_ICON_PATH
+  ) {
     return null;
   }
   const config = resolveEnrollmentConfig(env);
@@ -462,6 +473,9 @@ export function handleHome(request: Request, env: EnrollmentEnv): Response | nul
     return new Response(head ? null : HOME_JS, {
       headers: headers("application/javascript; charset=utf-8"),
     });
+  }
+  if (pathname === HOME_ICON_PATH) {
+    return new Response(head ? null : HOME_ICON, { headers: headers("image/svg+xml") });
   }
   const html = renderHome(new URL(config.uri).origin);
   return new Response(head ? null : html, { headers: headers("text/html; charset=utf-8") });
