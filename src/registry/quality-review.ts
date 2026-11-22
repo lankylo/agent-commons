@@ -25,7 +25,10 @@ export const ALLOWED_TRANSITIONS: Readonly<Record<string, readonly QualityState[
 );
 
 export const MAX_REASON_LENGTH = 500;
-/** Free-pilot cap on distinct approved contribution IDs; mirrored by migration 0010 triggers. */
+/**
+ * Free-pilot cap on distinct approved contribution IDs; mirrored by the migration 0010 triggers
+ * as revised by migration 0025, under which exempt (platform seeding) operators use no place.
+ */
 export const PILOT_CAPACITY_LIMIT = 100;
 
 export interface PilotCapacity {
@@ -187,7 +190,7 @@ export class QualityReviewer {
   /** Private view of pilot places used and remaining (never exposed through a public endpoint). */
   async capacity(): Promise<PilotCapacity> {
     const row = await this.db
-      .prepare("SELECT count(*) AS used FROM pilot_capacity_places")
+      .prepare("SELECT count(*) AS used FROM pilot_capacity_counted")
       .first<{ used: number }>();
     const used = row?.used ?? 0;
     return {
@@ -251,12 +254,16 @@ export class QualityReviewer {
   private async atCapacityFor(contributionId: string): Promise<boolean> {
     const row = await this.db
       .prepare(
-        `SELECT (SELECT count(*) FROM pilot_capacity_places) AS used,
-                EXISTS (SELECT 1 FROM pilot_capacity_places WHERE contribution_id = ?) AS held`,
+        `SELECT (SELECT count(*) FROM pilot_capacity_counted) AS used,
+                EXISTS (SELECT 1 FROM pilot_capacity_places WHERE contribution_id = ?1) AS held,
+                EXISTS (SELECT 1 FROM contributions c
+                          JOIN pilot_capacity_exempt_operators e
+                            ON e.operator_id = c.contributor_operator_id
+                         WHERE c.id = ?1) AS exempt`,
       )
       .bind(contributionId)
-      .first<{ used: number; held: number }>();
-    return !!row && row.held === 0 && row.used >= PILOT_CAPACITY_LIMIT;
+      .first<{ used: number; held: number; exempt: number }>();
+    return !!row && row.held === 0 && row.exempt === 0 && row.used >= PILOT_CAPACITY_LIMIT;
   }
 
   /** Integrity-checked retrieval (same D1/R2 path as `commons.get`) plus state and history. */

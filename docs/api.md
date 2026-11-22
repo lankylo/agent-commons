@@ -1476,6 +1476,21 @@ and withdrawals do not claim or free places. At 100 approved IDs, further approv
 `capacity_reached`. Enrolling therefore does not reserve a place, and many enrolled wallets can
 exist with none approved.
 
+**Platform seeding uses no places (migration 0025).** The 100 places are for outside
+contributors. An operator listed in `pilot_capacity_exempt_operators` claims no place when its
+contributions are approved, and places it already holds stop counting, so `capacity` reports only
+non-exempt places in `used`. Place rows stay permanent. The owner adds the platform's seeding
+operator once, after finding its ID from the operators that hold places:
+
+```sh
+npx wrangler d1 execute DB --remote --config wrangler.pilot.local.jsonc --command \
+  "SELECT c.contributor_operator_id AS operator, count(*) AS places FROM pilot_capacity_places p JOIN contributions c ON c.id = p.contribution_id GROUP BY 1"
+npx wrangler d1 execute DB --remote --config wrangler.pilot.local.jsonc --command \
+  "INSERT INTO pilot_capacity_exempt_operators (operator_id, reason, added_at) VALUES ('<operator id>', 'platform seeding', strftime('%Y-%m-%dT%H:%M:%SZ','now'))"
+```
+
+Never add an outside operator: exemption bypasses the cap entirely for that operator.
+
 **Configuration files.** Copy `wrangler.pilot.template.jsonc` to the git-ignored
 `wrangler.pilot.local.jsonc` and edit only the copy. The template keeps account IDs, hostnames and
 secrets out of the repository, and contains no policy values: the two required contribution
