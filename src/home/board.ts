@@ -84,7 +84,6 @@ export interface Board {
     readonly verified: number;
     readonly openRewards: number;
     readonly openRewardsMinor: number;
-    readonly enrolledOperators: number;
   };
   readonly records: readonly BoardRecord[];
   readonly activity: readonly BoardActivity[];
@@ -138,8 +137,6 @@ const ACTIVITY_SQL = `SELECT kind, at, title, family FROM (
 ORDER BY at DESC
 LIMIT ?1`;
 
-const ENROLLED_SQL = "SELECT COUNT(*) AS n FROM wallet_accounts";
-
 interface RecordRow {
   id: string;
   version: number;
@@ -164,10 +161,9 @@ export async function buildBoard(db: D1Database, env: BoardEnv, now: Date): Prom
   const paid = mode === "sandbox" || mode === "live";
   const prices = paid ? PAID_PRICE_LIST : PILOT_PRICE_LIST;
 
-  const [recordRows, activityRows, enrolled] = await Promise.all([
+  const [recordRows, activityRows] = await Promise.all([
     db.prepare(RECORDS_SQL).bind(BOARD_LIMITS.records).all<RecordRow>(),
     db.prepare(ACTIVITY_SQL).bind(BOARD_LIMITS.activity).all<ActivityRow>(),
-    db.prepare(ENROLLED_SQL).first<{ n: number }>(),
   ]);
   const rows = recordRows.results.filter((r) => isFamily(r.family));
   const trust = await new TrustStore(db, () => now).read(
@@ -221,7 +217,6 @@ export async function buildBoard(db: D1Database, env: BoardEnv, now: Date): Prom
       verified: records.filter((r) => r.status === "verified").length,
       openRewards: open.length,
       openRewardsMinor: open.reduce((sum, r) => sum + r.rewardMinor, 0),
-      enrolledOperators: enrolled?.n ?? 0,
     },
     records,
     activity,

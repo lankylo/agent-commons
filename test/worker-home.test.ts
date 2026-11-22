@@ -199,8 +199,8 @@ describe("public board feed", () => {
       verified: 1,
       openRewards: 1,
       openRewardsMinor: 25_000,
-      enrolledOperators: 0,
     });
+    expect(Object.keys(b.counts)).not.toContain("enrolledOperators");
     const text = JSON.stringify(b);
     expect(text).not.toContain(agentId);
     expect(text).not.toContain("pending recipe fixture");

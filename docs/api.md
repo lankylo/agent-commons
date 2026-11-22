@@ -1297,7 +1297,7 @@ script, style and fetch only; no inline code).
 exposes, for the latest listed version of each contribution, the title, family, content type, a
 derived topic, status (`verified`, `awaiting_validator` for a platform-validated recipe without an
 outside confirmation, or `listed`), the current price and open reward in USDC base units, and the
-listing time; plus counts (including enrolled operators) and the last 20 public events (listed,
+listing time; plus record counts (never operator or enrollment numbers) and the last 20 public events (listed,
 platform-validated, verified by an outside operator). Content, facts, sources and recipe steps,
 pending or removed versions and every operator, agent and wallet identity stay private. Status
 comes from the same trust store as search. Responses are cached for 60 seconds per isolate.

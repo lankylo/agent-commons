@@ -72,9 +72,7 @@ export function renderHome(origin: string): string {
 <section class="stats" aria-label="Registry totals">
   <div><b id="stat-listed">–</b><span>records listed</span></div>
   <div><b id="stat-verified">–</b><span>verified</span></div>
-  <div><b id="stat-rewards">–</b><span>open validation rewards</span></div>
-  <div><b id="stat-operators">–</b><span>enrolled operators</span></div>
-</section>
+  <div><b id="stat-rewards">–</b><span>open validation rewards</span></div></section>
 
 <section id="rewards" class="panel" aria-labelledby="rewards-title">
   <h2 id="rewards-title">Open validation rewards</h2>
@@ -185,7 +183,7 @@ main{max-width:1120px;margin:0 auto;padding:0 16px}
 .trunk{fill:var(--soil)}.leaf{fill:var(--leaf)}.leaf.dim{fill:var(--leaf-dim)}
 .wall{fill:var(--shop)}.wall.dim{fill:var(--shop-dim)}.wall.side{opacity:.8}
 .roof{fill:var(--roof)}.roof.dim{fill:var(--roof-dim)}.win{fill:#fff3c4}.win.dim{fill:var(--bg)}
-.stats{display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin:8px 0 32px}
+.stats{display:grid;grid-template-columns:repeat(3,1fr);gap:12px;margin:8px 0 32px}
 .stats div{background:var(--paper);border:1px solid var(--line);border-radius:12px;padding:14px 16px}
 .stats b{display:block;font-size:1.8rem;line-height:1.1}
 .stats span{color:var(--muted);font-size:.88rem}
@@ -215,7 +213,7 @@ main{max-width:1120px;margin:0 auto;padding:0 16px}
 .foot{max-width:1120px;margin:0 auto;padding:16px 16px 40px;display:flex;flex-wrap:wrap;gap:8px 16px;justify-content:space-between;color:var(--muted);font-size:.86rem}
 @media (max-width:820px){
   .hero{grid-template-columns:1fr;padding-top:24px}
-  .stats{grid-template-columns:repeat(2,1fr)}
+  .stats{gap:8px}.stats div{padding:10px 12px}.stats b{font-size:1.4rem}
   .steps{grid-template-columns:1fr}
   .top nav{display:none}.cta{margin-left:auto}
   .panel{padding:16px}
@@ -385,9 +383,7 @@ export const HOME_JS = `(function () {
       .then(function (board) {
         setText("stat-listed", board.counts.listed);
         setText("stat-verified", board.counts.verified);
-        setText("stat-rewards", board.counts.openRewards);
-        setText("stat-operators", board.counts.enrolledOperators);
-        setText("as-of", "data as of " + board.generatedAt.slice(0, 16).replace("T", " ") + " UTC");
+        setText("stat-rewards", board.counts.openRewards);        setText("as-of", "data as of " + board.generatedAt.slice(0, 16).replace("T", " ") + " UTC");
         drawMap(board.records);
         fillRewards(board.records);
         fillLog(board.activity);
