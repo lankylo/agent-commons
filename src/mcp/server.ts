@@ -40,20 +40,26 @@ const getInputSchema = z
   })
   .passthrough();
 
-const contributeInputSchema = z.union([
-  z
-    .object({
-      contribution: contributionInput,
-    })
-    .passthrough(),
-  z
-    .object({
-      contributionId: z.string().min(1),
-      expectedPreviousVersion: z.number().int().positive().safe(),
-      contribution: contributionInput,
-    })
-    .passthrough(),
-]);
+// One flat object, not a union: Anthropic's API rejects a tool whose input schema has oneOf, anyOf
+// or allOf at the top level, and one such tool fails the whole request, so the model gets no tools.
+// The REST handler still requires contributionId and expectedPreviousVersion together.
+const contributeInputSchema = z
+  .object({
+    contribution: contributionInput,
+    contributionId: z
+      .string()
+      .min(1)
+      .optional()
+      .describe("Only to add a new version: the existing contribution's ID."),
+    expectedPreviousVersion: z
+      .number()
+      .int()
+      .positive()
+      .safe()
+      .optional()
+      .describe("Only to add a new version, with contributionId: the current latest version."),
+  })
+  .passthrough();
 
 const feedbackInputSchema = z
   .object({
