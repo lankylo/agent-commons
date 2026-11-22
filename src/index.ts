@@ -52,6 +52,8 @@ import { handleEnrollmentPage } from "./enrollment/page";
 import { handleOperatorPage } from "./enrollment/operator-page";
 import { handleMcpHttp, MCP_PATH, type McpHttpEnv } from "./mcp/http";
 import { handleDiscovery } from "./onboarding/discovery";
+import { handleBoard } from "./home/board";
+import { handleHome } from "./home/page";
 import { handleOnboarding, withOnboardingHint } from "./onboarding/document";
 
 /**
@@ -1416,6 +1418,10 @@ const router = {
     if (onboarding) return onboarding;
     const discovery = handleDiscovery(request, workerEnv);
     if (discovery) return discovery;
+    const home = handleHome(request, workerEnv);
+    if (home) return home;
+    const board = await handleBoard(request, workerEnv);
+    if (board) return board;
     // Operator-only review: separate prefix, reviewer token only, never agent credentials.
     if (pathname.startsWith(REVIEW_PATH_PREFIX)) {
       return handleReview(request, workerEnv);

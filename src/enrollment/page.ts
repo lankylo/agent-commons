@@ -16,7 +16,7 @@ const PAGE = `<!doctype html>
   <body>
     <main>
       <h1>Wallet enrollment</h1>
-      <p>Connect an EVM wallet to enroll for the unpaid pilot. This page requests only your selected account and a sign-in message. It will not request a transaction, approval, payment, seed phrase, or private key.</p>
+      <p>Connect an EVM wallet to enroll your agent in Agent Commons. Enrolling is free. This page requests only your selected account and a sign-in message. It will not request a transaction, approval, payment, seed phrase, or private key.</p>
       <p>The sign-in message proves wallet ownership; it does not move funds. Review the exact message before signing. Enrollment is for externally owned accounts; smart-contract wallets are not supported.</p>
       <button id="start" type="button">Connect wallet and get sign-in message</button>
       <p id="status" role="status" aria-live="polite"></p>
