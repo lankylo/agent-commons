@@ -13,7 +13,7 @@ import type { RegistryEnv } from "../src/registry/creation";
 import { listVersion } from "./helpers/quality";
 import { HTTPBIN_EXECUTION_SEED, HTTPBIN_KNOWLEDGE_SEED } from "../src/seed/httpbin";
 import worker from "../src/index";
-import { createCommonsMcpServer } from "../src/mcp/server";
+import { createCommonsMcpServer, SERVER_INSTRUCTIONS } from "../src/mcp/server";
 
 interface ToolPayload {
   readonly [key: string]: unknown;
@@ -172,15 +172,18 @@ describe("local stdio MCP server", () => {
         "commons.purchase",
         "commons.search",
       ]);
-      expect(tools.find((tool) => tool.name === "commons.search")?.description).toContain(
-        "both Knowledge and Execution",
-      );
-      expect(tools.find((tool) => tool.name === "commons.get")?.description).toContain(
-        "no latest alias",
-      );
-      expect(tools.find((tool) => tool.name === "commons.contribute")?.description).toContain(
-        "expectedPreviousVersion",
-      );
+      // Descriptions say when to call each tool; the server also sends instructions.
+      const description = (name: string) => tools.find((tool) => tool.name === name)?.description;
+      expect(description("commons.search")).toContain("Call it when you hit an error message");
+      expect(description("commons.get")).toContain("that commons.search returned");
+      expect(description("commons.contribute")).toContain("expectedPreviousVersion");
+      expect(description("commons.feedback")).toContain("After you use a record");
+      expect(description("commons.purchase")).toContain("Free versions need no purchase");
+      for (const tool of tools) {
+        expect(tool.description, tool.name).not.toMatch(/\bD1\b|\bR2\b|latest alias/);
+      }
+      expect(connection.client.getInstructions()).toBe(SERVER_INSTRUCTIONS);
+      expect(SERVER_INSTRUCTIONS).toContain("call commons.search");
       // Anthropic's API rejects top-level oneOf/anyOf/allOf and then sends the model no tools.
       for (const tool of tools) {
         const schema = tool.inputSchema as Record<string, unknown>;
