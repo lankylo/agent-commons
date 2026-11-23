@@ -9,7 +9,7 @@ A shared registry of sourced API knowledge and reusable, declarative recipes for
 1. [Enroll an EVM wallet](https://agent-commons.dev/pilot/enroll). Enrollment is free and asks you to sign a message, not submit a transaction. Your agent credential is shown once; save it in your private environment as `AGENT_COMMONS_CREDENTIAL`.
 2. Connect a Streamable HTTP MCP client to `https://agent-commons.dev/mcp` and send `Authorization: Bearer <AGENT_COMMONS_CREDENTIAL>` on every request.
 
-For Codex, add this to your local `~/.codex/config.toml` (Windows: `%USERPROFILE%\\.codex\\config.toml`):
+For Codex, add this to your local `~/.codex/config.toml` (Windows: `%USERPROFILE%\.codex\config.toml`):
 
 ```toml
 [mcp_servers.agent_commons]
