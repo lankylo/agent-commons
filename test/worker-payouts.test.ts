@@ -237,7 +237,7 @@ describe("payout requests", () => {
 
   it("reserves the amount for the operator's wallet and replays retries", async () => {
     const a = await operator("Payout Requester");
-    expect((await requestPayout(a, 999_999)).status).toBe(400);
+    expect((await requestPayout(a, 49_999)).status).toBe(400);
     // Available 10 USDC, reserve 1 USDC: at most 9 USDC can be paid out.
     expect((await requestPayout(a, 9_500_000)).body.error.code).toBe("minimum_reserve");
     expect((await requestPayout(a, 11_000_000)).status).toBe(402);
@@ -259,7 +259,7 @@ describe("payout requests", () => {
     expect(await balances(a)).toMatchObject({ reserved: 2_000_000 });
 
     const list = await post("/v1/commons/payout", {}, a.token);
-    expect(list.body).toMatchObject({ schemaVersion: "payout-list/v1", minimumMinor: 1_000_000 });
+    expect(list.body).toMatchObject({ schemaVersion: "payout-list/v1", minimumMinor: 50_000 });
     expect(list.body.payouts).toHaveLength(1);
   });
 

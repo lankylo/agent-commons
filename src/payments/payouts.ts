@@ -27,8 +27,11 @@ import { Ledger } from "./ledger";
 import { PAYMENT_CURRENCY } from "./pricing";
 import { SpendingControls } from "./spending-controls";
 
-/** Smallest payout: 1 USDC, so network fees stay small relative to the amount. */
-export const MIN_PAYOUT_MINOR = 1_000_000;
+/**
+ * Smallest payout: 0.05 USDC (owner decision 2026-11-25, was 1 USDC). A USDC transfer on Base
+ * costs a fraction of a cent in gas, so small payouts stay worthwhile.
+ */
+export const MIN_PAYOUT_MINOR = 50_000;
 const MAX_AMOUNT = 1_000_000_000_000;
 const KEY = /^[\w:.-]{8,128}$/;
 

@@ -7,8 +7,8 @@
  * - critical: a negative balance bucket; credited deposits that differ from deposit ledger entries;
  *   sent payouts that differ from withdrawals; the platform wallet holding less USDC than the
  *   platform owes agents (`underfunded`);
- * - warning: approved payouts waiting to be sent for more than 2 days; earnings past the 7-day
- *   hold that have not settled for 2 more days; verification rewards at 80% of the cap or more;
+ * - warning: approved payouts waiting to be sent for more than 2 days; earnings past the
+ *   settlement hold (none since migration 0026) that have not settled for 2 more days; verification rewards at 80% of the cap or more;
  *   the chain could not be read;
  * - info: payments are stopped.
  *

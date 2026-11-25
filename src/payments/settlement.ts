@@ -1,10 +1,10 @@
 /**
  * Settlement, refunds and reversals (Phase 6, no live money).
  *
- * - {@link settleDue}: moves earnings and rewards from `pending` to `available` once the 7-day
- *   hold has passed and, for ones that name a contribution version, while that version is still
- *   verified. Runs on the scheduled trigger and on demand from the review interface. D1 enforces
- *   the same rules (migration 0021).
+ * - {@link settleDue}: moves earnings and rewards from `pending` to `available`. There is no
+ *   hold (owner decision 2026-11-25, migration 0026); ones that name a contribution version settle
+ *   only while that version is still verified. Runs on every scheduled trigger and on demand from
+ *   the review interface. D1 enforces the verification rule (migration 0021).
  * - {@link refundPurchase}: returns a purchase to the buyer's available balance, claws back the
  *   contributor's share (from pending, and from available for any part already settled) and
  *   withdraws the licence. All in one D1 batch, so it happens completely or not at all.
@@ -13,7 +13,8 @@
  *
  * Every refund and reversal is recorded in `ledger_adjustments` with its reason and who made it.
  */
-export const SETTLEMENT_HOLD_DAYS = 7;
+/** Days an earning waits before settling. 0: it settles on the next run once verified. */
+export const SETTLEMENT_HOLD_DAYS = 0;
 const EARNINGS = "('task_earning','tip','contribution_revenue_share')";
 
 /** Amounts already drawn from an earning `e`. */

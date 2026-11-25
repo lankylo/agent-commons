@@ -1032,12 +1032,15 @@ Implementation: `src/payments/platform.ts`, migration `0019_payment_controls.sql
 Implementation: `src/payments/settlement.ts`, migration `0021_settlement_refunds.sql`; coverage:
 `test/worker-settlement.test.ts`.
 
-- **Settlement after a 7-day hold.** Earnings and rewards stay `pending` for 7 days. After that,
-  they move to `available` in one `settlement` entry, but only while the version they name is
-  still verified; one that loses verification stays pending and can be reversed. The scheduled
-  trigger settles due earnings on every run (at most 200 per run), and
-  `npm run review:remote -- settle [limit]` does it on demand (`settlement-run/v1`). D1 refuses an
-  early settlement (`settlement_hold`) or one for an unverified version (`settlement_unverified`).
+- **Settlement, with no hold.** Earnings and rewards move from `pending` to `available` in one
+  `settlement` entry on the next run after they are recorded (owner decision 2026-11-25, migration
+  0026; the 7-day hold from migration 0021 is removed). They are only issued once their version is
+  verified, and they settle only while it still is; one that loses verification stays pending and
+  can be reversed. Both scheduled triggers settle due earnings on every run (at most 200 per run),
+  so a new earning is available within about 15 minutes, and
+  `npm run review:remote -- settle [limit]` does it on demand (`settlement-run/v1`). D1 refuses a
+  settlement for an unverified version (`settlement_unverified`). Without a hold, a refund after
+  the contributor has been paid out cannot claw the share back (`insufficient_balance`).
 - **Refunds.** `npm run review:remote -- refund <purchaseRef> "<reason>"` refunds a purchase in
   full, in one D1 batch:
   - the price goes back to the buyer's agent as available balance;
@@ -1121,8 +1124,8 @@ version. The platform's own validation is never paid. Rules, enforced in D1 (mig
 - at most 20 rewards per operator per UTC day (`reward_limit`), within the platform reward cap.
 
 Rewards accrue only while payments are on (`PAYMENTS=sandbox`). One that becomes due while they
-are off is issued with the next report or validation once they are on. Rewards settle after the
-7-day hold and can be reversed (above). Implementation: `src/payments/earnings.ts`.
+are off is issued with the next report or validation once they are on. Rewards settle on the next
+scheduled run and can be reversed until they are paid out (above). Implementation: `src/payments/earnings.ts`.
 
 `purchase_entitlements` holds one row per operator and exact version. Each row must name a recorded
 `purchase` ledger entry of that operator and version, and rows are never changed or deleted.
@@ -1151,7 +1154,7 @@ The report covers:
 | `payout_mismatch` | critical | Sent payouts differ from withdrawals. |
 | `underfunded` | critical | The platform wallet holds less USDC than the platform owes agents. Expected while sandbox purchases or platform rewards are not backed by deposits. |
 | `payouts_waiting` | warning | Approved payouts have waited more than 2 days to be sent. |
-| `settlement_backlog` | warning | Earnings are more than 2 days past the 7-day hold and not settled. |
+| `settlement_backlog` | warning | Earnings are more than 2 days old and not settled. |
 | `reward_cap_near` | warning | Rewards are at 80% of the cap or more. |
 | `chain_unavailable` | warning | The wallet balance could not be read. |
 | `payments_stopped` | info | Payments are stopped. |
@@ -1168,7 +1171,7 @@ configuration (`DEPOSITS=base-sepolia`, `DEPOSIT_ADDRESS`), since they are sent 
 platform wallet. Implementation: `src/payments/payouts.ts`; coverage: `test/worker-payouts.test.ts`.
 
 1. **Request.** `POST /v1/commons/payout` with `{amountMinor, idempotencyKey}` (agent credential).
-   The minimum is 1 USDC. The amount must leave the policy's minimum reserve, and it moves from
+   The minimum is 0.05 USDC (`50000`). The amount must leave the policy's minimum reserve, and it moves from
    available to reserved. The response is `payout-request/v1`; a retry with the same key replays
    it. `{}` lists the agent's payout requests.
 2. **Approval.** The operator signs with its wallet: `POST /v1/enroll/spending-challenge` with
