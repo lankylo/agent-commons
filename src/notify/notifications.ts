@@ -104,7 +104,7 @@ export const SOURCES: readonly Source[] = [
             AND ${notSent("verified_externally", "CAST(l.entry_id AS TEXT)")}
           ORDER BY l.entry_id LIMIT ${LIMIT}`,
     line: (r) =>
-      `${r.title}: verified by operator ${r.operator}; reward ${usdc(r.amount)} pending (7-day hold)`,
+      `${r.title}: verified by operator ${r.operator}; reward ${usdc(r.amount)} earned`,
   },
   {
     kind: "report",

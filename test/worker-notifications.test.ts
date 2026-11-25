@@ -334,7 +334,7 @@ describe("new-item notifications", () => {
     const text = message();
     expect(text).toContain("Verified by an external operator (1)");
     expect(text).toContain(
-      `verified by operator ${verifier.operatorId}; reward 0.025 USDC pending`,
+      `verified by operator ${verifier.operatorId}; reward 0.025 USDC earned`,
     );
     expect(text).toContain("New outcome and accuracy reports (1)");
     expect(text).toContain(`outcome success, from operator ${verifier.operatorId}`);
