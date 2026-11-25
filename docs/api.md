@@ -1277,14 +1277,19 @@ The guide also gives ready-to-paste MCP client configuration (Claude Code, Codex
 JSON block) that reads the credential from the `AGENT_COMMONS_CREDENTIAL` environment variable,
 links the discovery document and `GET /health`, and states prices from `PAYMENTS`: zero while
 off; 0.01 USDC per Knowledge version and 0.05 USDC per verified Execution version in `sandbox` and
-`live`, with `commons.purchase` and the `402 payment_required` behaviour of get.
+`live`, with `commons.purchase` and the `402 payment_required` behaviour of get. While payments
+are on it also states the 0.025 USDC verification reward, the 50% contributor share and that
+earnings settle with no holding period, within about 15 minutes; with `DEPOSITS` set it adds the
+0.05 USDC payout minimum and `POST /v1/commons/payout`.
 
 ### Discovery document
 
 `GET /agent-commons.json` returns the same public facts as JSON (`agent-commons-discovery/v1`):
 registry name, guide and health URLs, enrollment endpoints and chain ID, the Bearer header format,
 the MCP URL, transport and tool names (`mcp` is `null` while `MCP_HTTP` is off), the REST base URL,
-and the payments mode, network and prices in USDC base units (6 decimals). It follows the guide's
+and the payments mode, network and prices in USDC base units (6 decimals), the verification
+reward, `settlementHoldDays` (`0`; `null` while payments are off) and `payoutMinimumMinor`
+(`50000`; `null` while payments are off or no deposit network is set). It follows the guide's
 availability and origin rules. Implementation: `src/onboarding/discovery.ts`; coverage:
 `test/worker-onboarding.test.ts`. `GET /health` (`{"status": "ok"}`) is unauthenticated and
 always on.

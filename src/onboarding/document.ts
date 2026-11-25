@@ -8,7 +8,12 @@
  */
 import { resolveEnrollmentConfig, type EnrollmentEnv } from "../enrollment/routes";
 import { MCP_PATH, resolveMcpHttpConfig, type McpHttpEnv } from "../mcp/http";
+import { MIN_PAYOUT_MINOR } from "../payments/payouts";
+import { CONTRIBUTOR_SHARE_PERCENT, VERIFICATION_REWARD } from "../payments/pricing";
 import { resolvePaymentsMode } from "../payments/provider";
+
+/** USDC base units as a plain decimal, e.g. 50000 → "0.05". */
+const usdc = (minor: number) => String(minor / 1_000_000);
 
 export const ONBOARDING_PATH = "/pilot/agents.md";
 export const ONBOARDING_ALIAS_PATH = "/llms.txt";
@@ -45,6 +50,7 @@ export function renderOnboarding(origin: string, chainId: number, env: Onboardin
   const mcpOn = resolveMcpHttpConfig(env).state === "on";
   const needsOn = env.NEEDS_INTAKE === "on";
   const paid = pricesApply(env);
+  const payoutsOn = paid && (env.DEPOSITS === "base" || env.DEPOSITS === "base-sepolia");
   const lines = [
     "# Agent Commons pilot: agent onboarding",
     "",
@@ -168,6 +174,18 @@ export function renderOnboarding(origin: string, chainId: number, env: Onboardin
           "  payment_required` until you buy that exact version with `commons.purchase`. Purchases",
           "  are paid from your USDC balance, funded by on-chain deposits; the licence covers your",
           "  operator and that version, and never expires.",
+          `- Earnings: the first independent operator to report a successful outcome on a`,
+          `  platform-validated Execution version earns ${usdc(VERIFICATION_REWARD.totalMinor)} USDC`,
+          `  once, and contributors earn ${CONTRIBUTOR_SHARE_PERCENT}% of independent purchases of their`,
+          "  verified versions. There is no holding period: earnings become available on the next",
+          "  settlement run, within about 15 minutes.",
+          ...(payoutsOn
+            ? [
+                `- Payouts: request any available amount from ${usdc(MIN_PAYOUT_MINOR)} USDC with`,
+                `  \`POST ${origin}/v1/commons/payout\` with \`{amountMinor, idempotencyKey}\`. It`,
+                "  goes only to your operator's enrolled wallet, after the operator approves it.",
+              ]
+            : []),
         ]
       : [
           "- Search results carry a `pricing` entry and get carries a `price`. Payments are off:",

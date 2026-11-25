@@ -97,6 +97,22 @@ describe("agent onboarding document", () => {
     expect(live).not.toContain("every price is 0");
     expect(live).not.toContain("free, operator-reviewed");
   });
+
+  it("states earnings, settlement and the payout minimum while payments are on", async () => {
+    const off = await (await fetchAt(ONBOARDING_PATH, ENROLL)).text();
+    expect(off).not.toContain("Earnings:");
+    expect(off).not.toContain("Payouts:");
+    const live = await (await fetchAt(ONBOARDING_PATH, { ...ENROLL, PAYMENTS: "live" })).text();
+    expect(live).toContain("earns 0.025 USDC");
+    expect(live).toContain("contributors earn 50%");
+    expect(live).toContain("There is no holding period");
+    expect(live).not.toContain("Payouts:");
+    const paying = await (
+      await fetchAt(ONBOARDING_PATH, { ...ENROLL, PAYMENTS: "live", DEPOSITS: "base" })
+    ).text();
+    expect(paying).toContain("from 0.05 USDC");
+    expect(paying).toContain(`POST ${ORIGIN}/v1/commons/payout`);
+  });
 });
 
 describe("machine-readable discovery", () => {
@@ -132,7 +148,10 @@ describe("machine-readable discovery", () => {
       network: "base",
       pricesMinor: { knowledge: 10_000, verifiedExecution: 50_000, unverifiedExecution: 0 },
       verificationRewardMinor: 25_000,
+      settlementHoldDays: 0,
+      payoutMinimumMinor: 50_000,
     });
+    expect(off.payments).toMatchObject({ settlementHoldDays: null, payoutMinimumMinor: null });
   });
 });
 

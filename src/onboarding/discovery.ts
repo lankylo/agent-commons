@@ -9,7 +9,9 @@
  */
 import { resolveEnrollmentConfig } from "../enrollment/routes";
 import { MCP_PATH, resolveMcpHttpConfig } from "../mcp/http";
+import { MIN_PAYOUT_MINOR } from "../payments/payouts";
 import { PAID_PRICES, VERIFICATION_REWARD } from "../payments/pricing";
+import { SETTLEMENT_HOLD_DAYS } from "../payments/settlement";
 import { resolvePaymentsMode } from "../payments/provider";
 import {
   DISCOVERY_PATH,
@@ -63,6 +65,8 @@ export function renderDiscovery(origin: string, chainId: number, env: Onboarding
           }
         : { knowledge: 0, verifiedExecution: 0, unverifiedExecution: 0 },
       verificationRewardMinor: paid ? VERIFICATION_REWARD.totalMinor : 0,
+      settlementHoldDays: paid ? SETTLEMENT_HOLD_DAYS : null,
+      payoutMinimumMinor: paid && network ? MIN_PAYOUT_MINOR : null,
     },
   };
 }
