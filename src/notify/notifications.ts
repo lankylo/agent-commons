@@ -103,8 +103,7 @@ export const SOURCES: readonly Source[] = [
           WHERE l.entry_type = 'task_earning'
             AND ${notSent("verified_externally", "CAST(l.entry_id AS TEXT)")}
           ORDER BY l.entry_id LIMIT ${LIMIT}`,
-    line: (r) =>
-      `${r.title}: verified by operator ${r.operator}; reward ${usdc(r.amount)} pending (7-day hold)`,
+    line: (r) => `${r.title}: verified by operator ${r.operator}; reward ${usdc(r.amount)} earned`,
   },
   {
     kind: "report",

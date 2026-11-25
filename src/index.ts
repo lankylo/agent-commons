@@ -1513,14 +1513,20 @@ const worker = {
 
   /**
    * Cron entry point. The daily trigger runs one bounded batch of Knowledge source re-checks,
-   * settlement, reconciliation, new-item notifications and the daily summary; `NOTIFY_CRON` only
-   * announces new items. Nothing runs unless the deployment configures cron triggers.
+   * settlement, reconciliation, new-item notifications and the daily summary; `NOTIFY_CRON`
+   * settles earnings and announces new items, so a verified earning is available within minutes. Nothing runs unless the deployment configures cron triggers.
    */
   async scheduled(controller: unknown, env?: unknown): Promise<void> {
     const workerEnv = (env ?? {}) as WorkerEnv;
     if (!workerEnv.DB) return;
-    // The frequent cron only announces new items; every other trigger runs the daily jobs too.
+    // The frequent cron settles earnings and announces new items; every other trigger runs the
+    // daily jobs too.
     if ((controller as { cron?: unknown } | undefined)?.cron === NOTIFY_CRON) {
+      try {
+        await settleDue(workerEnv.DB, workerEnv.NOW);
+      } catch {
+        // Nothing settles (for example while payments are stopped); it is retried next run.
+      }
       try {
         await notifyNew(workerEnv.DB, workerEnv, workerEnv.NOW);
       } catch {

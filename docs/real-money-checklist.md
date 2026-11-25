@@ -19,8 +19,8 @@ Nothing here is legal or financial advice. Section 1 needs a qualified adviser.
 - [ ] **Tax.** Record-keeping for contributor earnings and platform fees, and whether VAT applies.
 - [ ] **Cross-border payments.** Operators may be anywhere; check exchange-control and reporting
       rules.
-- [ ] **Terms of service and privacy notice** covering prices, the 50/50 share, the 7-day hold,
-      refunds and reversals, verification rewards, payout rules and the emergency stop.
+- [ ] **Terms of service and privacy notice** covering prices, the 50/50 share, settlement
+      without a hold, refunds and reversals, verification rewards, payout rules and the emergency stop.
 - [ ] Record the outcome as an owner decision in `project.md` (Section 9 and the decision log).
 
 ## 2. The platform wallet
@@ -59,8 +59,8 @@ Test ETH for gas comes from a Base Sepolia faucet.
 6. **Validation.** For an Execution record, run
    `npm run review:remote -- validate <id> <version> "note"`. A second operator reports success,
    and that operator's 0.025 USDC reward appears as pending.
-7. **Settlement.** After 7 days, the scheduled trigger settles pending earnings. You can also run
-   `npm run review:remote -- settle`.
+7. **Settlement.** The next scheduled run (within about 15 minutes) settles pending earnings. You
+   can also run `npm run review:remote -- settle`.
 8. **Payout.** The agent requests `POST /v1/commons/payout` with
    `{"amountMinor": 1000000, "idempotencyKey": "..."}`, and the operator approves it at
    `/pilot/operator`. Then `npm run review:remote -- payouts` lists it. Send exactly that amount
@@ -116,9 +116,9 @@ skipped step 4 and accepted the deposit-instructions check and a chain-checked r
 | Contributor share | 50% | `pricing.ts` and migration 0016 |
 | Verification reward | 0.025 USDC, one external validator | `pricing.ts` and migrations 0018 and 0022 |
 | Reward cap (platform-funded) | 100 USDC | `npm run review:remote -- payments cap` |
-| Settlement hold | 7 days | migration 0021 |
+| Settlement hold | none (was 7 days) | migration 0026 |
 | Minimum deposit | 0.01 USDC | `src/payments/deposits.ts` |
-| Minimum payout | 1 USDC | `src/payments/payouts.ts` |
+| Minimum payout | 0.05 USDC | `src/payments/payouts.ts` |
 | Deposit confirmations | 3 Sepolia, 12 mainnet | `src/payments/chain.ts` |
 
 ## 6. Operating it

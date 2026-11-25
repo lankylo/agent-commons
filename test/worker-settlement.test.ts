@@ -8,6 +8,7 @@ import { CredentialService } from "../src/identity/credentials";
 import { IdentityRepository } from "../src/identity/repository";
 import type { AgentId, OperatorId } from "../src/identity/types";
 import { ContributionRegistry, type RegistryEnv } from "../src/registry/creation";
+import { NOTIFY_CRON } from "../src/notify/notifications";
 import { Ledger } from "../src/payments/ledger";
 import { quote, type PriceList } from "../src/payments/pricing";
 import type { PaymentProvider } from "../src/payments/provider";
@@ -197,35 +198,39 @@ const balances = async (a: Actor) =>
   );
 
 describe("settlement", () => {
-  it("settles earnings only after the 7-day hold, once", async () => {
+  it("settles verified earnings at once, with no hold, once", async () => {
     const id = await record("knowledge");
     const { purchaseRef } = await purchase(id);
     const share = await shareOf(purchaseRef);
     expect(share).not.toBeNull();
     const before = await balances(owner);
 
-    // Six days on: still held, and D1 refuses a direct settlement.
-    expect((await settleDue(db, () => new Date(START + 6 * DAY))).settled).toBe(0);
-    const early = await new Ledger(db, () => new Date(START + 6 * DAY)).append([
-      {
-        idempotencyKey: `early-${++counter}-settle`,
-        agentId: owner.agentId,
-        operatorId: owner.operatorId,
-        entryType: "settlement",
-        amountMinor: PRICE / 2,
-        currency: "USDC",
-        relatedEntryId: share!.entry_id,
-      },
-    ]);
-    expect(early.ok ? "ok" : early.error.code).toBe("settlement_hold");
-
-    const run = await review("settle", {}, START + 7 * DAY);
+    // The same instant the earning was recorded: settled, with no waiting period.
+    const run = await review("settle", {}, START);
     expect(run.status).toBe(200);
     expect(run.body).toMatchObject({ schemaVersion: "settlement-run/v1" });
     expect(run.body.settled).toBeGreaterThanOrEqual(1);
     const after = await balances(owner);
     expect(after.available - before.available).toBeGreaterThanOrEqual(PRICE / 2);
-    expect((await review("settle", {}, START + 7 * DAY)).body.settled).toBe(0);
+    expect((await review("settle", {}, START)).body.settled).toBe(0);
+  });
+
+  it("lets D1 accept a settlement recorded the moment the earning was", async () => {
+    const id = await record("knowledge");
+    const { purchaseRef } = await purchase(id);
+    const share = (await shareOf(purchaseRef))!;
+    const direct = await new Ledger(db, () => new Date(START)).append([
+      {
+        idempotencyKey: `instant-${++counter}-settle`,
+        agentId: owner.agentId,
+        operatorId: owner.operatorId,
+        entryType: "settlement",
+        amountMinor: PRICE / 2,
+        currency: "USDC",
+        relatedEntryId: share.entry_id,
+      },
+    ]);
+    expect(direct.ok ? "ok" : direct.error.code).toBe("ok");
   });
 
   it("keeps an earning pending while its version is not verified", async () => {
@@ -287,6 +292,23 @@ describe("settlement", () => {
     }
     await worker.scheduled({}, scheduledEnv);
     expect(await balances(worker1)).toMatchObject({ pending: 0, available: 500 });
+  });
+
+  it("settles from the frequent notification trigger too", async () => {
+    const worker2 = await actor("Quick Worker");
+    const earned = await new Ledger(db, () => new Date(START)).append([
+      {
+        idempotencyKey: `task-${++counter}-earning`,
+        agentId: worker2.agentId,
+        operatorId: worker2.operatorId,
+        entryType: "task_earning",
+        amountMinor: 300,
+        currency: "USDC",
+      },
+    ]);
+    if (!earned.ok) throw new Error(earned.error.code);
+    await worker.scheduled({ cron: NOTIFY_CRON }, { DB: db, NOW: () => new Date(START) } as never);
+    expect(await balances(worker2)).toMatchObject({ pending: 0, available: 300 });
   });
 });
 

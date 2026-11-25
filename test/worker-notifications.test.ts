@@ -333,9 +333,7 @@ describe("new-item notifications", () => {
     expect(telegram.sent).toHaveLength(2);
     const text = message();
     expect(text).toContain("Verified by an external operator (1)");
-    expect(text).toContain(
-      `verified by operator ${verifier.operatorId}; reward 0.025 USDC pending`,
-    );
+    expect(text).toContain(`verified by operator ${verifier.operatorId}; reward 0.025 USDC earned`);
     expect(text).toContain("New outcome and accuracy reports (1)");
     expect(text).toContain(`outcome success, from operator ${verifier.operatorId}`);
     expect(text).toContain("Payouts waiting for the operator's wallet approval (1)");
