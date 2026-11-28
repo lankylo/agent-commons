@@ -1,5 +1,5 @@
 /**
- * Wallet-signed operator spending controls (Phase 6, no live money).
+ * Wallet-signed operator spending controls (Phase 6).
  *
  * An enrolled wallet controls its own operator's spending: it sets the USDC spending policy, or
  * suspends or resumes spending for one agent or every agent. Two steps, like enrollment:
