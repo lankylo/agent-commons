@@ -34,6 +34,20 @@ import {
   type PaymentProvider,
 } from "./payments/provider";
 import { PurchaseService, type PaymentMethod } from "./payments/purchase";
+import {
+  decodePaymentSignature,
+  encodeHeader,
+  matchPayment,
+  paymentRequiredBody,
+  payerAccount,
+  requirementsFor,
+  X402Payments,
+  X402_GET_PATH,
+  X402Provider,
+  x402ConfigOf,
+  type VerifyResult,
+  type X402Env,
+} from "./payments/x402";
 import type { ConditionalRetrievalResponse } from "./registry/retrieval-conditional";
 import type { RetrievalResponse } from "./registry/retrieval-response";
 import { ContributionRegistry, type CreationError, type VersionError } from "./registry/creation";
@@ -68,7 +82,7 @@ interface McpPrecharge {
   used: boolean;
 }
 
-interface WorkerEnv extends ReviewEnv, EnrollmentEnv, McpHttpEnv {
+interface WorkerEnv extends ReviewEnv, EnrollmentEnv, McpHttpEnv, X402Env {
   readonly [MCP_PRECHARGE]?: McpPrecharge;
   readonly DB?: D1Database;
   readonly CONTENT_BUCKET?: R2Bucket;
@@ -519,33 +533,82 @@ async function handleGet(request: Request, env: WorkerEnv): Promise<Response> {
       };
     }
 
+    return await serveRetrieval(
+      env,
+      env.DB,
+      env.CONTENT_BUCKET,
+      authorization.actor,
+      {
+        contributionId: record.contributionId,
+        version: record.version,
+        maxUtf8Bytes: record.maxUtf8Bytes,
+        validator,
+      },
+      { checkAccess: true },
+    );
+  } catch {
+    return httpError(500, "internal_error", "Retrieval is unavailable.");
+  }
+}
+
+interface RetrievalTarget {
+  readonly contributionId: string;
+  readonly version: number;
+  readonly maxUtf8Bytes: number;
+  readonly validator?: { contributionId: string; version: number; contentHash: string };
+}
+
+/**
+ * Runs just before content is returned, after the size check: x402 settles the payment here, so
+ * a payer is never charged for a response that cannot be served.
+ */
+type BeforeServe = () => Promise<
+  { readonly ok: true; readonly headers?: Headers } | { readonly ok: false; readonly response: Response }
+>;
+
+/**
+ * Serves one exact listed version to an authorized actor: visibility, paid access (unless the
+ * caller already settled it), retrieval, the UTF-8 budget, then receipts and usage.
+ */
+async function serveRetrieval(
+  env: WorkerEnv,
+  db: D1Database,
+  bucket: R2Bucket,
+  actor: { readonly agentId: string; readonly operatorId: string },
+  record: RetrievalTarget,
+  options: { readonly checkAccess: boolean; readonly beforeServe?: BeforeServe },
+): Promise<Response> {
+  {
+    const validator = record.validator;
     // Consumer visibility gate: only an exact listed_unverified version is retrievable. Pending,
     // rejected, withdrawn, unknown and missing-state versions share one 404 before any content,
     // R2 read, validator comparison or receipt, so conditional requests cannot probe them either.
-    const states = new QualityStateStore(env.DB);
+    const states = new QualityStateStore(db);
     if (!(await states.isListed(record.contributionId, record.version))) {
       return httpError(404, "not_found", "The requested contribution version was not found.");
     }
 
     // Paid access: a priced version needs the operator's purchase before any content, validator
-    // comparison or receipt. Every pilot price is zero, so this never applies on the pilot.
-    const access = await new PurchaseService(env.DB, pricesOf(env), SANDBOX_PROVIDER).access(
-      authorization.actor.operatorId,
-      record.contributionId,
-      record.version,
-    );
-    if (access.required && !access.entitled) {
-      return httpError(
-        402,
-        "payment_required",
-        "This contribution version must be purchased before it can be retrieved.",
-        { price: access.price },
+    // comparison or receipt.
+    if (options.checkAccess) {
+      const access = await new PurchaseService(db, pricesOf(env), SANDBOX_PROVIDER).access(
+        actor.operatorId,
+        record.contributionId,
+        record.version,
       );
+      if (access.required && !access.entitled) {
+        return httpError(
+          402,
+          "payment_required",
+          "This contribution version must be purchased before it can be retrieved.",
+          { price: access.price },
+        );
+      }
     }
 
     const result = await new ContributionRetriever({
-      DB: env.DB,
-      CONTENT_BUCKET: env.CONTENT_BUCKET,
+      DB: db,
+      CONTENT_BUCKET: bucket,
     }).getConditionalContributionVersion(record.contributionId, record.version, validator);
     if (!result.ok) {
       switch (result.error.code) {
@@ -579,38 +642,263 @@ async function handleGet(request: Request, env: WorkerEnv): Promise<Response> {
       );
     }
 
+    let headers: Headers | undefined;
+    if (options.beforeServe) {
+      const gate = await options.beforeServe();
+      if (!gate.ok) return gate.response;
+      headers = gate.headers;
+    }
+
     // Platform trust is read before this request's own receipt is counted.
     const now = env.NOW ?? (() => new Date());
     const target = { id: record.contributionId, version: record.version };
-    const trustByKey = await new TrustStore(env.DB, now).read([target]);
+    const trustByKey = await new TrustStore(db, now).read([target]);
     const trust = trustByKey.get(trustKey(target.id, target.version));
 
     if (data.schemaVersion === "retrieval-response/v1") {
-      await env.DB.prepare(
+      await db.prepare(
         `INSERT INTO retrieval_receipts (agent_id, contribution_id, version)
          VALUES (?, ?, ?)
          ON CONFLICT (agent_id, contribution_id, version) DO NOTHING`,
       )
-        .bind(authorization.actor.agentId, record.contributionId, record.version)
+        .bind(actor.agentId, record.contributionId, record.version)
         .run();
-      await recordUsage(env.DB, "retrieval", now());
-      await refreshTrustBestEffort(env.DB, now, target, "consumers");
+      await recordUsage(db, "retrieval", now());
+      await refreshTrustBestEffort(db, now, target, "consumers");
     }
 
-    return Response.json({
-      data,
-      budget: {
-        maxUtf8Bytes: record.maxUtf8Bytes,
-        usedUtf8Bytes,
+    return Response.json(
+      {
+        data,
+        budget: {
+          maxUtf8Bytes: record.maxUtf8Bytes,
+          usedUtf8Bytes,
+        },
+        quality: versionQualityLabel(trust?.verified ?? false),
+        ...(trust ? { trust } : {}),
+        ...(data.schemaVersion === "retrieval-response/v1"
+          ? { price: priceFor(data.family, trust?.verified ?? false, pricesOf(env)) }
+          : {}),
       },
-      quality: versionQualityLabel(trust?.verified ?? false),
-      ...(trust ? { trust } : {}),
-      ...(data.schemaVersion === "retrieval-response/v1"
-        ? { price: priceFor(data.family, trust?.verified ?? false, pricesOf(env)) }
-        : {}),
+      headers ? { headers } : undefined,
+    );
+  }
+}
+
+const X402_FIELDS = new Set(["contributionId", "version", "maxUtf8Bytes"]);
+const X402_IP_LIMIT = 60;
+const X402_GLOBAL_LIMIT = 1200;
+
+const X402_REFUSAL_STATUS: Readonly<Record<string, number>> = {
+  payment_declined: 402,
+  provider_unavailable: 503,
+  payments_stopped: 503,
+  not_found: 404,
+};
+
+/**
+ * x402 paid retrieval (docs/x402.md): buys and returns one exact priced version per request, with
+ * no credential. Without a payment it answers 402 with the offer; with a `PAYMENT-SIGNATURE` it
+ * verifies the payment, resolves the paying wallet's operator, checks the response size, settles
+ * through the facilitator and records the purchase before returning the content. A wallet that
+ * already holds the licence, or owns the content, is served without being charged.
+ */
+async function handleX402Get(request: Request, env: WorkerEnv): Promise<Response> {
+  try {
+    const config = x402ConfigOf(env);
+    if (config.mode === "off") return httpError(403, "x402_disabled", "x402 payments are off.");
+    if (config.mode === "invalid") {
+      return httpError(503, "misconfigured", "Service configuration is invalid.");
+    }
+    const pilotMode = resolvePilotMode(env.PILOT_MODE);
+    if (pilotMode === undefined) {
+      return httpError(503, "misconfigured", "Service configuration is invalid.");
+    }
+    if (pilotMode === "read-only") {
+      return httpError(403, "pilot_read_only", "Purchases are disabled in read-only pilot mode.");
+    }
+    if (!env.DB || !env.CONTENT_BUCKET) {
+      return httpError(500, "content_unavailable", "Contribution content is unavailable.");
+    }
+    const db = env.DB;
+    const now = env.NOW ?? (() => new Date());
+
+    // Unauthenticated route: bound it per client address and globally before any other work.
+    const limiter = new RateLimitService(db, { now });
+    const ip = request.headers.get("CF-Connecting-IP") ?? "unknown";
+    const ipDigest = await crypto.subtle.digest(
+      "SHA-256",
+      new TextEncoder().encode(`agent-commons/x402-ip:${ip}`),
+    );
+    const ipKey = `x402:ip:${Array.from(new Uint8Array(ipDigest).slice(0, 16), (b) =>
+      b.toString(16).padStart(2, "0"),
+    ).join("")}`;
+    for (const [key, limit] of [
+      ["x402:global", X402_GLOBAL_LIMIT],
+      [ipKey, X402_IP_LIMIT],
+    ] as const) {
+      const decision = await limiter.checkKey(key, limit);
+      if (decision.unavailable) {
+        return httpError(503, "rate_limiter_unavailable", "The shared rate limiter is unavailable.");
+      }
+      if (!decision.allowed) {
+        const seconds = String(Math.max(1, Math.ceil((decision.retryAfterMs ?? 1000) / 1000)));
+        return httpError(429, "rate_limited", "Too many requests; try again later.", undefined, new Headers({ "Retry-After": seconds }));
+      }
+    }
+
+    const parsed = await parseJsonBody(request);
+    if (!parsed.ok) return parsed.response;
+    const body = parsed.value;
+    if (typeof body !== "object" || body === null || Array.isArray(body)) {
+      return httpError(400, "invalid_request", "The request body must be an object.");
+    }
+    const record = body as Record<string, unknown>;
+    if (!Object.keys(record).every((k) => X402_FIELDS.has(k))) {
+      return httpError(400, "invalid_request", "Only contributionId, version and maxUtf8Bytes are accepted.");
+    }
+    if (
+      typeof record.contributionId !== "string" ||
+      record.contributionId.length === 0 ||
+      !requirePositiveSafeInteger(record.version) ||
+      !requirePositiveSafeInteger(record.maxUtf8Bytes)
+    ) {
+      return httpError(
+        400,
+        "invalid_request",
+        "contributionId, a positive safe-integer version and maxUtf8Bytes are required.",
+      );
+    }
+    const target = {
+      contributionId: record.contributionId,
+      version: record.version,
+      maxUtf8Bytes: record.maxUtf8Bytes,
+    };
+
+    const prices = pricesOf(env);
+    const states = new QualityStateStore(db);
+    if (!(await states.isListed(target.contributionId, target.version))) {
+      return httpError(404, "not_found", "The requested contribution version was not found.");
+    }
+    const price = await new PurchaseService(db, prices, SANDBOX_PROVIDER).quote(
+      target.contributionId,
+      target.version,
+    );
+    if (!price) {
+      return httpError(404, "not_found", "The requested contribution version was not found.");
+    }
+    if (!price.paymentRequired) {
+      return httpError(
+        400,
+        "not_priced",
+        "This version is free; retrieve it with an enrolled credential at /v1/commons/get.",
+      );
+    }
+
+    const requirements = requirementsFor(config, price.amountMinor);
+    const url = new URL(request.url);
+    const offer = (error: string, status = 402, detail?: string) => {
+      const required = paymentRequiredBody(`${url.origin}${X402_GET_PATH}`, requirements, error);
+      return Response.json(detail ? { ...required, detail } : required, {
+        status,
+        headers: { "PAYMENT-REQUIRED": encodeHeader(required) },
+      });
+    };
+
+    const header = request.headers.get("PAYMENT-SIGNATURE");
+    if (header === null) return offer("PAYMENT-SIGNATURE header is required");
+    const payment = decodePaymentSignature(header);
+    if (!payment) return offer("invalid_payment", 402, "The PAYMENT-SIGNATURE is not a valid x402 v2 exact payment.");
+    const match = matchPayment(payment, requirements, now());
+    if (!match.ok) return offer(match.reason);
+
+    let verified: VerifyResult;
+    try {
+      verified = await config.facilitator.verify(payment, requirements);
+    } catch {
+      return httpError(503, "facilitator_unavailable", "The payment could not be verified; try again.");
+    }
+    if (!verified.isValid) return offer(verified.invalidReason ?? "invalid_payment");
+    if (verified.payer !== undefined && verified.payer.toLowerCase() !== match.payer) {
+      return offer("payer_mismatch");
+    }
+
+    const account = await payerAccount(db, match.payer, now());
+    const access = await new PurchaseService(db, prices, SANDBOX_PROVIDER).access(
+      account.operatorId,
+      target.contributionId,
+      target.version,
+    );
+    // Already licensed, or the wallet's own content: serve it and settle nothing.
+    if (!access.required || access.entitled) {
+      return serveRetrieval(env, db, env.CONTENT_BUCKET, account, target, { checkAccess: false });
+    }
+
+    const records = new X402Payments(db, now);
+    const fresh = await records.begin({
+      nonce: match.nonce,
+      network: requirements.network,
+      payer: match.payer,
+      operatorId: account.operatorId,
+      contributionId: target.contributionId,
+      version: target.version,
+      amountMinor: price.amountMinor,
+    });
+    if (!fresh) {
+      return httpError(409, "payment_replayed", "This payment authorization was already used.");
+    }
+
+    const provider = new X402Provider(
+      config.facilitator,
+      payment,
+      requirements,
+      match.nonce,
+      records,
+    );
+    const settlementHeader = () =>
+      provider.settlement
+        ? new Headers({
+            "PAYMENT-RESPONSE": encodeHeader({
+              success: provider.settlement.success,
+              ...(provider.settlement.errorReason
+                ? { errorReason: provider.settlement.errorReason }
+                : {}),
+              transaction: provider.settlement.transaction,
+              network: provider.settlement.network,
+              payer: match.payer,
+            }),
+          })
+        : undefined;
+
+    return serveRetrieval(env, db, env.CONTENT_BUCKET, account, target, {
+      checkAccess: false,
+      beforeServe: async () => {
+        const outcome = await new PurchaseService(db, prices, provider, now).purchase({
+          agentId: account.agentId,
+          operatorId: account.operatorId,
+          contributionId: target.contributionId,
+          version: target.version,
+          idempotencyKey: `x402:${match.nonce}`,
+          method: "provider",
+        });
+        if (!outcome.ok) {
+          return {
+            ok: false,
+            response: httpError(
+              X402_REFUSAL_STATUS[outcome.code] ?? 403,
+              outcome.code,
+              "The payment was not completed.",
+              undefined,
+              settlementHeader(),
+            ),
+          };
+        }
+        if (outcome.status === "purchased") await records.event(match.nonce, "recorded");
+        return { ok: true, headers: settlementHeader() };
+      },
     });
   } catch {
-    return httpError(500, "internal_error", "Retrieval is unavailable.");
+    return httpError(500, "internal_error", "Paid retrieval is unavailable.");
   }
 }
 
@@ -1497,6 +1785,9 @@ const router = {
     }
     if (pathname === "/v1/commons/payout" && request.method === "POST") {
       return handlePayout(request, workerEnv);
+    }
+    if (pathname === X402_GET_PATH && request.method === "POST") {
+      return handleX402Get(request, workerEnv);
     }
     return new Response("Not Found", { status: 404 });
   },

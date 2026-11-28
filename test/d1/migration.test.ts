@@ -165,6 +165,8 @@ describe("clean migration", () => {
         "wallet_accounts",
         "wallet_action_challenges",
         "wallet_challenges",
+        "x402_payment_events",
+        "x402_payments",
       ].sort(),
     );
     // FTS5 virtual table plus its document table (shadow tables are filtered out above).

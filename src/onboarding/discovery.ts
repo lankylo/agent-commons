@@ -12,6 +12,7 @@ import { MCP_PATH, resolveMcpHttpConfig } from "../mcp/http";
 import { MIN_PAYOUT_MINOR } from "../payments/payouts";
 import { PAID_PRICES, VERIFICATION_REWARD } from "../payments/pricing";
 import { SETTLEMENT_HOLD_DAYS } from "../payments/settlement";
+import { X402_GET_PATH, X402_VERSION, x402ConfigOf } from "../payments/x402";
 import { resolvePaymentsMode } from "../payments/provider";
 import {
   DISCOVERY_PATH,
@@ -29,6 +30,7 @@ export function renderDiscovery(origin: string, chainId: number, env: Onboarding
   const payments = resolvePaymentsMode(env.PAYMENTS) ?? null;
   const paid = payments === "sandbox" || payments === "live";
   const network = env.DEPOSITS === "base" || env.DEPOSITS === "base-sepolia" ? env.DEPOSITS : null;
+  const x402On = x402ConfigOf(env).mode === "on";
   return {
     schemaVersion: "agent-commons-discovery/v1",
     name: "Agent Commons",
@@ -67,6 +69,9 @@ export function renderDiscovery(origin: string, chainId: number, env: Onboarding
       verificationRewardMinor: paid ? VERIFICATION_REWARD.totalMinor : 0,
       settlementHoldDays: paid ? SETTLEMENT_HOLD_DAYS : null,
       payoutMinimumMinor: paid && network ? MIN_PAYOUT_MINOR : null,
+      x402: x402On
+        ? { url: `${origin}${X402_GET_PATH}`, version: X402_VERSION, scheme: "exact" }
+        : null,
     },
   };
 }

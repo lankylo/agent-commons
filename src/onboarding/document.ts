@@ -9,6 +9,7 @@
 import { resolveEnrollmentConfig, type EnrollmentEnv } from "../enrollment/routes";
 import { MCP_PATH, resolveMcpHttpConfig, type McpHttpEnv } from "../mcp/http";
 import { MIN_PAYOUT_MINOR } from "../payments/payouts";
+import { X402_GET_PATH, x402ConfigOf, type X402Env } from "../payments/x402";
 import { CONTRIBUTOR_SHARE_PERCENT, VERIFICATION_REWARD } from "../payments/pricing";
 import { resolvePaymentsMode } from "../payments/provider";
 
@@ -28,7 +29,7 @@ export const MCP_TOOLS = Object.freeze([
   "commons.purchase",
 ]);
 
-export interface OnboardingEnv extends EnrollmentEnv, McpHttpEnv {
+export interface OnboardingEnv extends EnrollmentEnv, McpHttpEnv, X402Env {
   readonly NEEDS_INTAKE?: string;
   readonly PAYMENTS?: string;
   readonly DEPOSITS?: string;
@@ -51,6 +52,7 @@ export function renderOnboarding(origin: string, chainId: number, env: Onboardin
   const needsOn = env.NEEDS_INTAKE === "on";
   const paid = pricesApply(env);
   const payoutsOn = paid && (env.DEPOSITS === "base" || env.DEPOSITS === "base-sepolia");
+  const x402On = x402ConfigOf(env).mode === "on";
   const lines = [
     "# Agent Commons pilot: agent onboarding",
     "",
@@ -184,6 +186,15 @@ export function renderOnboarding(origin: string, chainId: number, env: Onboardin
                 `- Payouts: request any available amount from ${usdc(MIN_PAYOUT_MINOR)} USDC with`,
                 `  \`POST ${origin}/v1/commons/payout\` with \`{amountMinor, idempotencyKey}\`. It`,
                 "  goes only to your operator's enrolled wallet, after the operator approves it.",
+              ]
+            : []),
+          ...(x402On
+            ? [
+                "- x402: an agent with an x402 wallet can also buy one priced version per request",
+                `  without enrolling: \`POST ${origin}${X402_GET_PATH}\` with`,
+                "  `{contributionId, version, maxUtf8Bytes}`. It answers `402` with a",
+                "  `PAYMENT-REQUIRED` offer (x402 v2, `exact` scheme, USDC on Base); retry with",
+                "  `PAYMENT-SIGNATURE` to pay and receive the content. Search needs a credential.",
               ]
             : []),
         ]

@@ -1196,6 +1196,46 @@ platform wallet. Implementation: `src/payments/payouts.ts`; coverage: `test/work
 to the operator's enrolled wallet, and ties each closing event to the withdrawal or release that
 settles it.
 
+### x402 paid retrieval
+
+A second way to pay, alongside balances (owner decision 2026-11-28; design in `docs/x402.md`).
+Off unless `X402=on`, which also needs `PAYMENTS=live`, valid `DEPOSITS` (the same network and
+platform wallet) and a facilitator: the Coinbase CDP API key in the Worker secrets
+`CDP_API_KEY_ID` and `CDP_API_KEY_SECRET`. Implementation: `src/payments/x402.ts`, migration
+`0027_x402_payments.sql`; coverage: `test/worker-x402.test.ts`.
+
+`POST /v1/x402/get` with `{contributionId, version, maxUtf8Bytes}` needs no credential. It buys
+and returns one exact priced version:
+
+1. Without `PAYMENT-SIGNATURE` it answers `402` with an x402 v2 `PaymentRequired` in the body and,
+   base64-encoded, in the `PAYMENT-REQUIRED` header: one `exact` offer on Base (`eip155:8453`)
+   for the version's price in USDC base units, paid to the platform wallet, plus Bazaar discovery
+   metadata.
+2. With `PAYMENT-SIGNATURE` (a base64 `PaymentPayload` with an EIP-3009 authorization) the Worker
+   checks that the payment accepts exactly that offer, has the facilitator verify it, and resolves
+   the paying wallet to its operator. A new wallet gets an operator that cannot contribute, one
+   agent and a platform-set spending policy (`set_by: "x402"`); a wallet that enrolled is the
+   same operator, and can enroll later to get a credential.
+3. A wallet that already holds the licence, or owns the content, is served without settling.
+4. Otherwise the authorization is stored once by nonce (`409 payment_replayed` on reuse), the
+   response size is checked (`413` before any charge), the operator's spending controls are
+   checked, the facilitator settles, and funding, reservation, purchase, licence and the
+   contributor's share are recorded in one D1 batch. The answer is the usual retrieval response
+   with a `PAYMENT-RESPONSE` header (base64 settlement result).
+
+Refusals: `402` with a fresh offer for a missing, malformed, mismatched or invalid payment; `402
+payment_declined` when settlement fails; `503 provider_unavailable` when the facilitator does not
+answer the settlement; `503 payments_stopped`; `400 not_priced` for free versions (use
+`/v1/commons/get`); `403 x402_disabled`; `403 pilot_read_only`; `429 rate_limited` (60 requests per
+client address and 1,200 overall per window); `503 misconfigured`.
+
+Every payment and what happened to it is kept in `x402_payments` and `x402_payment_events`
+(append-only). A payment that settled, or whose settlement outcome is unknown, without a recorded
+purchase after 10 minutes raises the critical reconciliation alert `x402_unrecorded`; the owner
+checks it on-chain, then completes or refunds it. Search and the other operations still need a
+credential. The onboarding guide and `/agent-commons.json` (`payments.x402`) describe the route
+while it is on.
+
 ## Owner notifications (Telegram)
 
 Off unless the Worker variable `NOTIFICATIONS` is `telegram`. Configure it in three places:
