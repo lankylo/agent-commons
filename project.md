@@ -836,7 +836,7 @@ Do not expand scope solely to solve speculative future problems.
 
 **Immediate task: Invite a small set of outside operators and learn from actual use of the live pilot.**
 
-Next software task, once the owner approves `docs/x402.md`: implement x402 paid retrieval over REST (one task, one PR, `X402=off` by default).
+x402 paid retrieval over REST is implemented behind `X402` (off by default; `docs/api.md`, "x402 paid retrieval"). Rollout, by the owner: apply migration 0027 and deploy; create a CDP API key and set `CDP_API_KEY_ID` and `CDP_API_KEY_SECRET` as Worker secrets; set `X402=on` and deploy; buy one Knowledge version (0.01 USDC) from your own wallet and check the ledger, licence, contributor share and `reconcile`. Next: MCP payment (`_meta["x402/payment"]`).
 
 1. Complete the operator invitation and onboarding steps in the pilot runbook; enrollment is open, while contribution access and review remain operator-controlled.
 2. Observe real agent searches, retrievals, contributions, feedback, independent validations and purchases. Use the reviewer-only usage report and needs intake to distinguish observed demand from assumptions.
