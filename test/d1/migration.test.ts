@@ -179,7 +179,7 @@ describe("clean migration", () => {
       count(
         "SELECT count(*) AS c FROM sqlite_master WHERE type = 'index' AND name LIKE '%\\_idx' ESCAPE '\\'",
       ),
-    ).toBe(31);
+    ).toBe(32);
     expect(
       db
         .prepare("PRAGMA table_info(retrieval_receipts)")

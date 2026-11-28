@@ -101,10 +101,13 @@ afterAll(async () => {
 /** A new listed version; Knowledge is marked verified so its contributor share is due at once. */
 async function record(family: "knowledge" | "execution", verified = true): Promise<string> {
   const seed = family === "knowledge" ? HTTPBIN_KNOWLEDGE_SEED : HTTPBIN_EXECUTION_SEED;
-  const created = await registry.createContribution(ownerAgent as never, {
-    ...seed,
-    title: `x402word ${family} ${++counter}`,
-  } as never);
+  const created = await registry.createContribution(
+    ownerAgent as never,
+    {
+      ...seed,
+      title: `x402word ${family} ${++counter}`,
+    } as never,
+  );
   if (!created.ok) throw new Error(created.error.code);
   const id = created.contribution.id;
   await listVersion(proxy.env, id);
@@ -191,7 +194,11 @@ async function buy(
   return { response, body: (await response.json()) as Json };
 }
 
-const target = (id: string, maxUtf8Bytes = 200_000) => ({ contributionId: id, version: 1, maxUtf8Bytes });
+const target = (id: string, maxUtf8Bytes = 200_000) => ({
+  contributionId: id,
+  version: 1,
+  maxUtf8Bytes,
+});
 
 const accountOf = (address: string) =>
   db
@@ -235,7 +242,11 @@ describe("x402 paid retrieval", () => {
       .bind(ownerAgent)
       .first<{ n: number }>();
 
-    const { response, body } = await buy(facilitator, target(id), signature(payer, KNOWLEDGE_PRICE));
+    const { response, body } = await buy(
+      facilitator,
+      target(id),
+      signature(payer, KNOWLEDGE_PRICE),
+    );
     expect(response.status, JSON.stringify(body)).toBe(200);
     expect(body.data.schemaVersion).toBe("retrieval-response/v1");
     expect(decode(response.headers.get("PAYMENT-RESPONSE"))).toMatchObject({
@@ -355,7 +366,11 @@ describe("x402 paid retrieval", () => {
     };
     const id = await record("knowledge");
     const payer = wallet();
-    const { response, body } = await buy(facilitator, target(id), signature(payer, KNOWLEDGE_PRICE));
+    const { response, body } = await buy(
+      facilitator,
+      target(id),
+      signature(payer, KNOWLEDGE_PRICE),
+    );
     expect(response.status).toBe(402);
     expect(body.error.code).toBe("payment_declined");
     expect(decode(response.headers.get("PAYMENT-RESPONSE"))).toMatchObject({ success: false });
@@ -403,7 +418,11 @@ describe("x402 paid retrieval", () => {
       .bind(at)
       .run();
     try {
-      const { response, body } = await buy(facilitator, target(id), signature(wallet(), KNOWLEDGE_PRICE));
+      const { response, body } = await buy(
+        facilitator,
+        target(id),
+        signature(wallet(), KNOWLEDGE_PRICE),
+      );
       expect(response.status).toBe(503);
       expect(body.error.code).toBe("payments_stopped");
       expect(facilitator.settles).toBe(0);
@@ -424,13 +443,20 @@ describe("x402 paid retrieval", () => {
     expect(free.body.error.code).toBe("not_priced");
 
     const id = await record("knowledge");
-    expect((await buy(facilitator, target(id), undefined, { X402: undefined })).response.status).toBe(403);
     expect(
-      (await buy(facilitator, target(id), undefined, { PAYMENTS: "sandbox", DEPOSITS: "base-sepolia" }))
-        .response.status,
+      (await buy(facilitator, target(id), undefined, { X402: undefined })).response.status,
+    ).toBe(403);
+    expect(
+      (
+        await buy(facilitator, target(id), undefined, {
+          PAYMENTS: "sandbox",
+          DEPOSITS: "base-sepolia",
+        })
+      ).response.status,
     ).toBe(503);
     expect(
-      (await buy(facilitator, target(id), undefined, { X402_FACILITATOR: undefined })).response.status,
+      (await buy(facilitator, target(id), undefined, { X402_FACILITATOR: undefined })).response
+        .status,
     ).toBe(503);
     expect(
       (await buy(facilitator, target(id), undefined, { PILOT_MODE: "read-only" })).response.status,
@@ -447,7 +473,11 @@ describe("x402 paid retrieval", () => {
       )
       .bind(ownerWallet, ownerOperator, ownerAgent, new Date(START).toISOString())
       .run();
-    const { response } = await buy(facilitator, target(id), signature(ownerWallet, KNOWLEDGE_PRICE));
+    const { response } = await buy(
+      facilitator,
+      target(id),
+      signature(ownerWallet, KNOWLEDGE_PRICE),
+    );
     expect(response.status).toBe(200);
     expect(facilitator.settles).toBe(0);
   });
@@ -467,7 +497,14 @@ describe("CDP facilitator client", () => {
 
   it("signs an EdDSA JWT CDP accepts: claims, header and a valid signature", async () => {
     const { publicKey, secret } = await keyPair();
-    const jwt = await cdpJwt("key-1", secret, "POST", "api.cdp.coinbase.com", "/platform/v2/x402/settle", new Date(START));
+    const jwt = await cdpJwt(
+      "key-1",
+      secret,
+      "POST",
+      "api.cdp.coinbase.com",
+      "/platform/v2/x402/settle",
+      new Date(START),
+    );
     const [header, claims, sig] = jwt.split(".");
     expect(JSON.parse(Buffer.from(header!, "base64url").toString())).toMatchObject({
       alg: "EdDSA",

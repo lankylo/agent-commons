@@ -181,7 +181,11 @@ export function paymentRequiredBody(
             type: "http",
             method: "POST",
             bodyType: "json",
-            body: { contributionId: "<contributionId from search>", version: 1, maxUtf8Bytes: 20000 },
+            body: {
+              contributionId: "<contributionId from search>",
+              version: 1,
+              maxUtf8Bytes: 20000,
+            },
           },
           output: { type: "json", example: { data: { schemaVersion: "retrieval-response/v1" } } },
         },
@@ -234,7 +238,7 @@ function decodeBase64Json(value: string): unknown {
   try {
     const binary = atob(padded);
     const bytes = Uint8Array.from(binary, (c) => c.charCodeAt(0));
-    return JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(bytes));
+    return JSON.parse(new TextDecoder("utf-8", { fatal: true, ignoreBOM: false }).decode(bytes));
   } catch {
     return null;
   }
@@ -313,7 +317,8 @@ const base64Url = (bytes: Uint8Array) => {
   return btoa(binary).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
 };
 const jsonPart = (value: unknown) => base64Url(new TextEncoder().encode(JSON.stringify(value)));
-const hex = (bytes: Uint8Array) => Array.from(bytes, (b) => b.toString(16).padStart(2, "0")).join("");
+const hex = (bytes: Uint8Array) =>
+  Array.from(bytes, (b) => b.toString(16).padStart(2, "0")).join("");
 
 /**
  * A CDP API JWT (EdDSA) for one request, valid two minutes. The key secret is the base64 64-byte
@@ -424,8 +429,7 @@ export interface PayerAccount {
 
 const ACCOUNT_SQL = "SELECT operator_id, agent_id FROM wallet_accounts WHERE address = ?";
 
-const newId = (prefix: string) =>
-  `${prefix}_${hex(crypto.getRandomValues(new Uint8Array(16)))}`;
+const newId = (prefix: string) => `${prefix}_${hex(crypto.getRandomValues(new Uint8Array(16)))}`;
 
 /**
  * The operator and agent of a paying wallet. A wallet that enrolled already is the same operator.
@@ -495,7 +499,8 @@ export async function payerAccount(
   return { operatorId, agentId };
 }
 
-export type X402Event = "settled" | "settle_failed" | "settle_unknown" | "recorded" | "record_failed";
+export type X402Event =
+  "settled" | "settle_failed" | "settle_unknown" | "recorded" | "record_failed";
 
 export class X402Payments {
   constructor(

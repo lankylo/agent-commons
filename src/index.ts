@@ -563,7 +563,8 @@ interface RetrievalTarget {
  * a payer is never charged for a response that cannot be served.
  */
 type BeforeServe = () => Promise<
-  { readonly ok: true; readonly headers?: Headers } | { readonly ok: false; readonly response: Response }
+  | { readonly ok: true; readonly headers?: Headers }
+  | { readonly ok: false; readonly response: Response }
 >;
 
 /**
@@ -656,11 +657,12 @@ async function serveRetrieval(
     const trust = trustByKey.get(trustKey(target.id, target.version));
 
     if (data.schemaVersion === "retrieval-response/v1") {
-      await db.prepare(
-        `INSERT INTO retrieval_receipts (agent_id, contribution_id, version)
+      await db
+        .prepare(
+          `INSERT INTO retrieval_receipts (agent_id, contribution_id, version)
          VALUES (?, ?, ?)
          ON CONFLICT (agent_id, contribution_id, version) DO NOTHING`,
-      )
+        )
         .bind(actor.agentId, record.contributionId, record.version)
         .run();
       await recordUsage(db, "retrieval", now());
@@ -739,11 +741,21 @@ async function handleX402Get(request: Request, env: WorkerEnv): Promise<Response
     ] as const) {
       const decision = await limiter.checkKey(key, limit);
       if (decision.unavailable) {
-        return httpError(503, "rate_limiter_unavailable", "The shared rate limiter is unavailable.");
+        return httpError(
+          503,
+          "rate_limiter_unavailable",
+          "The shared rate limiter is unavailable.",
+        );
       }
       if (!decision.allowed) {
         const seconds = String(Math.max(1, Math.ceil((decision.retryAfterMs ?? 1000) / 1000)));
-        return httpError(429, "rate_limited", "Too many requests; try again later.", undefined, new Headers({ "Retry-After": seconds }));
+        return httpError(
+          429,
+          "rate_limited",
+          "Too many requests; try again later.",
+          undefined,
+          new Headers({ "Retry-After": seconds }),
+        );
       }
     }
 
@@ -755,7 +767,11 @@ async function handleX402Get(request: Request, env: WorkerEnv): Promise<Response
     }
     const record = body as Record<string, unknown>;
     if (!Object.keys(record).every((k) => X402_FIELDS.has(k))) {
-      return httpError(400, "invalid_request", "Only contributionId, version and maxUtf8Bytes are accepted.");
+      return httpError(
+        400,
+        "invalid_request",
+        "Only contributionId, version and maxUtf8Bytes are accepted.",
+      );
     }
     if (
       typeof record.contributionId !== "string" ||
@@ -808,7 +824,12 @@ async function handleX402Get(request: Request, env: WorkerEnv): Promise<Response
     const header = request.headers.get("PAYMENT-SIGNATURE");
     if (header === null) return offer("PAYMENT-SIGNATURE header is required");
     const payment = decodePaymentSignature(header);
-    if (!payment) return offer("invalid_payment", 402, "The PAYMENT-SIGNATURE is not a valid x402 v2 exact payment.");
+    if (!payment)
+      return offer(
+        "invalid_payment",
+        402,
+        "The PAYMENT-SIGNATURE is not a valid x402 v2 exact payment.",
+      );
     const match = matchPayment(payment, requirements, now());
     if (!match.ok) return offer(match.reason);
 
@@ -816,7 +837,11 @@ async function handleX402Get(request: Request, env: WorkerEnv): Promise<Response
     try {
       verified = await config.facilitator.verify(payment, requirements);
     } catch {
-      return httpError(503, "facilitator_unavailable", "The payment could not be verified; try again.");
+      return httpError(
+        503,
+        "facilitator_unavailable",
+        "The payment could not be verified; try again.",
+      );
     }
     if (!verified.isValid) return offer(verified.invalidReason ?? "invalid_payment");
     if (verified.payer !== undefined && verified.payer.toLowerCase() !== match.payer) {
