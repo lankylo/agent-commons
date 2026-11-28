@@ -1,11 +1,11 @@
 /**
- * Purchase flow (Phase 6, sandbox payments only). A purchase buys the licence
+ * Purchase flow (Phase 6). A purchase buys the licence
  * `operator-version-perpetual` for one exact listed version: every agent of the buying operator
  * may then retrieve it. Two ways to pay:
  *
  * - `provider`: the payment provider charges the amount, which is recorded as operator funding and
- *   spent at once. Only the sandbox provider exists; it moves no real money.
- * - `balance`: the agent's available ledger balance pays.
+ *   spent at once. Only the sandbox provider exists (sandbox mode, no real money).
+ * - `balance`: the agent's available ledger balance pays. Live mode accepts only this.
  *
  * Order: check the operator's spending controls first (so a refused purchase is never charged),
  * charge, then record funding, reservation, purchase, entitlement and (when already due) the

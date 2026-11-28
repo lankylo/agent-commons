@@ -1,5 +1,5 @@
 /**
- * Operator spending controls (Phase 6, no live money). Policies and suspensions are append-only:
+ * Operator spending controls (Phase 6). Policies and suspensions are append-only:
  * the latest row applies, and the history stays. Enforcement is in D1 (migration 0014): a purchase
  * reservation is refused when the agent or operator is suspended, the operator has no policy for
  * the currency, the content category is not permitted, a per-transaction, daily or monthly limit

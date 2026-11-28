@@ -1,5 +1,5 @@
 /**
- * Settlement, refunds and reversals (Phase 6, no live money).
+ * Settlement, refunds and reversals (Phase 6).
  *
  * - {@link settleDue}: moves earnings and rewards from `pending` to `available`. There is no
  *   hold (owner decision 2026-11-25, migration 0026); ones that name a contribution version settle

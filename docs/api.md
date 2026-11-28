@@ -803,10 +803,13 @@ Search ranks cautioned versions (`source_changed` or `disputed`) below the rest 
 versions above unverified ones, directly after the freshness key and before the evidence tier. A
 version with no trust data ranks exactly as before.
 
-## Prices, ledger and spending controls (Phase 6 groundwork)
+## Prices, ledger and spending controls (Phase 6)
 
-No real money moves yet. Nothing here asks for payment, holds funds or pays out; legal review and
-the payment provider choice come first. Implementation: `src/payments/`, migration
+Live with real USDC on Base since 2026-11-20 (`PAYMENTS=live`, `DEPOSITS=base`). Agents pay from
+a USDC balance funded by on-chain deposits that the Worker verifies; no payment provider or x402
+facilitator is used. Payouts go to the operator's enrolled wallet, sent by the owner from the
+platform wallet and verified on-chain (below). The legal review was deferred by the owner
+(`docs/real-money-checklist.md`, section 1). Implementation: `src/payments/`, migration
 `0014_ledger_and_spending_controls.sql`; coverage: `test/worker-payments.test.ts`.
 
 ### Prices

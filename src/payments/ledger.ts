@@ -1,5 +1,5 @@
 /**
- * Append-only agent ledger (Phase 6, no live money). Every entry records the agent and its
+ * Append-only agent ledger (Phase 6). Every entry records the agent and its
  * operator and moves a positive amount of one currency between balance buckets. Balances are
  * derived from the entries and never stored. The rules that keep money consistent (no overdraw,
  * no double use of a reservation or earning, one earning per purchase, no self-purchase earning,

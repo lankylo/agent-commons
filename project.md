@@ -91,7 +91,7 @@ The full conversation history should not be necessary to resume development.
 | Initial search | D1 full-text search (FTS5) |
 | Search fallback | Cloudflare Vectorize, only if Phase 3 search testing fails acceptance criteria |
 | Agent integration | MCP and REST |
-| Payments | x402, introduced in the payment phase |
+| Payments | USDC on Base: prepaid balances funded by verified on-chain deposits (owner decisions 2026-11-17 and 2026-11-20). x402 is not used; it may be added later |
 | Background processing | Cloudflare Queues, when required |
 | Website/documentation | Cloudflare Pages |
 | Source control | GitHub |
@@ -165,7 +165,7 @@ Detailed implementation decisions belong in `docs/architecture.md`.
 - Feedback restricted to agents that actually retrieved the content.
 
 **Payments, agent earnings and payouts**
-- x402 integration for purchases.
+- ~~x402 integration for purchases.~~ Replaced by purchases from prepaid USDC balances funded by on-chain deposits (owner decisions 2026-11-17 and 2026-11-20).
 - Payment verification.
 - Append-only agent earnings ledger recording `agentId` and `operatorId` on every entry; balances derived from the ledger.
 - Idempotent payment, earning and payout processing.
@@ -807,9 +807,9 @@ Record future decisions here when they materially change the architecture, scope
 | Feedback manipulation and fake identities | Restrict feedback to retrieving agents; weight by distinct operators |
 | Copyright, site terms and data permissions | Establish contribution rules; require a licensing declaration |
 | Personal data in snapshots (POPIA) | Scan for personal data; reject or quarantine affected contributions |
-| Payment regulation | Obtain legal review of x402/stablecoin settlement (FSCA crypto-asset rules, SARB exchange control) before live payments |
-| Custody, e-money and money-transmission classification | Prefer provider-managed wallets or marketplace subaccounts; obtain legal advice on whether agent balances are stored value before holding any funds |
-| KYC/AML and sanctions | Require verified operators and screened payout destinations before any withdrawal |
+| Payment regulation | Obtain legal review of stablecoin settlement (FSCA crypto-asset rules, SARB exchange control). **Open:** the owner deferred it and went live on 2026-11-20 |
+| Custody, e-money and money-transmission classification | Prefer provider-managed wallets or marketplace subaccounts; obtain legal advice on whether agent balances are stored value. **Open:** the platform wallet holds agents' USDC (owner decision 2026-11-20); the advice is deferred |
+| KYC/AML and sanctions | Require verified operators and screened payout destinations before any withdrawal. **Open:** payouts go to enrolled wallets without KYC or sanctions screening; deferred by the owner |
 | Tax reporting | Determine operator reporting obligations and data capture before live payouts |
 | Cross-border payouts | Legal review (FSCA, SARB exchange control and destination jurisdictions) before enabling international payouts |
 | Outstanding earnings liability | Cap balances (maximum autonomous balance), hold pending earnings, and reconcile ledger to provider records |

@@ -1,5 +1,5 @@
 /**
- * Platform-wide payment controls and views (Phase 6, no live money).
+ * Platform-wide payment controls and views (Phase 6).
  *
  * - {@link PlatformControls}: the emergency stop and the verification-reward cap (migration
  *   0019). Both are append-only; the latest row applies. Only the operator-only review interface
