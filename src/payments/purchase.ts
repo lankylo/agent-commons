@@ -157,6 +157,12 @@ export class PurchaseService {
     private readonly now: () => Date = () => new Date(),
   ) {}
 
+  /** The price of one listed version, before any buyer is known; null when not listed. */
+  async quote(contributionId: string, version: number): Promise<PriceQuote | null> {
+    const row = await this.version(contributionId, version);
+    return row ? this.prices(row.family, row.verified === 1) : null;
+  }
+
   /** Whether retrieving this listed version needs a purchase, and whether the operator has one. */
   async access(
     operatorId: string,

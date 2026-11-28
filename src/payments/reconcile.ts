@@ -6,7 +6,8 @@
  *
  * - critical: a negative balance bucket; credited deposits that differ from deposit ledger entries;
  *   sent payouts that differ from withdrawals; the platform wallet holding less USDC than the
- *   platform owes agents (`underfunded`);
+ *   platform owes agents (`underfunded`); an x402 payment settled, or of unknown outcome, with no
+ *   recorded purchase after 10 minutes (`x402_unrecorded`);
  * - warning: approved payouts waiting to be sent for more than 2 days; earnings past the
  *   settlement hold (none since migration 0026) that have not settled for 2 more days; verification rewards at 80% of the cap or more;
  *   the chain could not be read;
@@ -105,7 +106,16 @@ const FIGURES_SQL = `SELECT
        AND (r.contribution_id IS NULL
             OR EXISTS (SELECT 1 FROM version_trust t
                        WHERE t.contribution_id = r.contribution_id AND t.version = r.version
-                         AND t.verified = 1))) AS overdue`;
+                         AND t.verified = 1))) AS overdue,
+    (SELECT COUNT(*) FROM x402_payments p
+     WHERE EXISTS (SELECT 1 FROM x402_payment_events e
+                   WHERE e.nonce = p.nonce
+                     AND e.event IN ('settled', 'settle_unknown', 'record_failed'))
+       AND NOT EXISTS (SELECT 1 FROM x402_payment_events s
+                       JOIN ledger_entries l
+                         ON l.purchase_ref = s.purchase_ref AND l.entry_type = 'purchase'
+                       WHERE s.nonce = p.nonce)
+       AND julianday(?2) - julianday(p.created_at) >= 1.0 / 144) AS x402_unrecorded`;
 
 interface FiguresRow {
   chain_credited: number;
@@ -116,6 +126,7 @@ interface FiguresRow {
   approved_unsent: number;
   oldest_approved: string | null;
   overdue: number;
+  x402_unrecorded: number;
 }
 
 const DAY_MS = 86_400_000;
@@ -186,6 +197,14 @@ export async function reconcile(
       "warning",
       "Earnings past the hold have not settled; check the scheduled trigger.",
       f.overdue,
+    );
+  }
+  if (f.x402_unrecorded > 0) {
+    alert(
+      "x402_unrecorded",
+      "critical",
+      "x402 payments were settled (or may have been) but no purchase was recorded; check them on-chain, then complete or refund.",
+      f.x402_unrecorded,
     );
   }
   const rewards = summary.controls.rewardsIssuedNetMinor;

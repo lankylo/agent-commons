@@ -68,6 +68,7 @@ const ALLOWED_VARS = new Set([
   "DEPOSITS",
   "DEPOSIT_ADDRESS",
   "BASE_RPC_URL",
+  "X402",
   "NOTIFICATIONS",
   "TELEGRAM_CHAT_ID",
 ]);
@@ -279,6 +280,14 @@ function checkSettings(vars: Record<string, unknown>, phase: PilotPhase, errors:
   }
   const deposits = vars["DEPOSITS"];
   const depositsOn = deposits !== undefined && deposits !== "off";
+  // x402 is optional (absent means off) and pays the same platform wallet as deposits.
+  const x402 = vars["X402"];
+  if (x402 !== undefined && (typeof x402 !== "string" || !ON_OFF.has(x402))) {
+    errors.push('vars.X402: must be explicitly "on" or "off" when present');
+  }
+  if (x402 === "on" && (payments !== "live" || !depositsOn)) {
+    errors.push('vars.X402: "on" needs PAYMENTS "live" and DEPOSITS');
+  }
   if (payments === "live" && !depositsOn) {
     errors.push('vars.PAYMENTS: "live" needs DEPOSITS, or no agent can pay');
   }
